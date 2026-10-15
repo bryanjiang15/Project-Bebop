@@ -86,6 +86,43 @@ func execute_player_move(move: Dictionary, target_enemy: EnemyState = null) -> D
 	
 	return result
 
+func preview_move(move: Dictionary) -> Dictionary:
+	"""Preview a move's effects without mutating state. Returns countdown predictions."""
+	var cost = move.get("cost", 0)
+	var move_type = move.get("type", "")
+	
+	if move_type == "movement" and mech.has_free_state_change():
+		cost = 0
+	
+	var preview = {
+		"cost": cost,
+		"affordable": mech.get_remaining_time() >= cost,
+		"enemy_countdowns": [],
+		"would_interrupt": []
+	}
+	
+	for enemy in enemies:
+		if enemy.is_destroyed():
+			continue
+		
+		var new_countdown = enemy.countdown - cost
+		if enemy.has_acted_this_turn:
+			new_countdown = maxi(0, enemy.countdown)
+		else:
+			new_countdown = maxi(0, new_countdown)
+		
+		preview.enemy_countdowns.append({
+			"enemy": enemy,
+			"current": enemy.countdown,
+			"after": new_countdown,
+			"would_interrupt": new_countdown <= 0 and not enemy.has_acted_this_turn
+		})
+		
+		if new_countdown <= 0 and not enemy.has_acted_this_turn:
+			preview.would_interrupt.append(enemy)
+	
+	return preview
+
 func _execute_player_attack(attacker_part: MechPart, move: Dictionary, target: EnemyState, part_name: String):
 	if target == null or target.is_destroyed():
 		return

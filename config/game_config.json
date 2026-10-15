@@ -1,6 +1,7 @@
 {
   "combat": {
     "time_budget_base": 10,
+    "stun_applied_before_countdown_tick": true,
     "height_bands": {
       "low_min": 0.0,
       "low_max": 1.2,

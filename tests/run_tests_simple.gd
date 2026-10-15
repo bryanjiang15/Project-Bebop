@@ -24,6 +24,8 @@ func _init():
 	test_damage_calculation()
 	test_chain_bonus()
 	test_part_destruction()
+	test_move_preview_countdowns()
+	test_move_preview_interrupts()
 	
 	print("\n=== Test Results ===")
 	print("Passed: %d" % passed)
@@ -338,3 +340,43 @@ func test_part_destruction():
 	else:
 		print("  ℹ Note: Drone not destroyed in single turn (expected)")
 		passed += 1
+
+func test_move_preview_countdowns():
+	print("\n[Test: Move Preview - Countdown Calculation]")
+	var build = config.get_default_build()
+	combat = CombatState.new(config, build, "e1_swarm")
+	combat.start_combat()
+	
+	var enemies = combat.get_living_enemies()
+	var right_arm = combat.mech.parts["right_arm"]
+	var medium_attack = null
+	for move in right_arm.get_available_moves(config):
+		if move.type == "attack" and move.level == "medium":
+			medium_attack = move
+			break
+	
+	var preview = combat.preview_move(medium_attack)
+	
+	assert_eq(preview.cost, 3, "Medium attack costs 3")
+	assert_true(preview.affordable, "Move should be affordable")
+	assert_eq(preview.enemy_countdowns.size(), 3, "Should preview all 3 enemies")
+	assert_eq(preview.enemy_countdowns[0].after, 1, "Drone 1 after: 4-3=1")
+
+func test_move_preview_interrupts():
+	print("\n[Test: Move Preview - Interrupt Detection]")
+	var build = config.get_default_build()
+	combat = CombatState.new(config, build, "e1_swarm")
+	combat.start_combat()
+	
+	var right_arm = combat.mech.parts["right_arm"]
+	var heavy_attack = null
+	for move in right_arm.get_available_moves(config):
+		if move.type == "attack" and move.level == "heavy":
+			heavy_attack = move
+			break
+	
+	var preview = combat.preview_move(heavy_attack)
+	
+	assert_eq(preview.cost, 5, "Heavy attack costs 5")
+	assert_true(preview.would_interrupt.size() > 0, "At least one enemy should interrupt")
+

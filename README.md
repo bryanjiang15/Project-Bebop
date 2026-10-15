@@ -30,17 +30,29 @@ The project will open in the Godot editor. Press **F5** or click the Play button
 
 ### Controls
 - **Mouse**: Click to select parts, moves, and targets
-- **Space / Enter**: Confirm action
-- **Escape**: Cancel selection
-- **E**: End turn early
-- **R**: Restart fight (reloads config)
+- **Space / Enter (Confirm)**: Execute selected action
+- **Escape (Cancel)**: Cancel current selection and go back
+- **E (End Turn)**: End turn early, unspent time is lost
+- **R (Restart)**: Restart the current fight and reload config
+
+All hotkeys are customizable in Project → Project Settings → Input Map.
 
 ### Flow
 1. Click a mech part (torso, left arm, right arm, legs)
 2. Click a move (attack, block, or movement)
+   - Move preview shows: time cost and which enemies would interrupt (highlighted in red)
+   - Time budget bar shows remaining time after the move
 3. For attacks: click an enemy to target
-4. Click Confirm or press Space/Enter
-5. Repeat until time budget is spent or End Turn
+4. Click Confirm or press Space/Enter to execute
+5. Repeat until time budget is spent or End Turn (E key)
+
+### UI Elements
+- **Time Budget Bar**: Shows remaining time (blue) and preview after selected move (faded)
+- **Mech Panel** (left): HP per part, active blocks, movement state, stun meter
+- **Enemy Cards** (right): Countdown (red when at 0), next move, HP, stun meter
+  - Highlighted in red border when they would interrupt after your selected move
+- **Turn Log** (bottom center): Scrollable event log with color coding
+- **Callouts**: Large on-screen messages for HIT, WHIFF, BLOCKED, STUNNED
 
 ## Running Tests
 

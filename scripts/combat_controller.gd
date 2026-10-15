@@ -16,12 +16,15 @@ var selected_part: MechPart = null
 var selected_part_name: String = ""
 var selected_move: Dictionary = {}
 var selected_target: EnemyState = null
+var move_preview: Dictionary = {}
 
 enum UIState { SELECT_PART, SELECT_MOVE, SELECT_TARGET, EXECUTE }
 var ui_state: UIState = UIState.SELECT_PART
 
 var available_parts: Array[String] = []
 var available_moves: Array[Dictionary] = []
+
+var callout_label: Label
 
 func _ready():
 	_setup_camera()
@@ -94,15 +97,18 @@ func _setup_ui():
 		add_child(ui)
 	
 	_create_time_budget_display()
+	_create_mech_panel()
 	_create_enemy_cards()
 	_create_action_panel()
 	_create_turn_log_display()
 	_create_result_screen()
+	_create_callout_label()
 
 func _create_time_budget_display():
 	var time_panel = PanelContainer.new()
+	time_panel.name = "TimePanel"
 	time_panel.position = Vector2(10, 10)
-	time_panel.size = Vector2(200, 60)
+	time_panel.size = Vector2(250, 80)
 	ui.add_child(time_panel)
 	
 	var vbox = VBoxContainer.new()
@@ -113,12 +119,70 @@ func _create_time_budget_display():
 	time_label.text = "Time: 10/10"
 	vbox.add_child(time_label)
 	
+	var bar_container = Control.new()
+	bar_container.custom_minimum_size = Vector2(230, 30)
+	vbox.add_child(bar_container)
+	
 	var time_bar = ProgressBar.new()
 	time_bar.name = "TimeBar"
 	time_bar.max_value = 10
 	time_bar.value = 10
 	time_bar.show_percentage = false
-	vbox.add_child(time_bar)
+	time_bar.size = Vector2(230, 30)
+	bar_container.add_child(time_bar)
+	
+	var preview_bar = ProgressBar.new()
+	preview_bar.name = "PreviewBar"
+	preview_bar.max_value = 10
+	preview_bar.value = 10
+	preview_bar.show_percentage = false
+	preview_bar.size = Vector2(230, 30)
+	preview_bar.position = Vector2(0, 0)
+	preview_bar.modulate = Color(1, 1, 1, 0.4)
+	bar_container.add_child(preview_bar)
+
+func _create_mech_panel():
+	var mech_panel = PanelContainer.new()
+	mech_panel.name = "MechPanel"
+	mech_panel.position = Vector2(10, 110)
+	mech_panel.size = Vector2(250, 480)
+	ui.add_child(mech_panel)
+	
+	var vbox = VBoxContainer.new()
+	mech_panel.add_child(vbox)
+	
+	var title = Label.new()
+	title.text = "MECH STATUS"
+	title.add_theme_font_size_override("font_size", 16)
+	vbox.add_child(title)
+	
+	var movement_label = Label.new()
+	movement_label.name = "MovementLabel"
+	movement_label.text = "Movement: Standing"
+	vbox.add_child(movement_label)
+	
+	var stun_label = Label.new()
+	stun_label.name = "StunLabel"
+	stun_label.text = "Stun: 0/60"
+	vbox.add_child(stun_label)
+	
+	var stun_bar = ProgressBar.new()
+	stun_bar.name = "StunBar"
+	stun_bar.max_value = 60
+	stun_bar.value = 0
+	stun_bar.show_percentage = false
+	vbox.add_child(stun_bar)
+	
+	vbox.add_child(HSeparator.new())
+	
+	var parts_title = Label.new()
+	parts_title.text = "PARTS"
+	parts_title.add_theme_font_size_override("font_size", 14)
+	vbox.add_child(parts_title)
+	
+	var parts_container = VBoxContainer.new()
+	parts_container.name = "PartsContainer"
+	vbox.add_child(parts_container)
 
 func _create_enemy_cards():
 	var cards_container = VBoxContainer.new()
@@ -241,6 +305,17 @@ func _create_result_screen():
 	retry_btn.pressed.connect(_on_restart_pressed)
 	vbox.add_child(retry_btn)
 
+func _create_callout_label():
+	callout_label = Label.new()
+	callout_label.name = "CalloutLabel"
+	callout_label.position = Vector2(540, 350)
+	callout_label.size = Vector2(200, 50)
+	callout_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	callout_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	callout_label.add_theme_font_size_override("font_size", 24)
+	callout_label.visible = false
+	ui.add_child(callout_label)
+
 func _input(event):
 	if event.is_action_pressed("restart"):
 		_on_restart_pressed()
@@ -342,6 +417,7 @@ func _on_part_selected(part_name: String):
 
 func _on_move_selected(move: Dictionary):
 	selected_move = move
+	move_preview = combat.preview_move(move)
 	
 	var move_type = move.get("type", "")
 	if move_type == "attack":
@@ -352,8 +428,12 @@ func _on_move_selected(move: Dictionary):
 		ui_state = UIState.EXECUTE
 	
 	_update_action_panel()
+	_update_time_display()
 
 func _update_enemy_target_preview():
+	if move_preview.is_empty():
+		return
+	
 	for i in enemy_cards.size():
 		var enemy = combat.enemies[i]
 		var card = enemy_cards[i]
@@ -361,6 +441,13 @@ func _update_enemy_target_preview():
 		if enemy.is_destroyed():
 			continue
 		
+		var would_interrupt = false
+		for countdown_data in move_preview.enemy_countdowns:
+			if countdown_data.enemy == enemy:
+				would_interrupt = countdown_data.would_interrupt
+				break
+		
+		card.set_would_interrupt(would_interrupt)
 		enemy_visuals[i].set_targeted(false)
 
 func _on_enemy_clicked(_camera, event, _position, _normal, _shape_idx, enemy_index):
@@ -418,7 +505,14 @@ func _on_confirm_pressed():
 	
 	if result.success:
 		if move_type == "attack" and selected_target:
+			_show_callout("HIT!", Color.ORANGE)
 			_log_message("  -> Hit %s for damage" % selected_target.enemy_id)
+		elif move_type == "block":
+			_show_callout("BLOCK UP!", Color.CYAN)
+		elif move_type == "movement":
+			_show_callout(move_name.to_upper() + "!", Color.YELLOW)
+		
+		mech_visual.update_movement_state()
 		
 		for interrupt in result.get("interrupts", []):
 			_process_enemy_action(interrupt)
@@ -433,15 +527,30 @@ func _on_confirm_pressed():
 		selected_part_name = ""
 		selected_move = {}
 		selected_target = null
+		move_preview = {}
 		ui_state = UIState.SELECT_PART
 		
 		for part_name in combat.mech.parts:
 			mech_visual.highlight_part(part_name, false)
 		for i in enemy_visuals.size():
 			enemy_visuals[i].set_targeted(false)
+		for card in enemy_cards:
+			card.set_would_interrupt(false)
 		
 		_update_part_buttons()
 		_update_action_panel()
+
+func _show_callout(text: String, color: Color):
+	if callout_label:
+		callout_label.text = text
+		callout_label.add_theme_color_override("font_color", color)
+		callout_label.visible = true
+		
+		var tween = create_tween()
+		tween.tween_property(callout_label, "modulate:a", 1.0, 0.1)
+		tween.tween_interval(1.0)
+		tween.tween_property(callout_label, "modulate:a", 0.0, 0.3)
+		tween.tween_callback(func(): callout_label.visible = false)
 
 func _on_end_turn_pressed():
 	if not combat.is_combat_active:
@@ -465,6 +574,7 @@ func _on_restart_pressed():
 func _update_all_displays():
 	_update_time_display()
 	_update_enemy_cards()
+	_update_mech_panel()
 	mech_visual.update_part_health()
 	mech_visual.update_movement_state()
 	
@@ -472,14 +582,84 @@ func _update_all_displays():
 		enemy_visuals[i].update_health()
 
 func _update_time_display():
-	var time_label = ui.get_node_or_null("PanelContainer/VBoxContainer/TimeLabel")
-	var time_bar = ui.get_node_or_null("PanelContainer/VBoxContainer/TimeBar")
+	var time_label = ui.get_node_or_null("TimePanel/VBoxContainer/TimeLabel")
+	var time_bar = ui.get_node_or_null("TimePanel/VBoxContainer/Control/TimeBar")
+	var preview_bar = ui.get_node_or_null("TimePanel/VBoxContainer/Control/PreviewBar")
 	
 	if time_label:
 		time_label.text = "Time: %d/%d" % [combat.mech.get_remaining_time(), combat.mech.time_budget]
 	if time_bar:
 		time_bar.max_value = combat.mech.time_budget
 		time_bar.value = combat.mech.get_remaining_time()
+	
+	if preview_bar and not selected_move.is_empty():
+		var preview = combat.preview_move(selected_move)
+		var remaining_after = combat.mech.get_remaining_time() - preview.cost
+		preview_bar.max_value = combat.mech.time_budget
+		preview_bar.value = remaining_after
+	elif preview_bar:
+		preview_bar.value = combat.mech.get_remaining_time()
+
+func _update_mech_panel():
+	var movement_label = ui.get_node_or_null("MechPanel/VBoxContainer/MovementLabel")
+	var stun_label = ui.get_node_or_null("MechPanel/VBoxContainer/StunLabel")
+	var stun_bar = ui.get_node_or_null("MechPanel/VBoxContainer/StunBar")
+	var parts_container = ui.get_node_or_null("MechPanel/VBoxContainer/PartsContainer")
+	
+	if movement_label:
+		var state_name = "Standing"
+		match combat.mech.movement_state:
+			MechState.MovementState.CROUCHING:
+				state_name = "Crouching"
+			MechState.MovementState.AIRBORNE:
+				state_name = "Airborne"
+		movement_label.text = "Movement: " + state_name
+	
+	var threshold = config.get_stun_threshold("mech")
+	if stun_label:
+		stun_label.text = "Stun: %d/%d" % [int(combat.mech.stun_meter), threshold]
+		if combat.mech.is_stunned:
+			stun_label.add_theme_color_override("font_color", Color.RED)
+		elif combat.mech.stun_immunity_turns > 0:
+			stun_label.add_theme_color_override("font_color", Color.CYAN)
+		else:
+			stun_label.remove_theme_color_override("font_color")
+	
+	if stun_bar:
+		stun_bar.max_value = threshold
+		stun_bar.value = combat.mech.stun_meter
+	
+	if parts_container:
+		for child in parts_container.get_children():
+			child.queue_free()
+		
+		for part_name in ["torso", "left_arm", "right_arm", "legs", "head"]:
+			if not combat.mech.parts.has(part_name):
+				continue
+			
+			var part: MechPart = combat.mech.parts[part_name]
+			var part_vbox = VBoxContainer.new()
+			
+			var part_label = Label.new()
+			part_label.text = part_name.capitalize()
+			if part.is_destroyed():
+				part_label.add_theme_color_override("font_color", Color.DIM_GRAY)
+			part_vbox.add_child(part_label)
+			
+			var hp_label = Label.new()
+			hp_label.text = "  HP: %d/%d" % [part.current_hp, part.max_hp]
+			if part.is_destroyed():
+				hp_label.add_theme_color_override("font_color", Color.DIM_GRAY)
+			part_vbox.add_child(hp_label)
+			
+			if part.is_blocking:
+				var block_label = Label.new()
+				var heights = ", ".join(part.block_heights)
+				block_label.text = "  Blocking: " + heights
+				block_label.add_theme_color_override("font_color", Color.CYAN)
+				part_vbox.add_child(block_label)
+			
+			parts_container.add_child(part_vbox)
 
 func _update_enemy_cards():
 	for card in enemy_cards:
@@ -498,10 +678,16 @@ func _process_enemy_action(action: Dictionary):
 	
 	if action.whiffed:
 		message += " - [color=yellow]WHIFF![/color]"
+		_show_callout("WHIFF!", Color.YELLOW)
 	elif action.blocked:
 		message += " - [color=cyan]BLOCKED[/color] (%d dmg)" % action.damage
+		_show_callout("BLOCKED!", Color.CYAN)
 	else:
 		message += " - [color=red]HIT![/color] (%d dmg)" % action.damage
+		_show_callout("HIT!", Color.RED)
+	
+	if combat.mech.is_stunned:
+		_show_callout("STUNNED!", Color.PURPLE)
 	
 	_log_message(message)
 
