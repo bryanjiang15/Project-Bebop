@@ -1,0 +1,8 @@
+[gd_scene load_steps=2 format=3 uid="uid://cvb5e8ixpkkyj"]
+
+[ext_resource type="Script" path="res://scripts/utils/enemy_visual.gd" id="1"]
+
+[node name="Enemy" type="Node3D"]
+script = ExtResource("1")
+enemy_color = Color(0.8, 0.2, 0.2, 1)
+enemy_size = Vector3(0.6, 0.8, 0.4)

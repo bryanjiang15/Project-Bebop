@@ -1,0 +1,218 @@
+{
+  "combat": {
+    "time_budget_base": 10,
+    "height_bands": {
+      "low_min": 0.0,
+      "low_max": 1.2,
+      "mid_min": 1.2,
+      "mid_max": 2.2,
+      "high_min": 2.2,
+      "high_max": 3.0
+    }
+  },
+  "attacks": {
+    "light": {
+      "cost": 2,
+      "damage": 4,
+      "stun": 10
+    },
+    "medium": {
+      "cost": 3,
+      "damage": 7,
+      "stun": 15
+    },
+    "heavy": {
+      "cost": 5,
+      "damage": 12,
+      "stun": 25
+    }
+  },
+  "blocking": {
+    "cost": 1,
+    "damage_reduction": 0.6,
+    "damage_reduction_cap": 0.9
+  },
+  "movement": {
+    "state_change_cost": 1
+  },
+  "chain": {
+    "enabled": true,
+    "heavy_multiplier": 1.5
+  },
+  "focus": {
+    "time_bonus": 2,
+    "uses_per_fight": 1
+  },
+  "pilots": {
+    "gunner_damage_bonus": 2,
+    "guard_block_bonus": 0.15
+  },
+  "stun": {
+    "mech_threshold": 60,
+    "drone_threshold": 20,
+    "miniboss_threshold": 60,
+    "damage_multiplier": 1.5,
+    "player_time_penalty": 4,
+    "enemy_countdown_delay": 4,
+    "immunity_duration_turns": 1,
+    "blocked_hit_stun_multiplier": 0.5
+  },
+  "parts": {
+    "torso": {
+      "balanced": {
+        "hp": 40,
+        "time_budget_modifier": 0
+      },
+      "heavy": {
+        "hp": 55,
+        "time_budget_modifier": -1
+      },
+      "light": {
+        "hp": 30,
+        "time_budget_modifier": 1
+      }
+    },
+    "arm": {
+      "bare_hand": {
+        "hp": 20,
+        "light_cost_modifier": -1,
+        "block_reduction": 0.6
+      },
+      "sword": {
+        "hp": 25,
+        "heavy_damage_bonus": 3,
+        "block_reduction": 0.6
+      },
+      "shield": {
+        "hp": 35,
+        "block_reduction": 0.8
+      }
+    },
+    "legs": {
+      "standard": {
+        "hp": 30,
+        "can_jump": true,
+        "first_change_free": false,
+        "block_reduction": 0.6
+      },
+      "tank": {
+        "hp": 45,
+        "can_jump": false,
+        "first_change_free": false,
+        "block_reduction": 0.8
+      },
+      "sprinter": {
+        "hp": 22,
+        "can_jump": true,
+        "first_change_free": true,
+        "block_reduction": 0.6
+      }
+    },
+    "head": {
+      "sensor": {
+        "hp": 15,
+        "reveals_next_move": true
+      }
+    }
+  },
+  "encounters": {
+    "e1_swarm": {
+      "enemies": [
+        {
+          "id": "drone_1",
+          "hp": 15,
+          "initial_countdown_turn_1": 4,
+          "moves": [
+            {
+              "name": "Light",
+              "damage": 4,
+              "countdown": 5,
+              "height": "low",
+              "target_part": "legs"
+            }
+          ]
+        },
+        {
+          "id": "drone_2",
+          "hp": 15,
+          "initial_countdown_turn_1": 5,
+          "moves": [
+            {
+              "name": "Light",
+              "damage": 4,
+              "countdown": 5,
+              "height": "mid",
+              "target_part": "torso"
+            },
+            {
+              "name": "Medium",
+              "damage": 6,
+              "countdown": 7,
+              "height": "low",
+              "target_part": "legs"
+            }
+          ]
+        },
+        {
+          "id": "drone_3",
+          "hp": 15,
+          "initial_countdown_turn_1": 6,
+          "moves": [
+            {
+              "name": "Light",
+              "damage": 4,
+              "countdown": 5,
+              "height": "mid",
+              "target_part": "torso"
+            }
+          ]
+        }
+      ]
+    },
+    "e2_brawler": {
+      "enemies": [
+        {
+          "id": "brawler",
+          "hp": 120,
+          "moves": [
+            {
+              "name": "Jab",
+              "damage": 5,
+              "countdown": 4,
+              "height": "mid",
+              "target_part": "torso"
+            },
+            {
+              "name": "Sweep",
+              "damage": 9,
+              "countdown": 6,
+              "height": "low",
+              "target_part": "legs"
+            },
+            {
+              "name": "Jab",
+              "damage": 5,
+              "countdown": 4,
+              "height": "mid",
+              "target_part": "torso"
+            },
+            {
+              "name": "Overhead",
+              "damage": 16,
+              "countdown": 9,
+              "height": "high",
+              "target_part": "head_or_torso"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "default_build": {
+    "torso": "balanced",
+    "left_arm": "bare_hand",
+    "right_arm": "sword",
+    "legs": "standard",
+    "head": null
+  }
+}

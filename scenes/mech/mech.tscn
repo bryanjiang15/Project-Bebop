@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://dp5m3yhvjvvgb"]
+
+[ext_resource type="Script" path="res://scripts/utils/mech_visual.gd" id="1"]
+
+[node name="Mech" type="Node3D"]
+script = ExtResource("1")

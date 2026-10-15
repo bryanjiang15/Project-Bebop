@@ -1,0 +1,8 @@
+[gd_scene load_steps=2 format=3 uid="uid://cxw0b5qv2jfhn"]
+
+[ext_resource type="Script" path="res://scripts/utils/part_visual.gd" id="1"]
+
+[node name="ArmPart" type="Node3D"]
+script = ExtResource("1")
+part_color = Color(0.4, 0.6, 0.8, 1)
+part_size = Vector3(0.3, 0.7, 0.3)
