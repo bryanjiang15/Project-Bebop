@@ -8,14 +8,16 @@ Project Bebop is a tactical mech combat game where players manage a time budget 
 
 This is **Milestone 1**: a playable greybox prototype focused on proving the core combat mechanics.
 
+**Requirements: Godot 4.7 stable**
+
 ## Opening the Project
 
 ### Requirements
-- Godot 4.3 (or later stable 4.x version)
+- **Godot 4.7 stable** (or later 4.x version)
 - Linux, Windows, or macOS
 
 ### Steps
-1. Download and install Godot 4.3 from https://godotengine.org/
+1. Download and install Godot 4.7 from https://godotengine.org/
 2. Open Godot and click "Import"
 3. Navigate to this folder and select `project.godot`
 4. Click "Import & Edit"
