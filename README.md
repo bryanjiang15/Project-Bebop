@@ -1,6 +1,6 @@
 # Project Bebop - Milestone 1
 
-A turn-based mech combat prototype built in Godot 4.3 with GDScript.
+A turn-based mech combat prototype built in Godot 4.7 with GDScript.
 
 ## Overview
 
@@ -10,7 +10,23 @@ This is **Milestone 1**: a playable greybox prototype focused on proving the cor
 
 **Requirements: Godot 4.7 stable**
 
-## Opening the Project
+## Quick Start
+
+### Option 1: Download Prebuilt macOS Build (Easiest)
+
+1. Go to the [Actions tab](../../actions) in this repository
+2. Click the latest successful "Build and Test" workflow run
+3. Download the `bebop-macos-4.7` artifact (universal binary: x86_64 + ARM64)
+4. Unzip the downloaded file
+5. **Important**: Remove macOS quarantine flag:
+   ```bash
+   xattr -dr com.apple.quarantine Bebop.app
+   ```
+6. Double-click `Bebop.app` to run
+
+**Note**: The build is unsigned, so macOS Gatekeeper will block it unless you remove the quarantine attribute.
+
+### Option 2: Open in Godot Editor
 
 ### Requirements
 - **Godot 4.7 stable** (or later 4.x version)
@@ -65,7 +81,8 @@ All hotkeys are customizable in Project → Project Settings → Input Map.
 
 ### Headless (Command Line)
 ```bash
-godot --headless -s tests/run_tests.gd
+godot --headless --script tests/run_tests_simple.gd
+godot --headless --script tests/verify_e1_playable.gd
 ```
 
 Tests cover:
