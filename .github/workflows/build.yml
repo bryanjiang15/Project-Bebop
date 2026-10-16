@@ -34,10 +34,14 @@ jobs:
           mv ~/.local/share/godot/export_templates/4.7.stable/templates/* ~/.local/share/godot/export_templates/4.7.stable/
           rmdir ~/.local/share/godot/export_templates/4.7.stable/templates
       
+      - name: Initialize Godot project
+        run: |
+          godot --headless --editor --quit
+      
       - name: Run headless tests
         run: |
-          godot --headless -s tests/run_tests_simple.gd
-          godot --headless -s tests/verify_e1_playable.gd
+          godot --headless --script tests/run_tests_simple.gd
+          godot --headless --script tests/verify_e1_playable.gd
       
       - name: Export macOS build
         run: |
