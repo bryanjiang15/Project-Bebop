@@ -1,0 +1,52 @@
+name: Build and Test
+
+on:
+  push:
+    branches:
+      - 'cursor/**'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  test-and-build:
+    name: Test and Build macOS
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Download Godot 4.7
+        run: |
+          wget -q https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_linux.x86_64.zip
+          unzip -q Godot_v4.7-stable_linux.x86_64.zip
+          chmod +x Godot_v4.7-stable_linux.x86_64
+          sudo mv Godot_v4.7-stable_linux.x86_64 /usr/local/bin/godot
+          godot --version
+      
+      - name: Download export templates
+        run: |
+          wget -q https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_export_templates.tpz
+          mkdir -p ~/.local/share/godot/export_templates/4.7.stable
+          unzip -q Godot_v4.7-stable_export_templates.tpz -d ~/.local/share/godot/export_templates/4.7.stable
+          mv ~/.local/share/godot/export_templates/4.7.stable/templates/* ~/.local/share/godot/export_templates/4.7.stable/
+          rmdir ~/.local/share/godot/export_templates/4.7.stable/templates
+      
+      - name: Run headless tests
+        run: |
+          godot --headless -s tests/run_tests_simple.gd
+          godot --headless -s tests/verify_e1_playable.gd
+      
+      - name: Export macOS build
+        run: |
+          mkdir -p builds
+          godot --headless --export-release "macOS" builds/bebop_macos_4.7.zip
+      
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bebop-macos-4.7
+          path: builds/bebop_macos_4.7.zip
+          retention-days: 30

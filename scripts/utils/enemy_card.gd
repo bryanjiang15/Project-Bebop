@@ -2,11 +2,11 @@
 extends PanelContainer
 class_name EnemyCard
 
-@onready var enemy_name_label = $VBox/NameLabel
-@onready var hp_label = $VBox/HPLabel
-@onready var countdown_label = $VBox/CountdownLabel
-@onready var move_label = $VBox/MoveLabel
-@onready var stun_bar = $VBox/StunBar
+var enemy_name_label
+var hp_label
+var countdown_label
+var move_label
+var stun_bar
 
 var enemy_state: EnemyState
 var config: ConfigManager
@@ -42,6 +42,9 @@ func _create_ui():
 	vbox.add_child(stun_bar)
 
 func initialize(state: EnemyState, p_config: ConfigManager):
+	if not enemy_name_label:
+		_create_ui()
+	
 	enemy_state = state
 	config = p_config
 	update_display()

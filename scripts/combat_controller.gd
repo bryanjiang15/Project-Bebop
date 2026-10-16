@@ -2,10 +2,10 @@
 extends Node
 class_name CombatController
 
-@onready var camera = $Camera3D
-@onready var mech_visual = $Mech
-@onready var enemies_container = $Enemies
-@onready var ui = $UI
+var camera
+var mech_visual
+var enemies_container
+var ui
 
 var config: ConfigManager
 var combat: CombatState
