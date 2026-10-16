@@ -1,50 +1,17 @@
-## UI component for displaying enemy status
+## UI component for displaying enemy status. Layout lives in scenes/ui/enemy_card.tscn.
 extends PanelContainer
 class_name EnemyCard
 
-var enemy_name_label: Label
-var hp_label: Label
-var countdown_label: Label
-var move_label: Label
-var stun_bar: ProgressBar
+@onready var enemy_name_label: Label = %NameLabel
+@onready var hp_label: Label = %HPLabel
+@onready var countdown_label: Label = %CountdownLabel
+@onready var move_label: Label = %MoveLabel
+@onready var stun_bar: ProgressBar = %StunBar
 
 var enemy_state: EnemyState
 var config: ConfigManager
 
-func _ready():
-	if not enemy_name_label:
-		_create_ui()
-
-func _create_ui():
-	var vbox = VBoxContainer.new()
-	vbox.name = "VBox"
-	add_child(vbox)
-	
-	enemy_name_label = Label.new()
-	enemy_name_label.name = "NameLabel"
-	vbox.add_child(enemy_name_label)
-	
-	hp_label = Label.new()
-	hp_label.name = "HPLabel"
-	vbox.add_child(hp_label)
-	
-	countdown_label = Label.new()
-	countdown_label.name = "CountdownLabel"
-	vbox.add_child(countdown_label)
-	
-	move_label = Label.new()
-	move_label.name = "MoveLabel"
-	vbox.add_child(move_label)
-	
-	stun_bar = ProgressBar.new()
-	stun_bar.name = "StunBar"
-	stun_bar.show_percentage = false
-	vbox.add_child(stun_bar)
-
 func initialize(state: EnemyState, p_config: ConfigManager):
-	if not enemy_name_label:
-		_create_ui()
-	
 	enemy_state = state
 	config = p_config
 	update_display()

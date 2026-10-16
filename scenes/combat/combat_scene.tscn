@@ -1,6 +1,288 @@
-[gd_scene load_steps=2 format=3 uid="uid://bmhvg02wkcm6j"]
+[gd_scene format=3 uid="uid://bmhvg02wkcm6j"]
 
-[ext_resource type="Script" path="res://scripts/combat_controller.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/combat_controller.gd" id="1_fyyo7"]
+[ext_resource type="PackedScene" path="res://scenes/mech/mech.tscn" id="2_3cl4e"]
+[ext_resource type="Script" path="res://scripts/utils/mech_visual.gd" id="3_kltxb"]
 
-[node name="CombatScene" type="Node"]
-script = ExtResource("1")
+[sub_resource type="Environment" id="Environment_pbkuh"]
+background_mode = 1
+background_color = Color(0.16, 0.17, 0.2, 1)
+ambient_light_source = 2
+ambient_light_color = Color(0.55, 0.58, 0.62, 1)
+ambient_light_energy = 0.7
+
+[node name="CombatScene" type="Node" unique_id=32190210]
+script = ExtResource("1_fyyo7")
+
+[node name="Camera3D" type="Camera3D" parent="." unique_id=829862030]
+unique_name_in_owner = true
+transform = Transform3D(1, 0, 0, 0, 0.9659258, 0.25881904, 0, -0.25881904, 0.9659258, -5, 3, 8)
+projection = 1
+size = 8.0
+
+[node name="KeyLight" type="DirectionalLight3D" parent="." unique_id=1643117806]
+transform = Transform3D(0.8660254, -0.35355338, 0.35355338, 0, 0.70710677, 0.70710677, -0.5, -0.6123724, 0.6123724, 0, 0, 0)
+light_energy = 1.1
+
+[node name="FillLight" type="DirectionalLight3D" parent="." unique_id=1019795991]
+transform = Transform3D(-0.76604444, 0.21984631, -0.6040228, 0, 0.9396926, 0.34202012, 0.64278764, 0.26200262, -0.7198463, 0, 0, 0)
+light_energy = 0.35
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=1506573381]
+environment = SubResource("Environment_pbkuh")
+
+[node name="MechAnchor" type="Node3D" parent="." unique_id=569886843]
+unique_name_in_owner = true
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2, 0, 0)
+
+[node name="Mech" type="Node3D" parent="MechAnchor" unique_id=700205358 instance=ExtResource("2_3cl4e")]
+unique_name_in_owner = true
+script = ExtResource("3_kltxb")
+
+[node name="EnemyAnchor" type="Node3D" parent="." unique_id=1343332964]
+unique_name_in_owner = true
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 1, 0)
+
+[node name="UI" type="CanvasLayer" parent="." unique_id=719106018]
+
+[node name="UIRoot" type="Control" parent="UI" unique_id=1796105731]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="TimePanel" type="PanelContainer" parent="UI/UIRoot" unique_id=1635635488]
+layout_mode = 1
+offset_left = 10.0
+offset_top = 10.0
+offset_right = 260.0
+offset_bottom = 90.0
+
+[node name="VBox" type="VBoxContainer" parent="UI/UIRoot/TimePanel" unique_id=1682651835]
+layout_mode = 2
+
+[node name="TimeLabel" type="Label" parent="UI/UIRoot/TimePanel/VBox" unique_id=743377885]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Time: 10/10"
+
+[node name="TimeBars" type="Control" parent="UI/UIRoot/TimePanel/VBox" unique_id=1742998372]
+custom_minimum_size = Vector2(230, 30)
+layout_mode = 2
+
+[node name="TimeBar" type="ProgressBar" parent="UI/UIRoot/TimePanel/VBox/TimeBars" unique_id=231152090]
+unique_name_in_owner = true
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+max_value = 10.0
+value = 10.0
+show_percentage = false
+
+[node name="PreviewBar" type="ProgressBar" parent="UI/UIRoot/TimePanel/VBox/TimeBars" unique_id=1636903579]
+unique_name_in_owner = true
+modulate = Color(1, 1, 1, 0.4)
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+max_value = 10.0
+value = 10.0
+show_percentage = false
+
+[node name="MechPanel" type="PanelContainer" parent="UI/UIRoot" unique_id=1694348809]
+layout_mode = 1
+offset_left = 10.0
+offset_top = 110.0
+offset_right = 260.0
+offset_bottom = 590.0
+
+[node name="VBox" type="VBoxContainer" parent="UI/UIRoot/MechPanel" unique_id=1908220543]
+layout_mode = 2
+
+[node name="Title" type="Label" parent="UI/UIRoot/MechPanel/VBox" unique_id=907357057]
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "MECH STATUS"
+
+[node name="MovementLabel" type="Label" parent="UI/UIRoot/MechPanel/VBox" unique_id=2023660336]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Movement: Standing"
+
+[node name="StunLabel" type="Label" parent="UI/UIRoot/MechPanel/VBox" unique_id=1108049319]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Stun: 0/60"
+
+[node name="StunBar" type="ProgressBar" parent="UI/UIRoot/MechPanel/VBox" unique_id=1926220478]
+unique_name_in_owner = true
+layout_mode = 2
+max_value = 60.0
+show_percentage = false
+
+[node name="Separator" type="HSeparator" parent="UI/UIRoot/MechPanel/VBox" unique_id=1281428756]
+layout_mode = 2
+
+[node name="PartsTitle" type="Label" parent="UI/UIRoot/MechPanel/VBox" unique_id=61031467]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "PARTS"
+
+[node name="MechPartsList" type="VBoxContainer" parent="UI/UIRoot/MechPanel/VBox" unique_id=995568566]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="EnemyCardRow" type="VBoxContainer" parent="UI/UIRoot" unique_id=1543484180]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -280.0
+offset_top = 10.0
+offset_right = -20.0
+offset_bottom = 610.0
+grow_horizontal = 0
+mouse_filter = 2
+
+[node name="ActionPanel" type="PanelContainer" parent="UI/UIRoot" unique_id=1081395858]
+layout_mode = 1
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 10.0
+offset_top = -120.0
+offset_right = 990.0
+offset_bottom = -10.0
+grow_vertical = 0
+
+[node name="VBox" type="VBoxContainer" parent="UI/UIRoot/ActionPanel" unique_id=110120867]
+layout_mode = 2
+
+[node name="StatusLabel" type="Label" parent="UI/UIRoot/ActionPanel/VBox" unique_id=633842264]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Select a part"
+
+[node name="MoveList" type="HBoxContainer" parent="UI/UIRoot/ActionPanel/VBox" unique_id=1732453803]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="PartList" type="HBoxContainer" parent="UI/UIRoot/ActionPanel/VBox" unique_id=1171972709]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="Buttons" type="HBoxContainer" parent="UI/UIRoot/ActionPanel/VBox" unique_id=194691255]
+layout_mode = 2
+
+[node name="ConfirmButton" type="Button" parent="UI/UIRoot/ActionPanel/VBox/Buttons" unique_id=934033490]
+unique_name_in_owner = true
+layout_mode = 2
+disabled = true
+text = "Confirm"
+
+[node name="CancelButton" type="Button" parent="UI/UIRoot/ActionPanel/VBox/Buttons" unique_id=1679028115]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Cancel"
+
+[node name="EndTurnButton" type="Button" parent="UI/UIRoot/ActionPanel/VBox/Buttons" unique_id=1111462400]
+unique_name_in_owner = true
+layout_mode = 2
+text = "End Turn (E)"
+
+[node name="RestartButton" type="Button" parent="UI/UIRoot/ActionPanel/VBox/Buttons" unique_id=1377280899]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Restart (R)"
+
+[node name="TurnLog" type="PanelContainer" parent="UI/UIRoot" unique_id=834238553]
+layout_mode = 1
+offset_left = 420.0
+offset_top = 400.0
+offset_right = 980.0
+offset_bottom = 700.0
+
+[node name="VBox" type="VBoxContainer" parent="UI/UIRoot/TurnLog" unique_id=2126229112]
+layout_mode = 2
+
+[node name="Title" type="Label" parent="UI/UIRoot/TurnLog/VBox" unique_id=713175423]
+layout_mode = 2
+text = "Turn Log"
+
+[node name="Scroll" type="ScrollContainer" parent="UI/UIRoot/TurnLog/VBox" unique_id=351492327]
+custom_minimum_size = Vector2(540, 260)
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="LogText" type="RichTextLabel" parent="UI/UIRoot/TurnLog/VBox/Scroll" unique_id=365517099]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+bbcode_enabled = true
+fit_content = true
+scroll_active = false
+
+[node name="ResultScreen" type="PanelContainer" parent="UI/UIRoot" unique_id=793488384]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -300.0
+offset_top = -160.0
+offset_right = 300.0
+offset_bottom = 160.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBox" type="VBoxContainer" parent="UI/UIRoot/ResultScreen" unique_id=1000987000]
+layout_mode = 2
+
+[node name="ResultTitle" type="Label" parent="UI/UIRoot/ResultScreen/VBox" unique_id=572875135]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 32
+horizontal_alignment = 1
+
+[node name="ResultSummary" type="RichTextLabel" parent="UI/UIRoot/ResultScreen/VBox" unique_id=1809398800]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(580, 200)
+layout_mode = 2
+bbcode_enabled = true
+
+[node name="RetryButton" type="Button" parent="UI/UIRoot/ResultScreen/VBox" unique_id=393431733]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Retry"
+
+[node name="CalloutLabel" type="Label" parent="UI/UIRoot" unique_id=652665472]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -100.0
+offset_top = -10.0
+offset_right = 100.0
+offset_bottom = 40.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_font_sizes/font_size = 24
+horizontal_alignment = 1
+vertical_alignment = 1

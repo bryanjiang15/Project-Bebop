@@ -4,50 +4,36 @@ Always-applied coding standards for this repository.
 
 ## Rules
 
-### 1. Never Use `@onready` for Nodes Created in `_ready()`
-`@onready` runs when the node enters the tree, **before** `_ready()` executes. If you create nodes in `_ready()`, assign them directly, not with `@onready`.
+### 1. Static layout lives in `.tscn`
+Camera, lights, anchors, and UI containers are nodes in `scenes/combat/combat_scene.tscn`. Give every node a script references a scene-unique name and read it with `@onready var x: Type = %UniqueName`. Connect signals in code. Code fills in data; it does not build that layout.
 
+`@onready` and `%UniqueName` resolve when the node enters the tree, so they only work for nodes already in the scene. A node created later is the reference returned by `instantiate()`, not an `@onready` variable.
+
+### 2. Repeated elements are small instanced scenes
+`scenes/ui/part_button.tscn`, `scenes/ui/move_button.tscn`, and `scenes/ui/enemy_card.tscn` are instantiated at runtime into the containers in the combat scene. Mech part meshes live in `scenes/mech/part_*.tscn`.
+
+### 3. Renaming a referenced node updates the script
+Moving or renaming a `%UniqueName` node breaks the `@onready` line. Update the script in the same change.
+
+### 4. Keep `scripts/core/` pure
+No `Node` or scene-tree APIs. Those classes are `RefCounted` and constructed with `.new()` so tests can run them without a scene.
+
+### 5. Always use type hints
 ```gdscript
-# WRONG - @onready runs before _ready(), camera doesn't exist yet
-@onready var camera = $Camera3D
-
-func _ready():
-    camera = Camera3D.new()
-    add_child(camera)
-
-# CORRECT - assign after creating
-var camera: Camera3D
-
-func _ready():
-    camera = Camera3D.new()
-    add_child(camera)
-```
-
-**Note**: `$NodePath` and `get_node()` work fine for nodes added earlier in `_ready()`. The bug is `@onready` timing, not `$` itself.
-
-### 2. Build UI Procedurally
-Create UI elements in code like `combat_controller.gd` does: instantiate with `.new()`, set properties, `add_child()`, connect signals.
-
-### 3. Keep `scripts/core/` Pure
-Files in `scripts/core/` must not extend `Node` or use scene tree APIs. They are pure GDScript classes (extend `RefCounted`) instantiated with `.new()` for testability.
-
-### 4. Always Use Type Hints
-```gdscript
-var health: int = 100
 var enemies: Array[EnemyState] = []
 func calculate_damage(base: int, multiplier: float) -> int:
     return int(base * multiplier)
 ```
 
-### 5. Tunables Live in `config/game_config.json`
-Any gameplay number (damage, cost, HP, countdown) goes in the JSON config, not as a constant. Designers can tune without touching code, and **R** reloads it in-game.
+### 6. Tunables live in `config/game_config.json`
+Damage, cost, HP, and countdowns go in the JSON config. **R** reloads it in-game.
 
-### 6. Run Tests Before Pushing
+### 7. Run tests before pushing
 ```bash
 godot --headless --script tests/run_tests_simple.gd
 godot --headless --script tests/verify_e1_playable.gd
 godot --headless --quit-after 80 res://tests/test_combat_scene_smoke.tscn
 ```
 
-### 7. Headless Tests ≠ Playability Proof
-Headless tests verify logic, not visuals or UX. After tests pass, open the editor (F5) and play through the feature to confirm it looks and feels right.
+### 8. Headless tests are not proof of playability
+They check rules, not layout or input. After they pass, run the scene in the editor and play the change.

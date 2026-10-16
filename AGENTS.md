@@ -10,7 +10,7 @@ Project Bebop is a turn-based tactical mech combat game built in Godot 4.7. The 
 
 - **Engine**: Godot 4.7 stable
 - **Language**: GDScript
-- **Rendering**: Greybox 3D with simple mesh primitives (boxes, cylinders)
+- **Rendering**: Greybox 3D. Parts and enemies are box meshes
 - **Camera**: Orthographic, side view (left-to-right)
 - **Assets**: Procedural materials only (body, accent, glow)
 
@@ -28,16 +28,17 @@ Project-Bebop/
 │   │   ├── damage_calculator.gd
 │   │   ├── block_calculator.gd
 │   │   └── turn_log.gd
-│   ├── combat_controller.gd  # Main scene controller (UI + visuals)
-│   └── utils/              # UI and visual helpers
+│   ├── combat_controller.gd  # Reads scene nodes, fills combat data
+│   └── utils/              # Visual and card scripts
 │       ├── mech_visual.gd
 │       ├── part_visual.gd
 │       ├── enemy_visual.gd
 │       └── enemy_card.gd
 ├── scenes/
-│   ├── combat/combat_scene.tscn  # Main combat scene
-│   ├── mech/*.tscn               # Part visual templates
-│   └── enemies/enemy.tscn        # Enemy visual template
+│   ├── combat/combat_scene.tscn  # Camera, lights, anchors, full UI
+│   ├── ui/                       # part_button, move_button, enemy_card
+│   ├── mech/*.tscn               # Socket hierarchy and part meshes
+│   └── enemies/enemy.tscn        # Enemy mesh and click area
 ├── tests/
 │   ├── run_tests_simple.gd       # Unit tests (no GUT)
 │   ├── verify_e1_playable.gd     # Playability verification
@@ -51,7 +52,9 @@ Project-Bebop/
 
 **Core Principles**:
 - `scripts/core/` contains pure GDScript classes with no `Node` or scene dependencies. They are instantiated directly with `.new()` and are fully unit-testable.
-- `scripts/combat_controller.gd` and `scripts/utils/` handle all UI, input, visuals, and scene tree operations.
+- `scripts/combat_controller.gd` connects signals and writes combat data into nodes that already exist in `combat_scene.tscn`. It references them with `@onready var x: Type = %UniqueName`.
+- Repeated widgets (`part_button`, `move_button`, `enemy_card`) are separate scenes, instanced into `PartList`, `MoveList`, and `EnemyCardRow`.
+- Renaming or moving a `%UniqueName` node requires the matching script update.
 - All tunables (damage, costs, HP, countdowns) live in `config/game_config.json`.
 
 ## Core Combat Rules (Brief)
@@ -82,10 +85,10 @@ Project-Bebop/
 
 ### Stun
 - Both mech and enemies have stun meters (0–100).
-- When a stun meter reaches the threshold (60 for mech, varies for enemies), the unit is stunned for 1 turn.
-- Stunned units take +50% damage and cannot act.
-- After being stunned, the unit gains 2 turns of stun immunity.
-- If stun is triggered after an enemy has already acted this turn, the stun delay (1 turn) is added to its countdown after turn-end reset.
+- Thresholds are `stun.mech_threshold` (60), `stun.drone_threshold` (20), and `stun.miniboss_threshold` (60).
+- Stunned units take `stun.damage_multiplier` (1.5) damage.
+- `add_stun` sets `stun_immunity_turns` to `stun.immunity_duration_turns` + 1 (config is 1, so the counter starts at 2). Turn reset decrements it.
+- If an enemy is stunned after it has already acted, `stun.enemy_countdown_delay` (4) is stored and added to its countdown when the countdown resets.
 
 ### Damage and Destruction
 - Attacks target a single enemy and a height (low, mid, high).
@@ -97,9 +100,9 @@ Project-Bebop/
 ## Naming and Structure Conventions
 
 ### Part Naming
-- Part slots: `torso`, `left_arm`, `right_arm`, `legs`, `head`.
-- Part variant naming: `part_<slot>_<variant>` (e.g., `part_torso_balanced`, `part_arm_sword`).
-- Config keys use the same naming.
+- Runtime part slots: `torso`, `left_arm`, `right_arm`, `legs`, `head`.
+- Config variants live under `parts.<slot>.<variant>`: `parts.torso.balanced`, `parts.arm.sword`, `parts.arm.bare_hand`, `parts.legs.standard`. Left and right arms both use the `arm` slot.
+- Scene files: `scenes/mech/part_torso.tscn`, `part_arm.tscn`, `part_legs.tscn`, `part_head.tscn`.
 
 ### Socket Hierarchy
 Mech visual structure (from root to leaves):
@@ -117,15 +120,12 @@ Mech (Node3D)
 
 ### Coordinate System
 - **1 unit = 1 meter**.
-- **Y-up** (Godot default).
-- **+Z is forward** (into the screen in side view).
-- Camera looks along +X axis (left to right).
+- **Y-up**.
+- `Camera3D` is orthographic, size 8, at `(-5, 3, 8)`, rotated `-15°` on X, so it looks down `-Z`.
+- `MechAnchor` is at `(-2, 0, 0)`. `EnemyAnchor` is at `(3, 1, 0)`; enemies are spaced on Z.
 
 ### Materials
-Each visual part has 3 material slots:
-1. **Body** (main color)
-2. **Accent** (secondary color)
-3. **Glow** (emissive, used for highlights)
+Each part and enemy mesh uses one `StandardMaterial3D`. Color comes from the `part_color` / `enemy_color` export. Highlight and targeting turn emission on.
 
 ## Hotkeys
 
@@ -199,10 +199,10 @@ timeout 10 godot --headless --quit-after 120 res://scenes/combat/combat_scene.ts
 
 ## Common Pitfalls
 
-- **`@onready` and nodes created in `_ready()`**: Don't use `@onready` to reference nodes created procedurally in `_ready()`. The decorator runs before `_ready()`, so the node won't exist yet. Instead, assign references directly in `_ready()` after creating the node.
-- **`$NodePath` for dynamic nodes**: Same issue. `$` syntax is compile-time and won't find nodes created at runtime. Use `get_node()` or direct references.
-- **Forgetting to run the smoke test**: The smoke test exercises the full controller→combat→state flow. If you change action execution or turn logic, run it.
-- **Assuming CI = playable**: Headless tests catch logic bugs but not visual bugs, missing UI updates, or interaction flows. Always test in the editor.
+- **Building layout in code**: Static nodes belong in the `.tscn`. `@onready` / `%UniqueName` only sees nodes that are already in the scene when it enters the tree. Buttons and cards created with `instantiate()` are held in the variable `instantiate()` returns.
+- **Renaming a unique node**: `%TimeLabel` is the node name. Renaming it in the editor without updating the script makes the scene fail at ready.
+- **Forgetting to run the smoke test**: The smoke test drives one turn through the controller. Run it after changes to action execution or scene node names.
+- **Assuming CI = playable**: Headless tests catch logic bugs, not layout or input. Open the editor and play the change.
 
 ## Quick Reference
 

@@ -1,13 +1,13 @@
-## Visual controller for the mech
+## Visual controller for the mech. Socket hierarchy lives in scenes/mech/mech.tscn.
 extends Node3D
 class_name MechVisual
 
-var legs_node: Node3D
-var hip_socket: Marker3D
-var torso_node: Node3D
-var head_socket: Marker3D
-var arm_socket_l: Marker3D
-var arm_socket_r: Marker3D
+@onready var legs_node: Node3D = %Legs
+@onready var hip_socket: Marker3D = %HipSocket
+@onready var torso_node: Node3D = %Torso
+@onready var head_socket: Marker3D = %HeadSocket
+@onready var arm_socket_l: Marker3D = %ArmSocket_L
+@onready var arm_socket_r: Marker3D = %ArmSocket_R
 
 var part_visuals: Dictionary = {}
 var mech_state: MechState
@@ -15,38 +15,6 @@ var mech_state: MechState
 var standing_hip_height: float = 1.2
 var crouch_hip_height: float = 0.7
 var jump_height: float = 2.4
-
-func _ready():
-	_setup_hierarchy()
-
-func _setup_hierarchy():
-	legs_node = Node3D.new()
-	legs_node.name = "Legs"
-	add_child(legs_node)
-	
-	hip_socket = Marker3D.new()
-	hip_socket.name = "HipSocket"
-	hip_socket.position = Vector3(0, standing_hip_height, 0)
-	legs_node.add_child(hip_socket)
-	
-	torso_node = Node3D.new()
-	torso_node.name = "Torso"
-	hip_socket.add_child(torso_node)
-	
-	head_socket = Marker3D.new()
-	head_socket.name = "HeadSocket"
-	head_socket.position = Vector3(0, 0.8, 0)
-	torso_node.add_child(head_socket)
-	
-	arm_socket_l = Marker3D.new()
-	arm_socket_l.name = "ArmSocket_L"
-	arm_socket_l.position = Vector3(-0.5, 0.3, 0)
-	torso_node.add_child(arm_socket_l)
-	
-	arm_socket_r = Marker3D.new()
-	arm_socket_r.name = "ArmSocket_R"
-	arm_socket_r.position = Vector3(0.5, 0.3, 0)
-	torso_node.add_child(arm_socket_r)
 
 func initialize_from_state(state: MechState):
 	mech_state = state

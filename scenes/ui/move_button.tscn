@@ -1,0 +1,4 @@
+[gd_scene format=3]
+
+[node name="MoveButton" type="Button" unique_id=1537547969]
+text = "Move"

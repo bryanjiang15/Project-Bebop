@@ -14,7 +14,7 @@ This document records ambiguities resolved during Milestone 1 implementation.
 
 **Question**: If an enemy is stunned after it has already acted this turn, when does the 1-turn stun delay take effect?
 
-**Decision**: The stun delay is added to the enemy's countdown **after the turn-end reset**. This prevents the delay from being wasted.
+**Decision**: The stun delay is added to the enemy's countdown **after the turn-end reset**. This prevents the delay from being wasted. The amount is `stun.enemy_countdown_delay` in `config/game_config.json` (4).
 
 **Example**:
 - Enemy acts at countdown 0 (interrupts mid-turn)

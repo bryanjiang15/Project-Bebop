@@ -1,0 +1,4 @@
+[gd_scene format=3]
+
+[node name="PartButton" type="Button" unique_id=1915300906]
+text = "Part"

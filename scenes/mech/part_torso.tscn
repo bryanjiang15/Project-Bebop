@@ -1,8 +1,14 @@
-[gd_scene load_steps=2 format=3 uid="uid://btj8yqc2pwxu7"]
+[gd_scene format=3 uid="uid://btj8yqc2pwxu7"]
 
-[ext_resource type="Script" path="res://scripts/utils/part_visual.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/utils/part_visual.gd" id="1_00ye5"]
 
-[node name="TorsoPart" type="Node3D"]
-script = ExtResource("1")
+[sub_resource type="BoxMesh" id="BoxMesh_ho2ty"]
+size = Vector3(0.8, 0.8, 0.4)
+
+[node name="TorsoPart" type="Node3D" unique_id=104078422]
+script = ExtResource("1_00ye5")
 part_color = Color(0.6, 0.4, 0.3, 1)
-part_size = Vector3(0.8, 0.8, 0.4)
+
+[node name="Mesh" type="MeshInstance3D" parent="." unique_id=1249431377]
+unique_name_in_owner = true
+mesh = SubResource("BoxMesh_ho2ty")

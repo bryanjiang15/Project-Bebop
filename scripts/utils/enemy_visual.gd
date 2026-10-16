@@ -1,28 +1,18 @@
-## Visual representation of an enemy
+## Visual representation of an enemy. Mesh and click area live in the enemy scene.
 extends Node3D
 class_name EnemyVisual
 
 @export var enemy_color: Color = Color.RED
-@export var enemy_size: Vector3 = Vector3(0.6, 0.8, 0.4)
 
-var mesh_instance: MeshInstance3D
+@onready var mesh_instance: MeshInstance3D = %Mesh
+@onready var click_area: Area3D = %ClickArea
 var material: StandardMaterial3D
 var enemy_state: EnemyState
 
 func _ready():
-	_create_mesh()
-
-func _create_mesh():
-	mesh_instance = MeshInstance3D.new()
-	var box_mesh = BoxMesh.new()
-	box_mesh.size = enemy_size
-	mesh_instance.mesh = box_mesh
-	
 	material = StandardMaterial3D.new()
 	material.albedo_color = enemy_color
 	mesh_instance.material_override = material
-	
-	add_child(mesh_instance)
 
 func initialize_from_state(state: EnemyState):
 	enemy_state = state

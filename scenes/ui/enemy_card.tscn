@@ -1,0 +1,31 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/utils/enemy_card.gd" id="1_6simt"]
+
+[node name="EnemyCard" type="PanelContainer" unique_id=889563103]
+custom_minimum_size = Vector2(250, 120)
+script = ExtResource("1_6simt")
+
+[node name="VBox" type="VBoxContainer" parent="." unique_id=1592738708]
+layout_mode = 2
+
+[node name="NameLabel" type="Label" parent="VBox" unique_id=1727587020]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="HPLabel" type="Label" parent="VBox" unique_id=1732150510]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="CountdownLabel" type="Label" parent="VBox" unique_id=1001229678]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="MoveLabel" type="Label" parent="VBox" unique_id=414770950]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="StunBar" type="ProgressBar" parent="VBox" unique_id=1873105529]
+unique_name_in_owner = true
+layout_mode = 2
+show_percentage = false
