@@ -105,12 +105,12 @@ Project-Bebop/
 Mech visual structure (from root to leaves):
 ```
 Mech (Node3D)
-└─ Legs Socket (Node3D)
-   └─ Hip Socket (Node3D)
-      └─ Torso Socket (Node3D)
-         ├─ Head Socket (Node3D)
-         ├─ Left Arm Socket (Node3D)
-         └─ Right Arm Socket (Node3D)
+└─ Legs (Node3D)
+   └─ HipSocket (Marker3D)
+      └─ Torso (Node3D)
+         ├─ HeadSocket (Marker3D)
+         ├─ ArmSocket_L (Marker3D)
+         └─ ArmSocket_R (Marker3D)
 ```
 - Sockets are positioned at joint attachment points.
 - Crouch/jump animations tween socket positions.
