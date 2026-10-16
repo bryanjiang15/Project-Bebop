@@ -463,6 +463,11 @@ func _on_enemy_clicked(_camera, event, _position, _normal, _shape_idx, enemy_ind
 	if enemy.is_destroyed():
 		return
 	
+	_select_target(enemy_index)
+
+func _select_target(enemy_index: int):
+	"""Select an enemy target. Called by input handler and tests."""
+	var enemy = combat.enemies[enemy_index]
 	selected_target = enemy
 	
 	for i in enemy_visuals.size():

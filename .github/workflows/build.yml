@@ -66,11 +66,8 @@ jobs:
       
       - name: Run combat scene smoke test
         run: |
+          set -o pipefail
           timeout 10 godot --headless --quit-after 80 res://tests/test_combat_scene_smoke.tscn 2>&1 | tee test_smoke.log
-          if [ $? -ne 0 ]; then
-            echo "Smoke test failed with non-zero exit code"
-            exit 1
-          fi
           if grep -E "SCRIPT ERROR|^ERROR:" test_smoke.log; then
             echo "Smoke test produced errors"
             exit 1
