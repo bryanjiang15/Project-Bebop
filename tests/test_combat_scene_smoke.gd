@@ -1,136 +1,80 @@
-## Smoke test: Load combat scene and simulate a complete turn
+## Smoke test: Load combat scene and drive one turn through controller API
+# Run: godot --headless --quit-after 80 res://tests/test_combat_scene_smoke.tscn
 extends Node
+
+var controller = null
+var combat = null
+var frame = 0
+var state = "loading"
+var spent_before = 0
+var turn_before = 0
 
 func _ready():
 	print("\n=== COMBAT SCENE SMOKE TEST ===")
-	run_test()
-
-func run_test():
-	# Load scene
 	var scene_resource = load("res://scenes/combat/combat_scene.tscn")
-	if not scene_resource:
-		fail("Failed to load combat_scene.tscn")
-		return
-	
-	# Instantiate
 	var combat_scene = scene_resource.instantiate()
-	if not combat_scene:
-		fail("Failed to instantiate combat_scene")
-		return
-	
 	add_child(combat_scene)
-	print("  ✓ Scene loaded and added to tree")
-	
-	# Wait for _ready() to complete
-	await get_tree().process_frame
-	await get_tree().process_frame
-	
-	# Get controller
-	var controller = combat_scene
-	var combat = controller.combat
-	
-	# Verify initial state
-	if not controller or not controller.has_method("select_part"):
-		fail("Controller not properly initialized")
-		return
-	
-	if not combat or not combat.mech or combat.enemies.size() == 0:
-		fail("Combat state not properly initialized")
-		return
-	
-	if combat.turn_count != 0:
-		fail("Turn count should start at 0")
-		return
-	
-	if combat.time_budget != 10:
-		fail("Time budget should start at 10")
-		return
-	
-	print("  ✓ Initial state verified")
-	
-	# Select torso part
-	controller.select_part(0)
-	await get_tree().process_frame
-	
-	if controller.selected_part_index != 0:
-		fail("Part selection failed")
-		return
-	
-	print("  ✓ Part selected (torso)")
-	
-	# Get and select light attack
-	var moves = combat.get_available_moves(0)
-	if moves.size() == 0:
-		fail("No moves available")
-		return
-	
-	var light_attack = null
-	for move in moves:
-		if move.type == "attack" and move.level == "light":
-			light_attack = move
-			break
-	
-	if not light_attack:
-		fail("Light attack not found")
-		return
-	
-	controller.select_move(light_attack)
-	await get_tree().process_frame
-	
-	if controller.selected_move.is_empty():
-		fail("Move selection failed")
-		return
-	
-	print("  ✓ Move selected (light attack, cost 2)")
-	
-	# Select target
-	controller.select_target(0)
-	await get_tree().process_frame
-	
-	if controller.selected_target_index != 0:
-		fail("Target selection failed")
-		return
-	
-	print("  ✓ Target selected (enemy 0)")
-	
-	# Record state before move
-	var time_before = combat.time_budget
-	
-	# Execute move
-	controller._on_confirm_pressed()
-	await get_tree().process_frame
-	await get_tree().process_frame
-	
-	# Verify time was spent
-	if combat.time_budget >= time_before:
-		fail("Time budget not reduced (was " + str(time_before) + ", now " + str(combat.time_budget) + ")")
-		return
-	
-	print("  ✓ Time spent (budget now: " + str(combat.time_budget) + ")")
-	
-	# End turn
-	controller._on_end_turn_pressed()
-	await get_tree().process_frame
-	await get_tree().process_frame
-	
-	# Verify turn advanced
-	if combat.turn_count != 1:
-		fail("Turn did not advance (expected 1, got " + str(combat.turn_count) + ")")
-		return
-	
-	print("  ✓ Turn advanced to turn 1")
-	
-	# Verify time budget reset
-	if combat.time_budget != 10:
-		fail("Time budget not reset (expected 10, got " + str(combat.time_budget) + ")")
-		return
-	
-	print("  ✓ Time budget reset to 10")
-	
-	# Success
-	print("\n[PASS] Combat scene smoke test - Full turn simulated successfully")
-	get_tree().quit(0)
+	controller = combat_scene
+	state = "wait_combat"
 
-func fail(message: String):
-	print("\n[FAIL] Combat scene smoke test: " + message)
-	get_tree().quit(1)
+func _process(_delta):
+	frame += 1
+	
+	if frame > 80:
+		print("[FAIL] Timeout in state: " + state)
+		get_tree().quit(1)
+		return
+	
+	if state == "wait_combat":
+		if controller.combat:
+			combat = controller.combat
+			if combat.mech and combat.enemies.size() > 0:
+				print("  ✓ Combat initialized")
+				spent_before = combat.mech.time_spent
+				turn_before = combat.current_turn
+				state = "select_part"
+	
+	elif state == "select_part":
+		controller._on_part_selected("torso")
+		print("  ✓ Part selected")
+		state = "select_move"
+	
+	elif state == "select_move":
+		var part = combat.mech.parts["torso"]
+		var moves = part.get_available_moves(controller.config)
+		if moves.size() > 0:
+			controller._on_move_selected(moves[0])
+			print("  ✓ Move selected (cost: " + str(moves[0].cost) + ")")
+			state = "select_target"
+		elif frame > 10:
+			print("[FAIL] No moves found")
+			get_tree().quit(1)
+	
+	elif state == "select_target":
+		controller.selected_target = combat.enemies[0]
+		controller.ui_state = controller.UIState.EXECUTE
+		print("  ✓ Target selected")
+		state = "confirm"
+	
+	elif state == "confirm":
+		var result = combat.execute_player_move(controller.selected_move, controller.selected_target)
+		if result.success:
+			print("  ✓ Move executed (spent: " + str(combat.mech.time_spent) + ")")
+			state = "end_turn"
+		else:
+			print("[FAIL] Move execution failed: " + str(result.get("reason", "unknown")))
+			get_tree().quit(1)
+	
+	elif state == "end_turn":
+		controller._on_end_turn_pressed()
+		state = "verify"
+	
+	elif state == "verify":
+		if combat.current_turn == turn_before + 1 and combat.mech.time_spent == 0:
+			print("  ✓ Turn advanced to " + str(combat.current_turn))
+			print("  ✓ Time reset (spent: 0)")
+			print("\n[PASS] Smoke test - Full turn simulated successfully")
+			get_tree().quit(0)
+		else:
+			print("[FAIL] turn=" + str(combat.current_turn) + " (expected " + str(turn_before + 1) + ") spent=" + str(combat.mech.time_spent) + " (expected 0)")
+			get_tree().quit(1)

@@ -64,6 +64,19 @@ jobs:
           fi
           echo "✓ Playability tests passed"
       
+      - name: Run combat scene smoke test
+        run: |
+          timeout 10 godot --headless --quit-after 80 res://tests/test_combat_scene_smoke.tscn 2>&1 | tee test_smoke.log
+          if [ $? -ne 0 ]; then
+            echo "Smoke test failed with non-zero exit code"
+            exit 1
+          fi
+          if grep -E "SCRIPT ERROR|^ERROR:" test_smoke.log; then
+            echo "Smoke test produced errors"
+            exit 1
+          fi
+          echo "✓ Combat scene smoke test passed"
+      
       - name: Verify main scene loads without errors
         run: |
           timeout 10 godot --headless --quit-after 120 res://scenes/combat/combat_scene.tscn 2>&1 | tee scene_load.log
