@@ -2,11 +2,11 @@
 extends PanelContainer
 class_name EnemyCard
 
-var enemy_name_label
-var hp_label
-var countdown_label
-var move_label
-var stun_bar
+var enemy_name_label: Label
+var hp_label: Label
+var countdown_label: Label
+var move_label: Label
+var stun_bar: ProgressBar
 
 var enemy_state: EnemyState
 var config: ConfigManager

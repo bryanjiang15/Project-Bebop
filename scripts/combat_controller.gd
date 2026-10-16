@@ -2,10 +2,10 @@
 extends Node
 class_name CombatController
 
-var camera
-var mech_visual
-var enemies_container
-var ui
+var camera: Camera3D
+var mech_visual: MechVisual
+var enemies_container: Node3D
+var ui: CanvasLayer
 
 var config: ConfigManager
 var combat: CombatState

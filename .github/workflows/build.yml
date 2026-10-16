@@ -38,10 +38,44 @@ jobs:
         run: |
           godot --headless --editor --quit
       
-      - name: Run headless tests
+      - name: Run unit tests
         run: |
-          godot --headless --script tests/run_tests_simple.gd
-          godot --headless --script tests/verify_e1_playable.gd
+          godot --headless --script tests/run_tests_simple.gd 2>&1 | tee test_unit.log
+          if [ $? -ne 0 ]; then
+            echo "Unit tests failed with non-zero exit code"
+            exit 1
+          fi
+          if grep -E "SCRIPT ERROR|^ERROR:" test_unit.log; then
+            echo "Unit tests produced errors"
+            exit 1
+          fi
+          echo "✓ Unit tests passed"
+      
+      - name: Run playability tests
+        run: |
+          godot --headless --script tests/verify_e1_playable.gd 2>&1 | tee test_playable.log
+          if [ $? -ne 0 ]; then
+            echo "Playability tests failed with non-zero exit code"
+            exit 1
+          fi
+          if grep -E "SCRIPT ERROR|^ERROR:" test_playable.log; then
+            echo "Playability tests produced errors"
+            exit 1
+          fi
+          echo "✓ Playability tests passed"
+      
+      - name: Verify main scene loads without errors
+        run: |
+          timeout 10 godot --headless --quit-after 120 res://scenes/combat/combat_scene.tscn 2>&1 | tee scene_load.log
+          if [ $? -gt 1 ]; then
+            echo "Scene load failed or timed out"
+            exit 1
+          fi
+          if grep -E "SCRIPT ERROR|^ERROR:" scene_load.log; then
+            echo "Scene load produced errors"
+            exit 1
+          fi
+          echo "✓ Main scene loads cleanly"
       
       - name: Export macOS build
         run: |
