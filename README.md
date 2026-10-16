@@ -2,6 +2,13 @@
 
 A turn-based mech combat prototype built in Godot 4.7 with GDScript.
 
+## Documentation
+
+- **[AGENTS.md](AGENTS.md)** - Guide for AI agents and developers: repository structure, conventions, testing workflow
+- **[.cursor/rules/godot.mdc](.cursor/rules/godot.mdc)** - GDScript and Godot 4.7 coding standards (auto-applied in Cursor)
+- **[docs/prototype_brief.md](docs/prototype_brief.md)** - Milestone 1 requirements and scope
+- **[docs/rules_clarifications.md](docs/rules_clarifications.md)** - Design decisions and edge case resolutions
+
 ## Overview
 
 Project Bebop is a tactical mech combat game where players manage a time budget across their turn, choosing when to attack, block, and move while enemy countdowns tick down. Heavy attacks do more damage but give enemies more opportunities to interrupt mid-turn.

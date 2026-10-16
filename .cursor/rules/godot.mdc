@@ -1,0 +1,196 @@
+# Godot 4.7 and GDScript Rules for Project Bebop
+
+This rule file is **always applied** and defines the GDScript and Godot 4.7 habits this repository depends on.
+
+## Core Principles
+
+### 1. Never Use `@onready` for Nodes Created in `_ready()`
+**Problem**: `@onready` decorators run before `_ready()`, so they will fail to find nodes created procedurally during `_ready()`.
+
+**Rule**: If a node is instantiated and added to the tree in `_ready()` (or later), assign it to a variable directly in `_ready()`, not with `@onready`.
+
+**Example (WRONG)**:
+```gdscript
+@onready var my_label = get_node("MyLabel")  # MyLabel is created in _ready()
+
+func _ready():
+    var label = Label.new()
+    label.name = "MyLabel"
+    add_child(label)  # Too late, @onready already ran
+```
+
+**Example (CORRECT)**:
+```gdscript
+var my_label: Label
+
+func _ready():
+    my_label = Label.new()
+    my_label.name = "MyLabel"
+    add_child(my_label)
+```
+
+### 2. Don't Use `$NodePath` for Dynamic Nodes
+**Problem**: The `$` syntax is resolved at compile time and only works for nodes defined in the scene file.
+
+**Rule**: For nodes created in code, use `get_node()` or direct references. `$NodePath` is only safe for nodes that exist in the `.tscn` file.
+
+**Example (WRONG)**:
+```gdscript
+func _ready():
+    var button = Button.new()
+    button.name = "MyButton"
+    add_child(button)
+    
+    var btn = $MyButton  # Will fail, node didn't exist at compile time
+```
+
+**Example (CORRECT)**:
+```gdscript
+func _ready():
+    var button = Button.new()
+    button.name = "MyButton"
+    add_child(button)
+    
+    var btn = button  # Direct reference, or get_node("MyButton")
+```
+
+### 3. Build UI Children in Code the Way `combat_controller.gd` Does
+**Pattern**: Create UI elements procedurally in `_ready()` or helper functions. Don't rely on scene hierarchies for dynamic content.
+
+**See**: `scripts/combat_controller.gd` methods like `_setup_ui()`, `_update_part_buttons()`, `_update_move_buttons()`.
+
+**Key points**:
+- Create containers and controls with `.new()`
+- Set properties directly (`.text`, `.size_flags_horizontal`, etc.)
+- Use `.add_child()` to attach
+- Use `.pressed.connect()` or `.connect()` for signals
+- Store references in member variables if you need to update them later
+
+### 4. Keep `scripts/core/` Free of Node Dependencies
+**Rule**: Files in `scripts/core/` must not extend `Node` or reference scene tree APIs. They are pure GDScript classes instantiated with `.new()`.
+
+**Why**: This keeps combat logic testable without needing a scene tree. Unit tests create `CombatState`, `MechState`, `EnemyState`, etc. directly.
+
+**What's allowed in `scripts/core/`**:
+- `extends RefCounted` (or no `extends` at all)
+- `.new()` instantiation
+- Pure logic, data structures, calculations
+
+**What's NOT allowed in `scripts/core/`**:
+- `extends Node` or any Node subclass
+- `add_child()`, `get_node()`, scene tree operations
+- `@onready`, `$NodePath`
+- Direct references to `Node`, `Node2D`, `Control`, etc.
+
+### 5. Always Use Type Hints
+**Rule**: Declare types for variables, parameters, and return values. This catches errors early and improves autocomplete.
+
+**Example**:
+```gdscript
+var health: int = 100
+var enemies: Array[EnemyState] = []
+
+func calculate_damage(base: int, multiplier: float) -> int:
+    return int(base * multiplier)
+```
+
+**Exceptions**: When the type is obvious from the right-hand side (e.g., `var x = 5`), hints are optional but preferred.
+
+### 6. Put New Tunables in `config/game_config.json`, Not as Constants
+**Rule**: Any magic number that affects gameplay (damage, cost, HP, countdown, multiplier, threshold) goes in the config file, not hardcoded in GDScript.
+
+**Why**: Designers can tweak values without touching code. The **R** key reloads config in-game for rapid iteration.
+
+**Example (WRONG)**:
+```gdscript
+const LIGHT_ATTACK_DAMAGE = 4
+const STUN_THRESHOLD = 60
+```
+
+**Example (CORRECT)**:
+```gdscript
+# In config/game_config.json:
+{
+  "attacks": {
+    "light": { "damage": 4, ... }
+  },
+  "stun": {
+    "mech_threshold": 60
+  }
+}
+
+# In code:
+var damage = config.get_attack("light").damage
+var threshold = config.get_stun_threshold("mech")
+```
+
+### 7. Run Tests and Smoke Test Before Pushing
+**Rule**: Before `git push`, run:
+```bash
+godot --headless --script tests/run_tests_simple.gd
+godot --headless --script tests/verify_e1_playable.gd
+godot --headless --quit-after 80 res://tests/test_combat_scene_smoke.tscn
+```
+
+All must exit 0 with no `SCRIPT ERROR` or `ERROR:` lines.
+
+**Why**: CI will catch these failures anyway, but local testing saves time and keeps the build green.
+
+### 8. Don't Treat Headless Tests Alone as Proof That Something is Playable
+**Rule**: Headless tests verify logic correctness, not user experience. Always open the game in the Godot editor and test interactively before claiming a feature works.
+
+**Headless tests DO catch**:
+- Logic bugs (wrong damage, incorrect countdown ticks, broken turn order)
+- Crashes and GDScript errors
+- Missing state updates
+
+**Headless tests DON'T catch**:
+- Visual bugs (wrong positions, missing sprites, incorrect colors)
+- UI bugs (buttons not appearing, labels not updating)
+- Input bugs (hotkeys not working, clicks not registering)
+- UX issues (confusing flow, missing feedback)
+
+**Workflow**:
+1. Write or change code
+2. Run headless tests to verify logic
+3. Open in editor (F5) and play through the feature
+4. Confirm it looks, feels, and behaves correctly
+5. Push
+
+## Common Mistakes and Fixes
+
+### Mistake: `@onready var camera = Camera3D.new()`
+**Fix**: Remove `@onready`, assign in `_ready()`:
+```gdscript
+var camera: Camera3D
+
+func _ready():
+    camera = Camera3D.new()
+    add_child(camera)
+```
+
+### Mistake: Using `$"NodeName"` for a node added in `_ready()`
+**Fix**: Store the reference directly or use `get_node()`:
+```gdscript
+var my_node: Node
+
+func _ready():
+    my_node = Node.new()
+    add_child(my_node)
+    # Use my_node, not $my_node
+```
+
+### Mistake: Adding `get_tree()` or `add_child()` to `scripts/core/combat_state.gd`
+**Fix**: Keep `scripts/core/` pure. If you need to react to combat events in the scene, emit a signal from `CombatState` and connect it in `combat_controller.gd`.
+
+### Mistake: Hardcoding `const MOVE_COST = 3`
+**Fix**: Add it to `config/game_config.json` under the appropriate section and load it via `ConfigManager`.
+
+### Mistake: Assuming the smoke test passes means the UI works
+**Fix**: Run the smoke test to verify logic, then press F5 and click through the feature to verify the UI and UX.
+
+## Enforcement
+
+These rules are **required** for all changes to this repository. Code that violates them will break CI or cause runtime errors in common scenarios (like pressing R to restart, or running on a clean checkout).
+
+When in doubt, look at existing code in `scripts/combat_controller.gd` and `scripts/core/*.gd` for patterns to follow.
