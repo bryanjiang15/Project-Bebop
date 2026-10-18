@@ -1,0 +1,170 @@
+[gd_scene load_steps=13 format=3]
+
+[ext_resource type="Script" path="res://scripts/view/game_view.gd" id="1_game"]
+[ext_resource type="TileSet" path="res://assets/art/bebop_tileset.tres" id="2_tiles"]
+[ext_resource type="PackedScene" path="res://scenes/ui/menu_button.tscn" id="3_button"]
+[ext_resource type="Shader" path="res://assets/art/team_tint.gdshader" id="4_tint"]
+[ext_resource type="Texture2D" path="res://assets/art/unit_settler.png" id="5_settler"]
+[ext_resource type="Texture2D" path="res://assets/art/unit_settler_mask.png" id="6_settler_mask"]
+[ext_resource type="Texture2D" path="res://assets/art/city_village.png" id="7_city"]
+[ext_resource type="Texture2D" path="res://assets/art/city_village_mask.png" id="8_city_mask"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_settler"]
+shader = ExtResource("4_tint")
+shader_parameter/team_mask = ExtResource("6_settler_mask")
+shader_parameter/team_color = Color(0.23921569, 0.49411765, 0.85882354, 1)
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_city"]
+shader = ExtResource("4_tint")
+shader_parameter/team_mask = ExtResource("8_city_mask")
+shader_parameter/team_color = Color(0.8509804, 0.2901961, 0.23921569, 1)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_bar"]
+bg_color = Color(0.12, 0.13, 0.16, 0.94)
+content_margin_left = 16.0
+content_margin_top = 8.0
+content_margin_right = 16.0
+content_margin_bottom = 8.0
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_tip"]
+bg_color = Color(0.07, 0.08, 0.1, 0.94)
+content_margin_left = 8.0
+content_margin_top = 4.0
+content_margin_right = 8.0
+content_margin_bottom = 4.0
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+
+[node name="Game" type="Node2D"]
+script = ExtResource("1_game")
+
+[node name="Camera" type="Camera2D" parent="."]
+unique_name_in_owner = true
+
+[node name="Map" type="TileMapLayer" parent="."]
+unique_name_in_owner = true
+tile_set = ExtResource("2_tiles")
+
+[node name="Highlight" type="TileMapLayer" parent="."]
+unique_name_in_owner = true
+z_index = 1
+tile_set = ExtResource("2_tiles")
+
+[node name="Actors" type="Node2D" parent="."]
+unique_name_in_owner = true
+z_index = 2
+y_sort_enabled = true
+
+[node name="TestSettler" type="Sprite2D" parent="Actors"]
+unique_name_in_owner = true
+centered = true
+offset = Vector2(0, -20)
+texture = ExtResource("5_settler")
+material = SubResource("ShaderMaterial_settler")
+
+[node name="TestCity" type="Sprite2D" parent="Actors"]
+unique_name_in_owner = true
+centered = true
+offset = Vector2(0, -10)
+texture = ExtResource("7_city")
+material = SubResource("ShaderMaterial_city")
+
+[node name="UI" type="CanvasLayer" parent="."]
+
+[node name="TopBar" type="PanelContainer" parent="UI"]
+offset_right = 1280.0
+offset_bottom = 60.0
+theme_override_styles/panel = SubResource("StyleBoxFlat_bar")
+
+[node name="Row" type="HBoxContainer" parent="UI/TopBar"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="TurnCaption" type="Label" parent="UI/TopBar/Row"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.78, 0.78, 0.74, 1)
+theme_override_font_sizes/font_size = 22
+text = "Turn"
+vertical_alignment = 1
+
+[node name="TurnLabel" type="Label" parent="UI/TopBar/Row"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.96, 0.95, 0.9, 1)
+theme_override_font_sizes/font_size = 22
+text = "1 / 50"
+vertical_alignment = 1
+
+[node name="Spacer" type="Control" parent="UI/TopBar/Row"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="MenuButton" parent="UI/TopBar/Row" instance=ExtResource("3_button")]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Menu"
+
+[node name="EndTurnButton" parent="UI/TopBar/Row" instance=ExtResource("3_button")]
+unique_name_in_owner = true
+layout_mode = 2
+text = "End Turn"
+
+[node name="TooltipPanel" type="PanelContainer" parent="UI"]
+unique_name_in_owner = true
+visible = false
+offset_right = 140.0
+offset_bottom = 32.0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_tip")
+
+[node name="Tooltip" type="Label" parent="UI/TooltipPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.96, 0.95, 0.9, 1)
+theme_override_font_sizes/font_size = 16
+text = "0, 0 plains"
+
+[node name="InGameMenu" type="PanelContainer" parent="UI"]
+unique_name_in_owner = true
+visible = false
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -130.0
+offset_top = -90.0
+offset_right = 130.0
+offset_bottom = 90.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_bar")
+
+[node name="Column" type="VBoxContainer" parent="UI/InGameMenu"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="MenuTitle" type="Label" parent="UI/InGameMenu/Column"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.96, 0.95, 0.9, 1)
+theme_override_font_sizes/font_size = 22
+text = "Menu"
+horizontal_alignment = 1
+
+[node name="RestartButton" parent="UI/InGameMenu/Column" instance=ExtResource("3_button")]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Restart"
+
+[node name="MainMenuButton" parent="UI/InGameMenu/Column" instance=ExtResource("3_button")]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Main Menu"
+
+[connection signal="pressed" from="UI/TopBar/Row/MenuButton" to="." method="_on_menu_pressed"]
+[connection signal="pressed" from="UI/TopBar/Row/EndTurnButton" to="." method="_on_end_turn_pressed"]
+[connection signal="pressed" from="UI/InGameMenu/Column/RestartButton" to="." method="_on_restart_pressed"]
+[connection signal="pressed" from="UI/InGameMenu/Column/MainMenuButton" to="." method="_on_main_menu_pressed"]

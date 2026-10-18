@@ -1,0 +1,36 @@
+# Godot 4+ specific ignores
+.godot/
+*.translation
+.godot_bin/*.zip
+.godot_bin/*.tpz
+
+# Godot-specific ignores
+# NOTE: .import files should be committed in Godot 4 (unlike Godot 3)
+export.cfg
+
+# Imported translations (automatically generated from CSV files)
+*.translation
+
+# Mono-specific ignores
+.mono/
+data_*/
+mono_crash.*.json
+
+# System/tool-specific ignores
+.DS_Store
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Build outputs
+builds/
+*.x86_64
+*.exe
+*.app
+*.zip
+
+# Logs
+logs/*.json
+*.log

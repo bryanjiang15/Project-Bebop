@@ -1,0 +1,30 @@
+[gd_resource type="TileSet" format=3]
+
+[ext_resource type="Texture2D" path="res://assets/art/tile_sheet.png" id="1_sjsuj"]
+[ext_resource type="Texture2D" path="res://assets/art/tile_highlight.png" id="2_o1a8r"]
+
+[sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_bwuqw"]
+texture = ExtResource("1_sjsuj")
+texture_region_size = Vector2i(128, 116)
+0:0/0 = 0
+0:0/0/texture_origin = Vector2i(0, -4)
+1:0/0 = 0
+1:0/0/texture_origin = Vector2i(0, -4)
+2:0/0 = 0
+2:0/0/texture_origin = Vector2i(0, -4)
+3:0/0 = 0
+3:0/0/texture_origin = Vector2i(0, -4)
+4:0/0 = 0
+4:0/0/texture_origin = Vector2i(0, -4)
+
+[sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_fjlol"]
+texture = ExtResource("2_o1a8r")
+texture_region_size = Vector2i(128, 116)
+0:0/0 = 0
+0:0/0/texture_origin = Vector2i(0, -4)
+
+[resource]
+tile_shape = 3
+tile_size = Vector2i(128, 108)
+sources/0 = SubResource("TileSetAtlasSource_bwuqw")
+sources/1 = SubResource("TileSetAtlasSource_fjlol")
