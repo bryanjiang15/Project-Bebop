@@ -2,6 +2,14 @@ extends SceneTree
 
 ## Drives the real button signals and the game scene's input handler.
 
+const _LAND_COLUMN := {
+	"plains": 0,
+	"forest": 1,
+	"hills": 2,
+	"water": 3,
+	"volcanic": 4,
+}
+
 
 func _init() -> void:
 	call_deferred("_run")
@@ -126,6 +134,8 @@ func _assert_new_game(game: Node) -> bool:
 		print("FAIL no unrevealed tile")
 		quit(1)
 		return false
+	if not _assert_unrevealed_atlas(game, setup):
+		return false
 	var actors := game.get_node("%Actors")
 	if actors.get_child_count() != shown:
 		print("FAIL visible sprites ", actors.get_child_count(), " expected ", shown)
@@ -136,6 +146,48 @@ func _assert_new_game(game: Node) -> bool:
 	if not _hover(game, human_cell, true):
 		return false
 	print("PASS new game seed ", setup.seed_used, " sprites ", shown)
+	return true
+
+
+func _assert_unrevealed_atlas(game: Node, setup: GameSetup) -> bool:
+	var map := game.get_node("%Map") as TileMapLayer
+	var lands := {}
+	var shared_source := 0
+	var shared_atlas := Vector2i.ZERO
+	var have := false
+	for row in setup.map.height:
+		for col in setup.map.width:
+			var cell := Vector2i(col, row)
+			if setup.fog.sight(setup.human_index, cell) != FogState.Sight.UNREVEALED:
+				continue
+			var land := setup.map.land_at(cell)
+			lands[land] = true
+			var source := map.get_cell_source_id(cell)
+			var atlas := map.get_cell_atlas_coords(cell)
+			if not have:
+				shared_source = source
+				shared_atlas = atlas
+				have = true
+			elif source != shared_source or atlas != shared_atlas:
+				print("FAIL unrevealed atlas depends on land ", land, " cell ", cell, " source ", source, " atlas ", atlas)
+				quit(1)
+				return false
+			if source == 0 and atlas == Vector2i(int(_LAND_COLUMN[land]), 0):
+				print("FAIL unrevealed ", land, " still uses its land atlas at ", cell)
+				quit(1)
+				return false
+	if lands.size() < 2:
+		print("FAIL unrevealed tiles did not include two land types")
+		quit(1)
+		return false
+	var visible: Vector2i = setup.human_settler_cell()
+	var visible_land := setup.map.land_at(visible)
+	var expected := Vector2i(int(_LAND_COLUMN[visible_land]), 0)
+	if map.get_cell_source_id(visible) != 0 or map.get_cell_atlas_coords(visible) != expected:
+		print("FAIL visible tile atlas ", map.get_cell_atlas_coords(visible), " land ", visible_land)
+		quit(1)
+		return false
+	print("PASS unrevealed atlas ignores land type")
 	return true
 
 

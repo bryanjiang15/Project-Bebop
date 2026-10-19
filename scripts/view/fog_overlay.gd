@@ -1,9 +1,9 @@
 class_name FogOverlay
 extends Node2D
 
-## Draws the human player's fog over the terrain faces.
-## Unrevealed tiles use the opaque hidden color. Revealed tiles use the dim color.
-## Visible tiles are left uncovered. Units are a later layer, so they sit above this.
+## Neutral fog fill for cells the terrain layer did not paint, plus a dim over
+## revealed-but-not-visible land. Unrevealed land art is never drawn, so this
+## fill is the same color for every land type. Visible tiles are left uncovered.
 
 const _OUTSET := 1.5
 

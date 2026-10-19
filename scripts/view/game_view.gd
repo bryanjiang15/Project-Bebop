@@ -122,9 +122,14 @@ func _on_main_menu_pressed() -> void:
 func _paint_map() -> void:
 	_map.clear()
 	_highlight.clear()
+	var viewer := _config.human_index
 	for row in setup.map.height:
 		for col in setup.map.width:
 			var cell := Vector2i(col, row)
+			# Unrevealed cells are erased. A land atlas here would show through the
+			# tile's side even under a dark overlay. Revealed cells keep their land.
+			if setup.fog.sight(viewer, cell) == FogState.Sight.UNREVEALED:
+				continue
 			var land_id := setup.map.land_at(cell)
 			var atlas := Vector2i(int(_LAND_COLUMN[land_id]), 0)
 			_map.set_cell(cell, _TERRAIN_SOURCE, atlas)
