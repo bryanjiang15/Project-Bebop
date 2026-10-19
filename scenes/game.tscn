@@ -1,23 +1,9 @@
-[gd_scene load_steps=13 format=3]
+[gd_scene load_steps=7 format=3]
 
 [ext_resource type="Script" path="res://scripts/view/game_view.gd" id="1_game"]
 [ext_resource type="TileSet" path="res://assets/art/bebop_tileset.tres" id="2_tiles"]
 [ext_resource type="PackedScene" path="res://scenes/ui/menu_button.tscn" id="3_button"]
-[ext_resource type="Shader" path="res://assets/art/team_tint.gdshader" id="4_tint"]
-[ext_resource type="Texture2D" path="res://assets/art/unit_settler.png" id="5_settler"]
-[ext_resource type="Texture2D" path="res://assets/art/unit_settler_mask.png" id="6_settler_mask"]
-[ext_resource type="Texture2D" path="res://assets/art/city_village.png" id="7_city"]
-[ext_resource type="Texture2D" path="res://assets/art/city_village_mask.png" id="8_city_mask"]
-
-[sub_resource type="ShaderMaterial" id="ShaderMaterial_settler"]
-shader = ExtResource("4_tint")
-shader_parameter/team_mask = ExtResource("6_settler_mask")
-shader_parameter/team_color = Color(0.23921569, 0.49411765, 0.85882354, 1)
-
-[sub_resource type="ShaderMaterial" id="ShaderMaterial_city"]
-shader = ExtResource("4_tint")
-shader_parameter/team_mask = ExtResource("8_city_mask")
-shader_parameter/team_color = Color(0.8509804, 0.2901961, 0.23921569, 1)
+[ext_resource type="Script" path="res://scripts/view/fog_overlay.gd" id="4_fog"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_bar"]
 bg_color = Color(0.12, 0.13, 0.16, 0.94)
@@ -47,29 +33,20 @@ unique_name_in_owner = true
 unique_name_in_owner = true
 tile_set = ExtResource("2_tiles")
 
-[node name="Highlight" type="TileMapLayer" parent="."]
+[node name="Fog" type="Node2D" parent="."]
 unique_name_in_owner = true
 z_index = 1
+script = ExtResource("4_fog")
+
+[node name="Highlight" type="TileMapLayer" parent="."]
+unique_name_in_owner = true
+z_index = 2
 tile_set = ExtResource("2_tiles")
 
 [node name="Actors" type="Node2D" parent="."]
 unique_name_in_owner = true
-z_index = 2
+z_index = 3
 y_sort_enabled = true
-
-[node name="TestSettler" type="Sprite2D" parent="Actors"]
-unique_name_in_owner = true
-centered = true
-offset = Vector2(0, -20)
-texture = ExtResource("5_settler")
-material = SubResource("ShaderMaterial_settler")
-
-[node name="TestCity" type="Sprite2D" parent="Actors"]
-unique_name_in_owner = true
-centered = true
-offset = Vector2(0, -10)
-texture = ExtResource("7_city")
-material = SubResource("ShaderMaterial_city")
 
 [node name="UI" type="CanvasLayer" parent="."]
 

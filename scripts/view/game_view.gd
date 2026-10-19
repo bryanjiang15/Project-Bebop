@@ -2,10 +2,23 @@ extends Node2D
 
 const _TERRAIN_SOURCE := 0
 const _HIGHLIGHT_SOURCE := 1
-const TEST_SETTLER_CELL := Vector2i(9, 6)
-const TEST_CITY_CELL := Vector2i(14, 9)
+const _LAND_COLUMN := {
+	"plains": 0,
+	"forest": 1,
+	"hills": 2,
+	"water": 3,
+	"volcanic": 4,
+}
+const _UNIT_SCENE: PackedScene = preload("res://scenes/actors/unit.tscn")
+const _UNIT_ART := {
+	"settler": ["res://assets/art/unit_settler.png", "res://assets/art/unit_settler_mask.png"],
+	"scout": ["res://assets/art/unit_scout.png", "res://assets/art/unit_scout_mask.png"],
+	"warrior": ["res://assets/art/unit_warrior.png", "res://assets/art/unit_warrior_mask.png"],
+	"archer": ["res://assets/art/unit_archer.png", "res://assets/art/unit_archer_mask.png"],
+}
 
 var _config: GameConfig
+var setup: GameSetup
 var _turn: int = 1
 var _tile_size: Vector2i = Vector2i.ZERO
 var _hovered: Vector2i = Vector2i(-999999, -999999)
@@ -14,8 +27,8 @@ var _dragging: bool = false
 @onready var _camera: Camera2D = %Camera
 @onready var _map: TileMapLayer = %Map
 @onready var _highlight: TileMapLayer = %Highlight
-@onready var _settler: Sprite2D = %TestSettler
-@onready var _city: Sprite2D = %TestCity
+@onready var _fog: FogOverlay = %Fog
+@onready var _actors: Node2D = %Actors
 @onready var _turn_label: Label = %TurnLabel
 @onready var _tooltip: Label = %Tooltip
 @onready var _tooltip_panel: PanelContainer = %TooltipPanel
@@ -30,16 +43,20 @@ func _ready() -> void:
 		push_error("Map is missing its TileSet")
 		return
 	_tile_size = _map.tile_set.tile_size
+	setup = GameSetup.start(_config)
+	if setup == null:
+		return
 	_paint_map()
-	_place_test_pieces()
+	_spawn_units()
+	_fog.show_fog(setup, _config, _map)
 	_refresh_turn()
-	_frame_map()
+	_frame_on_human()
 	_tooltip_panel.visible = false
 	_menu.visible = false
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if _config == null:
+	if _config == null or setup == null:
 		return
 	if event.is_action_pressed("debug_victory"):
 		get_tree().change_scene_to_file("res://scenes/victory.tscn")
@@ -67,7 +84,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _process(delta: float) -> void:
-	if _config == null:
+	if _config == null or setup == null:
 		return
 	var dir := Vector2.ZERO
 	if Input.is_action_pressed("pan_left"):
@@ -102,27 +119,46 @@ func _on_main_menu_pressed() -> void:
 	get_tree().change_scene_to_file("res://scenes/main_menu.tscn")
 
 
-func _place_test_pieces() -> void:
-	_settler.position = _map.map_to_local(TEST_SETTLER_CELL)
-	_city.position = _map.map_to_local(TEST_CITY_CELL)
-
-
 func _paint_map() -> void:
 	_map.clear()
 	_highlight.clear()
-	for row in _config.map_height:
-		for col in _config.map_width:
-			var atlas := Vector2i(TestMap.index_of(TestMap.land_at(col)), 0)
-			_map.set_cell(Vector2i(col, row), 0, atlas)
+	for row in setup.map.height:
+		for col in setup.map.width:
+			var cell := Vector2i(col, row)
+			var land_id := setup.map.land_at(cell)
+			var atlas := Vector2i(int(_LAND_COLUMN[land_id]), 0)
+			_map.set_cell(cell, _TERRAIN_SOURCE, atlas)
+
+
+func _spawn_units() -> void:
+	for child in _actors.get_children():
+		_actors.remove_child(child)
+		child.free()
+	var viewer := _config.human_index
+	for player in setup.players:
+		var stack := 0
+		for unit in player.units:
+			if not setup.fog.unit_visible(viewer, unit.cell):
+				continue
+			var art: Array = _UNIT_ART[unit.unit_type]
+			var sprite := _UNIT_SCENE.instantiate() as Sprite2D
+			sprite.texture = load(str(art[0]))
+			var mat := (sprite.material as ShaderMaterial).duplicate() as ShaderMaterial
+			mat.set_shader_parameter("team_mask", load(str(art[1])))
+			mat.set_shader_parameter("team_color", Color.html(player.color))
+			sprite.material = mat
+			sprite.position = _map.map_to_local(unit.cell) + Vector2(16, 10) * float(stack)
+			_actors.add_child(sprite)
+			stack += 1
 
 
 func _refresh_turn() -> void:
 	_turn_label.text = "%d / %d" % [_turn, _config.turn_limit]
 
 
-func _frame_map() -> void:
+func _frame_on_human() -> void:
 	_camera.zoom = Vector2.ONE * _config.camera_default_zoom
-	_camera.position = _map_rect().get_center()
+	_camera.position = _map.map_to_local(setup.human_settler_cell())
 	_clamp_camera()
 
 
@@ -173,10 +209,16 @@ func hover_at_local(local: Vector2, screen: Vector2 = Vector2.INF) -> void:
 		_hovered = cell
 		_highlight.clear()
 		_highlight.set_cell(cell, _HIGHLIGHT_SOURCE, Vector2i.ZERO)
-		_tooltip.text = "%d, %d %s" % [axial.x, axial.y, TestMap.land_at(cell.x)]
+		_tooltip.text = _tip_for(cell, axial)
 		_tooltip_panel.visible = true
 	if screen != Vector2.INF:
 		_tooltip_panel.position = screen + Vector2(16, 16)
+
+
+func _tip_for(cell: Vector2i, axial: Vector2i) -> String:
+	if setup.fog.sight(_config.human_index, cell) == FogState.Sight.UNREVEALED:
+		return "%d, %d Unexplored" % [axial.x, axial.y]
+	return "%d, %d %s" % [axial.x, axial.y, setup.map.land_at(cell)]
 
 
 func _clear_hover() -> void:

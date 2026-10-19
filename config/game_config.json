@@ -4,12 +4,20 @@
     "count": 3,
     "human": 1,
     "ai": 2,
-    "starting_mana": 10
+    "human_index": 0,
+    "starting_mana": 10,
+    "starting_units": ["settler"],
+    "colors": ["#3D7EDB", "#D94A3D", "#E2A23A"]
   },
   "map": {
     "width": 28,
     "height": 18,
+    "seed": 0,
     "start_min_distance": 8,
+    "start_quality_radius": 2,
+    "start_quality_min": 10,
+    "start_attempts": 32,
+    "generation_attempts": 16,
     "land_mix": {
       "plains": 0.35,
       "water": 0.25,
@@ -107,7 +115,9 @@
   "fog": {
     "unit_vision": 2,
     "city_vision_beyond_border": 2,
-    "ai_obeys_fog": true
+    "ai_obeys_fog": true,
+    "hidden_color": [0.02, 0.022, 0.028, 1.0],
+    "dim_color": [0.0, 0.0, 0.0, 0.58]
   },
   "movement": {
     "allow_enter_over_budget_if_mp_left": true

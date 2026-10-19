@@ -17,10 +17,18 @@ var turn_limit: int
 var player_count: int
 var human_count: int
 var ai_count: int
+var human_index: int
 var starting_mana: int
+var starting_units: PackedStringArray = PackedStringArray()
+var player_colors: PackedStringArray = PackedStringArray()
 var map_width: int
 var map_height: int
+var map_seed: int
 var start_min_distance: int
+var start_quality_radius: int
+var start_quality_min: int
+var start_attempts: int
+var generation_attempts: int
 var land_mix: Dictionary = {}
 var lands: Dictionary = {}
 var city_center_food: int
@@ -86,6 +94,8 @@ var archers_can_zero_city_hp: bool
 var unit_vision: int
 var city_vision_beyond_border: int
 var ai_obeys_fog: bool
+var fog_hidden: Array[float] = []
+var fog_dim: Array[float] = []
 var allow_enter_over_budget_if_mp_left: bool
 var shortfall_drains_bar: bool
 var starve_population_loss: int
@@ -217,10 +227,18 @@ static func required_paths() -> PackedStringArray:
 		"players.count",
 		"players.human",
 		"players.ai",
+		"players.human_index",
 		"players.starting_mana",
+		"players.starting_units",
+		"players.colors",
 		"map.width",
 		"map.height",
+		"map.seed",
 		"map.start_min_distance",
+		"map.start_quality_radius",
+		"map.start_quality_min",
+		"map.start_attempts",
+		"map.generation_attempts",
 	])
 	for land_id in ["plains", "water", "forest", "hills", "volcanic"]:
 		paths.append("map.land_mix." + land_id)
@@ -299,6 +317,8 @@ static func required_paths() -> PackedStringArray:
 		"fog.unit_vision",
 		"fog.city_vision_beyond_border",
 		"fog.ai_obeys_fog",
+		"fog.hidden_color",
+		"fog.dim_color",
 		"movement.allow_enter_over_budget_if_mp_left",
 		"growth.shortfall_drains_bar",
 		"growth.starve_population_loss",
@@ -326,6 +346,42 @@ static func required_paths() -> PackedStringArray:
 
 func land(id: String) -> LandStats:
 	return lands[id]
+
+
+func fog_hidden_color() -> Color:
+	return Color(fog_hidden[0], fog_hidden[1], fog_hidden[2], fog_hidden[3])
+
+
+func fog_dim_color() -> Color:
+	return Color(fog_dim[0], fog_dim[1], fog_dim[2], fog_dim[3])
+
+
+func _check_players() -> void:
+	if human_index < 0 or human_index >= player_count:
+		_fail("game_config.json players.human_index out of range")
+		_abort()
+		return
+	if starting_units.is_empty():
+		_fail("game_config.json players.starting_units is empty")
+		_abort()
+		return
+	for unit_id in starting_units:
+		if UNIT_IDS.find(unit_id) < 0:
+			_fail("game_config.json unknown starting unit: %s" % unit_id)
+			_abort()
+			return
+	if player_colors.size() != player_count:
+		_fail("game_config.json players.colors must list one color per player")
+		_abort()
+		return
+	for color in player_colors:
+		if color.length() != 7 or not color.begins_with("#"):
+			_fail("game_config.json players.colors entries are #RRGGBB")
+			_abort()
+			return
+	if start_attempts < 1 or generation_attempts < 1:
+		_fail("game_config.json map generation attempts must be at least 1")
+		_abort()
 
 
 func spell(id: String) -> SpellStats:
@@ -379,12 +435,20 @@ func to_dict() -> Dictionary:
 			"count": player_count,
 			"human": human_count,
 			"ai": ai_count,
+			"human_index": human_index,
 			"starting_mana": starting_mana,
+			"starting_units": _plain_strings(starting_units),
+			"colors": _plain_strings(player_colors),
 		},
 		"map": {
 			"width": map_width,
 			"height": map_height,
+			"seed": map_seed,
 			"start_min_distance": start_min_distance,
+			"start_quality_radius": start_quality_radius,
+			"start_quality_min": start_quality_min,
+			"start_attempts": start_attempts,
+			"generation_attempts": generation_attempts,
 			"land_mix": mix,
 		},
 		"land": land_out,
@@ -441,6 +505,8 @@ func to_dict() -> Dictionary:
 			"unit_vision": unit_vision,
 			"city_vision_beyond_border": city_vision_beyond_border,
 			"ai_obeys_fog": ai_obeys_fog,
+			"hidden_color": _plain_numbers(fog_hidden),
+			"dim_color": _plain_numbers(fog_dim),
 		},
 		"movement": {
 			"allow_enter_over_budget_if_mp_left": allow_enter_over_budget_if_mp_left,
@@ -483,10 +549,18 @@ func _read(data: Dictionary) -> void:
 	player_count = _int(data, "players.count")
 	human_count = _int(data, "players.human")
 	ai_count = _int(data, "players.ai")
+	human_index = _int(data, "players.human_index")
 	starting_mana = _int(data, "players.starting_mana")
+	starting_units = _strings(data, "players.starting_units")
+	player_colors = _strings(data, "players.colors")
 	map_width = _int(data, "map.width")
 	map_height = _int(data, "map.height")
+	map_seed = _int(data, "map.seed")
 	start_min_distance = _int(data, "map.start_min_distance")
+	start_quality_radius = _int(data, "map.start_quality_radius")
+	start_quality_min = _int(data, "map.start_quality_min")
+	start_attempts = _int(data, "map.start_attempts")
+	generation_attempts = _int(data, "map.generation_attempts")
 	land_mix = {}
 	for land_id in ["plains", "water", "forest", "hills", "volcanic"]:
 		land_mix[land_id] = _float(data, "map.land_mix." + land_id)
@@ -588,6 +662,9 @@ func _read(data: Dictionary) -> void:
 	unit_vision = _int(data, "fog.unit_vision")
 	city_vision_beyond_border = _int(data, "fog.city_vision_beyond_border")
 	ai_obeys_fog = _bool(data, "fog.ai_obeys_fog")
+	fog_hidden = _floats(data, "fog.hidden_color", 4)
+	fog_dim = _floats(data, "fog.dim_color", 4)
+	_check_players()
 	allow_enter_over_budget_if_mp_left = _bool(data, "movement.allow_enter_over_budget_if_mp_left")
 	shortfall_drains_bar = _bool(data, "growth.shortfall_drains_bar")
 	starve_population_loss = _int(data, "growth.starve_population_loss")
@@ -669,6 +746,36 @@ static func _string(data: Dictionary, path: String) -> String:
 		return value
 	_bad_type(path, "string", value)
 	return ""
+
+
+static func _floats(data: Dictionary, path: String, count: int) -> Array[float]:
+	var value: Variant = _at(data, path)
+	var out: Array[float] = []
+	if not (value is Array) or (value as Array).size() != count:
+		_bad_type(path, "array of %d numbers" % count, value)
+		return out
+	for item in value:
+		if item is float or item is int:
+			out.append(float(item))
+		else:
+			_bad_type(path, "array of %d numbers" % count, item)
+			out.clear()
+			return out
+	return out
+
+
+static func _plain_strings(values: PackedStringArray) -> Array:
+	var out: Array = []
+	for value in values:
+		out.append(value)
+	return out
+
+
+static func _plain_numbers(values: Array[float]) -> Array:
+	var out: Array = []
+	for value in values:
+		out.append(value)
+	return out
 
 
 static func _strings(data: Dictionary, path: String) -> PackedStringArray:

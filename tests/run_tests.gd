@@ -3,6 +3,8 @@ extends SceneTree
 var _passed := 0
 var _failed := 0
 
+const LAND_MIX_TOLERANCE := 0.02
+
 
 func _init() -> void:
 	print("\n=== Project Bebop unit tests ===\n")
@@ -13,7 +15,7 @@ func _init() -> void:
 	_test_hex_line()
 	_test_axial_offset()
 	_test_pixels()
-	_test_stripes()
+	_test_map_and_fog()
 	print("\nPassed: %d  Failed: %d" % [_passed, _failed])
 	quit(1 if _failed > 0 else 0)
 
@@ -80,6 +82,12 @@ func _test_config() -> void:
 	_ok(cfg.buildings_on_worked_tiles and cfg.one_building_per_tile and cfg.buildings_not_on_city_center and cfg.water_destroys_building, "building flags")
 	_ok(cfg.spells_require_revealed_target and not cfg.spells_change_tile_ownership, "spell flags")
 	_ok(cfg.ai_obeys_fog and cfg.unit_vision == 2 and cfg.city_vision_beyond_border == 2, "fog")
+	_ok(cfg.map_seed == 0, "seed 0 rolls a seed at new game")
+	_ok(cfg.human_index == 0, "human index 0")
+	_ok(cfg.starting_units.size() == 1 and cfg.starting_units[0] == "settler", "starting units are a settler")
+	_ok(cfg.player_colors.size() == cfg.player_count, "one color per player")
+	_ok(cfg.start_quality_radius == 2 and cfg.start_quality_min == 10, "start land quality")
+	_ok(cfg.fog_hidden.size() == 4 and cfg.fog_dim.size() == 4, "fog colors")
 	_ok(cfg.allow_enter_over_budget_if_mp_left, "over-budget move")
 	_ok(cfg.shortfall_drains_bar and cfg.starve_population_min == 1, "starvation")
 	_ok(cfg.volcanic_flat and cfg.volcanic_damage == 10 and cfg.volcanic_can_kill and cfg.volcanic_timing == "end_of_owner_turn", "flat volcanic damage")
@@ -264,14 +272,111 @@ func _test_pixels() -> void:
 	_ok(grid_ok, "pixel_to_hex matches local_to_map on the art TileSet")
 
 
-func _test_stripes() -> void:
-	print("[test map]")
+func _test_map_and_fog() -> void:
+	print("[map and fog]")
+	var cfg: GameConfig = GameConfig.load_file()
+	var first := GameSetup.start_with_seed(cfg, 12345)
+	var again := GameSetup.start_with_seed(cfg, 12345)
+	var other := GameSetup.start_with_seed(cfg, 99991)
+	_ok(first != null and again != null and other != null, "seeds build a game")
+	if first == null or again == null or other == null:
+		return
+	_ok(_same_setup(first, again), "same seed -> identical map and starts")
+	_ok(first.map.lands != other.map.lands, "different seed -> different map")
+	_ok(first.seed_used == 12345, "seed 12345 places starts on the first map (%d)" % first.seed_used)
 	var counts := {"plains": 0, "forest": 0, "hills": 0, "water": 0, "volcanic": 0}
-	for col in 28:
-		counts[TestMap.land_at(col)] += 1
-	_ok(counts["plains"] == 6 and counts["forest"] == 6 and counts["hills"] == 5 and counts["water"] == 6 and counts["volcanic"] == 5, "stripe widths")
-	_ok(TestMap.land_at(0) == "plains" and TestMap.land_at(8) == "forest" and TestMap.land_at(14) == "hills", "stripe samples")
-	_ok(TestMap.land_at(20) == "water" and TestMap.land_at(27) == "volcanic", "water and volcanic stripes")
+	for land_id in first.map.lands:
+		counts[land_id] = int(counts[land_id]) + 1
+	var total := float(cfg.map_width * cfg.map_height)
+	for land_id in GameConfig.LAND_IDS:
+		_ok(int(counts[land_id]) > 0, "default config contains %s" % land_id)
+		var share := float(counts[land_id]) / total
+		var target := float(cfg.land_mix[land_id])
+		_ok(absf(share - target) <= LAND_MIX_TOLERANCE, "%s mix %.3f within %.2f of %.2f" % [land_id, share, LAND_MIX_TOLERANCE, target])
+	_ok(first.players.size() == 3 and first.unit_total() == 3, "exactly 3 players and 3 settlers")
+	for player in first.players:
+		_ok(player.units.size() == cfg.starting_units.size(), "player %d spawned the starting unit list" % player.index)
+		for i in player.units.size():
+			var unit := player.units[i]
+			_ok(unit.unit_type == cfg.starting_units[i], "player %d unit %d is %s" % [player.index, i, cfg.starting_units[i]])
+			_ok(first.map.is_passable(unit.cell, cfg), "start %s is passable land" % unit.cell)
+			var quality := first.map.passable_count(unit.cell, cfg.start_quality_radius, cfg)
+			_ok(quality >= cfg.start_quality_min, "start %s quality %d" % [unit.cell, quality])
+		if player.index == cfg.human_index:
+			_ok(player.human, "human index is the human")
+		else:
+			_ok(not player.human, "player %d is a rival" % player.index)
+	for a in first.players.size():
+		for b in range(a + 1, first.players.size()):
+			var dist := Hex.distance(Hex.offset_to_axial(first.players[a].units[0].cell), Hex.offset_to_axial(first.players[b].units[0].cell))
+			_ok(dist >= cfg.start_min_distance, "starts %d and %d are %d apart" % [a, b, dist])
+	for player in first.players:
+		var origin := Hex.offset_to_axial(player.units[0].cell)
+		for row in first.map.height:
+			for col in first.map.width:
+				var cell := Vector2i(col, row)
+				var dist := Hex.distance(origin, Hex.offset_to_axial(cell))
+				var state := first.fog.sight(player.index, cell)
+				if dist <= cfg.unit_vision:
+					if state != FogState.Sight.VISIBLE:
+						_ok(false, "player %d should see %s" % [player.index, cell])
+						return
+				elif state != FogState.Sight.UNREVEALED:
+					_ok(false, "player %d should not have seen %s" % [player.index, cell])
+					return
+	_ok(true, "opening vision matches each settler disk")
+	for player in first.players:
+		if player.index == first.human_index:
+			continue
+		var rival_cell := player.units[0].cell
+		var dist := Hex.distance(Hex.offset_to_axial(first.human_settler_cell()), Hex.offset_to_axial(rival_cell))
+		var visible := first.fog.unit_visible(first.human_index, rival_cell)
+		_ok(visible == (dist <= cfg.unit_vision), "rival settler visibility follows vision (dist %d)" % dist)
+	_test_fog_memory()
+	var all_seeds := true
+	for seed_value in range(1, 31):
+		var game := GameSetup.start_with_seed(cfg, seed_value)
+		if game == null or game.players.size() != cfg.player_count or game.unit_total() != cfg.player_count:
+			print("    seed failed ", seed_value)
+			all_seeds = false
+			break
+	_ok(all_seeds, "seeds 1..30 all find fair starts")
+
+
+func _test_fog_memory() -> void:
+	var fog := FogState.new()
+	fog.resize(10, 8, 2)
+	var origin := Vector2i(4, 4)
+	var near := Vector2i(5, 4)
+	var far := Vector2i(9, 4)
+	fog.compute_initial([{"player": 0, "cell": origin, "radius": 2}])
+	_ok(fog.sight(0, near) == FogState.Sight.VISIBLE, "tile in radius is visible")
+	_ok(fog.sight(0, far) == FogState.Sight.UNREVEALED, "tile outside radius is unrevealed")
+	_ok(fog.unit_visible(0, near) and not fog.unit_visible(0, far), "a unit is hidden unless its tile is visible")
+	_ok(fog.sight(1, origin) == FogState.Sight.UNREVEALED, "the other player's fog stays unrevealed")
+	fog.recompute([{"player": 0, "cell": far, "radius": 2}])
+	_ok(fog.sight(0, origin) == FogState.Sight.REVEALED, "leaving a tile keeps it revealed")
+	_ok(fog.sight(0, far) == FogState.Sight.VISIBLE, "the new tile is visible")
+	_ok(fog.unit_visible(0, far) and not fog.unit_visible(0, origin), "a rival is visible only while in vision")
+
+
+func _same_setup(a: GameSetup, b: GameSetup) -> bool:
+	if a.seed_used != b.seed_used or a.map.lands != b.map.lands or a.players.size() != b.players.size():
+		return false
+	for i in a.players.size():
+		var left: Array = a.players[i].units
+		var right: Array = b.players[i].units
+		if left.size() != right.size():
+			return false
+		for j in left.size():
+			if left[j].cell != right[j].cell or left[j].unit_type != right[j].unit_type:
+				return false
+		for row in a.map.height:
+			for col in a.map.width:
+				var cell := Vector2i(col, row)
+				if a.fog.sight(i, cell) != b.fog.sight(i, cell):
+					return false
+	return true
 
 
 func _leaf_list(data: Dictionary, prefix: String = "") -> PackedStringArray:
