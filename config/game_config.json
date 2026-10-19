@@ -1,0 +1,147 @@
+{
+  "turn_limit": 50,
+  "players": {
+    "count": 3,
+    "human": 1,
+    "ai": 2,
+    "starting_mana": 10
+  },
+  "map": {
+    "width": 28,
+    "height": 18,
+    "start_min_distance": 8,
+    "land_mix": {
+      "plains": 0.35,
+      "water": 0.25,
+      "forest": 0.20,
+      "hills": 0.15,
+      "volcanic": 0.05
+    }
+  },
+  "land": {
+    "plains": {"food": 2, "production": 0, "move_cost": 1, "defense": 0.0, "passable": true, "hazard_damage": 0},
+    "forest": {"food": 1, "production": 2, "move_cost": 2, "defense": 0.0, "passable": true, "hazard_damage": 0},
+    "hills": {"food": 1, "production": 1, "move_cost": 2, "defense": 0.25, "passable": true, "hazard_damage": 0},
+    "water": {"food": 1, "production": 0, "move_cost": -1, "defense": 0.0, "passable": false, "hazard_damage": 0},
+    "volcanic": {"food": 0, "production": 3, "move_cost": 1, "defense": 0.0, "passable": true, "hazard_damage": 10}
+  },
+  "city": {
+    "center_food": 2,
+    "center_production": 2,
+    "mana_base": 2,
+    "mana_per_population_divisor": 2,
+    "growth_base": 10,
+    "growth_per_population": 6,
+    "food_per_population": 2,
+    "border_start_radius": 1,
+    "border_turns_per_growth": 4,
+    "border_max_radius": 3,
+    "min_distance": 3,
+    "hp": 100,
+    "defense": 15,
+    "heal": 10,
+    "capture_population_loss": 1,
+    "capture_population_min": 1,
+    "capture_hp_fraction": 0.5,
+    "center_never_terraformed": true,
+    "heals_if_not_attacked": true
+  },
+  "buildings": {
+    "buildings_on_worked_tiles": true,
+    "one_per_tile": true,
+    "not_on_city_center": true,
+    "water_destroys_building": true,
+    "granary_food": 2,
+    "mana_well_mana": 2,
+    "lumber_mill_production_per_adjacent_forest": 1,
+    "costs": {
+      "granary": 50,
+      "mana_well": 60,
+      "lumber_mill": 50
+    }
+  },
+  "spells": {
+    "casts_per_turn": 1,
+    "range_from": "owned_tile",
+    "line_length": 4,
+    "only_target_must_be_in_range": true,
+    "drop_off_map": true,
+    "spells_require_revealed_target": true,
+    "spells_change_tile_ownership": false,
+    "skip_water_if_land_unit_present": true,
+    "cooldown_uses_caster_turns": true,
+    "grow_forest": {"shape": "radius", "radius": 1, "length": 0, "mana": 15, "range": 3, "cooldown": 2, "land": "forest"},
+    "raise_hills": {"shape": "radius", "radius": 1, "length": 0, "mana": 20, "range": 3, "cooldown": 3, "land": "hills"},
+    "carve_river": {"shape": "line", "radius": 0, "length": 4, "mana": 25, "range": 3, "cooldown": 3, "land": "water"},
+    "ignite": {"shape": "radius", "radius": 1, "length": 0, "mana": 35, "range": 2, "cooldown": 5, "land": "volcanic"},
+    "restore_plains": {"shape": "radius", "radius": 1, "length": 0, "mana": 10, "range": 3, "cooldown": 2, "land": "plains"}
+  },
+  "units": {
+    "one_military_and_one_civilian_per_tile": true,
+    "capture_lone_settler": true,
+    "spawn_on_city_center": true,
+    "spawn_nearest_free_if_blocked": true,
+    "heal": 10,
+    "heal_only_if_idle": true,
+    "skip_enabled": true,
+    "fortify_enabled": true,
+    "fortify_defense_bonus": 0.25,
+    "end_turn_warns_if_unordered": true,
+    "scout": {"hp": 50, "attack": 5, "defense": 5, "move": 3, "cost": 20, "range": 0, "combatant": true, "population_cost": 0, "min_city_size": 0},
+    "warrior": {"hp": 100, "attack": 20, "defense": 20, "move": 2, "cost": 30, "range": 0, "combatant": true, "population_cost": 0, "min_city_size": 0},
+    "archer": {"hp": 100, "attack": 25, "defense": 12, "move": 2, "cost": 45, "range": 2, "combatant": true, "population_cost": 0, "min_city_size": 0},
+    "settler": {"hp": 0, "attack": 0, "defense": 0, "move": 2, "cost": 40, "range": 0, "combatant": false, "population_cost": 1, "min_city_size": 2}
+  },
+  "combat": {
+    "base_damage": 30,
+    "strength_exponent_base": 1.04,
+    "min_damage": 5,
+    "max_damage": 60,
+    "hp_reduces_strength": false,
+    "counter_uses_defender_strength": true,
+    "hills_defense_multiplier": 1.25,
+    "ranged_takes_no_counter": true,
+    "melee_captures_city": true,
+    "archers_can_zero_city_hp": true
+  },
+  "fog": {
+    "unit_vision": 2,
+    "city_vision_beyond_border": 2,
+    "ai_obeys_fog": true
+  },
+  "movement": {
+    "allow_enter_over_budget_if_mp_left": true
+  },
+  "growth": {
+    "shortfall_drains_bar": true,
+    "starve_population_loss": 1,
+    "starve_population_min": 1,
+    "settler_population_taken_when_finished": true
+  },
+  "volcanic": {
+    "damage": 10,
+    "flat": true,
+    "can_kill": true,
+    "timing": "end_of_owner_turn"
+  },
+  "score": {
+    "per_tile": 1,
+    "per_city": 10,
+    "per_population": 3
+  },
+  "ties": {
+    "order": ["tiles", "cities", "human_loses"]
+  },
+  "borders": {
+    "can_claim_water": true,
+    "can_claim_owned_tiles": false
+  },
+  "camera": {
+    "min_zoom": 0.2,
+    "max_zoom": 2.0,
+    "zoom_step": 0.1,
+    "pan_margin": 160.0,
+    "key_pan_speed": 1200.0,
+    "default_zoom": 0.36
+  }
+}
