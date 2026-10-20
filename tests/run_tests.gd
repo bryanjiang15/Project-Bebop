@@ -16,6 +16,9 @@ func _init() -> void:
 	_test_axial_offset()
 	_test_pixels()
 	_test_map_and_fog()
+	_test_pathfinding()
+	_test_movement_and_fog()
+	_test_found_city()
 	print("\nPassed: %d  Failed: %d" % [_passed, _failed])
 	quit(1 if _failed > 0 else 0)
 
@@ -86,6 +89,7 @@ func _test_config() -> void:
 	_ok(cfg.human_index == 0, "human index 0")
 	_ok(cfg.starting_units.size() == 1 and cfg.starting_units[0] == "settler", "starting units are a settler")
 	_ok(cfg.player_colors.size() == cfg.player_count, "one color per player")
+	_ok(cfg.city_names.size() == cfg.player_count and not (cfg.city_names[0] as PackedStringArray).is_empty(), "one city-name list per player")
 	_ok(cfg.start_quality_radius == 2 and cfg.start_quality_min == 10, "start land quality")
 	_ok(cfg.fog_hidden.size() == 4 and cfg.fog_dim.size() == 4, "fog colors")
 	_ok(cfg.allow_enter_over_budget_if_mp_left, "over-budget move")
@@ -294,6 +298,7 @@ func _test_map_and_fog() -> void:
 		var target := float(cfg.land_mix[land_id])
 		_ok(absf(share - target) <= LAND_MIX_TOLERANCE, "%s mix %.3f within %.2f of %.2f" % [land_id, share, LAND_MIX_TOLERANCE, target])
 	_ok(first.players.size() == 3 and first.unit_total() == 3, "exactly 3 players and 3 settlers")
+	_ok(first.players[0].units[0].mp == cfg.unit(first.players[0].units[0].unit_type).move, "starting units begin with full movement")
 	for player in first.players:
 		_ok(player.units.size() == cfg.starting_units.size(), "player %d spawned the starting unit list" % player.index)
 		for i in player.units.size():
@@ -358,6 +363,172 @@ func _test_fog_memory() -> void:
 	_ok(fog.sight(0, origin) == FogState.Sight.REVEALED, "leaving a tile keeps it revealed")
 	_ok(fog.sight(0, far) == FogState.Sight.VISIBLE, "the new tile is visible")
 	_ok(fog.unit_visible(0, far) and not fog.unit_visible(0, origin), "a rival is visible only while in vision")
+
+
+func _blank_setup(fill: String = "plains") -> GameSetup:
+	var cfg: GameConfig = GameConfig.load_file()
+	var map := MapState.create(cfg.map_width, cfg.map_height)
+	for row in map.height:
+		for col in map.width:
+			map.set_land(Vector2i(col, row), fill)
+	var game := GameSetup.new()
+	game.config = cfg
+	game.map = map
+	game.turn = 1
+	game.human_index = cfg.human_index
+	game.fog = FogState.new()
+	game.fog.resize(map.width, map.height, cfg.player_count)
+	for index in cfg.player_count:
+		var player := PlayerState.new()
+		player.index = index
+		player.human = index == cfg.human_index
+		player.color = cfg.player_colors[index]
+		game.players.append(player)
+	return game
+
+
+func _step(cell: Vector2i, direction: int, steps: int) -> Vector2i:
+	var axial := Hex.offset_to_axial(cell)
+	for _i in steps:
+		axial = Hex.neighbor(axial, direction)
+	return Hex.axial_to_offset(axial)
+
+
+func _test_pathfinding() -> void:
+	print("[pathfinding]")
+	var origin := Vector2i(8, 8)
+	var neighbor := _step(origin, Hex.EAST, 1)
+	var two := _step(origin, Hex.EAST, 2)
+	var three := _step(origin, Hex.EAST, 3)
+	var game := _blank_setup("forest")
+	var settler := game.spawn_unit(0, "settler", origin)
+	var reach := game.reachable_tiles(settler)
+	_ok(game.config.land("forest").move_cost * 2 > settler.mp, "two forests exceed settler movement")
+	_ok(reach.has(neighbor) and int(reach[neighbor]) == settler.mp - game.config.land("forest").move_cost, "forest spends its move cost")
+	_ok(not reach.has(two), "cannot walk two forests when no points remain")
+	game = _blank_setup("plains")
+	settler = game.spawn_unit(0, "settler", origin)
+	reach = game.reachable_tiles(settler)
+	_ok(reach.has(two) and int(reach[two]) == settler.mp - game.config.land("plains").move_cost * 2, "two plains fit in settler movement")
+	_ok(not reach.has(three), "three plains do not fit in settler movement")
+	game.map.set_land(neighbor, "water")
+	reach = game.reachable_tiles(settler)
+	_ok(not reach.has(neighbor), "water is impassable")
+	_ok(not game.move_unit(settler, neighbor), "move rejects water")
+	game = _blank_setup("forest")
+	game.map.set_land(origin, "plains")
+	settler = game.spawn_unit(0, "settler", origin)
+	_ok(game.config.land("forest").move_cost > 1, "forest costs more than one point")
+	settler.mp = 1
+	reach = game.reachable_tiles(settler)
+	_ok(reach.has(neighbor) and int(reach[neighbor]) == 0, "over-budget forest entry ends the move")
+	_ok(not reach.has(two), "no step after an over-budget entry")
+	game.config.allow_enter_over_budget_if_mp_left = false
+	reach = game.reachable_tiles(settler)
+	_ok(not reach.has(neighbor), "over-budget entry follows the config flag")
+	game = _blank_setup()
+	var scout := game.spawn_unit(0, "scout", origin)
+	var far := _step(origin, Hex.EAST, game.config.unit("scout").move)
+	var too_far := _step(origin, Hex.EAST, game.config.unit("scout").move + 1)
+	reach = game.reachable_tiles(scout)
+	_ok(reach.has(far) and not reach.has(too_far), "scout walks its own movement points")
+	var civilian := game.spawn_unit(0, "settler", origin)
+	var other := game.spawn_unit(0, "settler", neighbor)
+	_ok(civilian != null and other != null, "two settlers on different tiles")
+	_ok(not game.reachable_tiles(civilian).has(other.cell), "one civilian per tile")
+	_ok(game.spawn_unit(0, "settler", other.cell) == null, "spawn rejects a second civilian")
+	_ok(game.spawn_unit(0, "warrior", other.cell) != null, "one military unit may share a civilian's tile")
+	_ok(game.spawn_unit(0, "scout", other.cell) == null, "one military unit per tile")
+	var enemy := game.spawn_unit(1, "warrior", _step(origin, Hex.WEST, 1))
+	_ok(enemy != null and not game.reachable_tiles(civilian).has(enemy.cell), "cannot enter another player's unit")
+	_ok(game.spawn_unit(0, "boat", origin) == null, "unknown unit type is rejected")
+
+
+func _test_movement_and_fog() -> void:
+	print("[movement and fog]")
+	var game := _blank_setup()
+	var origin := Vector2i(6, 6)
+	var unit := game.spawn_unit(0, "settler", origin)
+	var seen := _step(origin, Hex.WEST, game.config.unit_vision)
+	_ok(game.fog.sight(0, seen) == FogState.Sight.VISIBLE, "unit vision reaches its radius")
+	_ok(game.fog.sight(0, _step(origin, Hex.WEST, game.config.unit_vision + 1)) == FogState.Sight.UNREVEALED, "unit vision stops at its radius")
+	var dest := _step(origin, Hex.EAST, 1)
+	_ok(game.move_unit(unit, dest), "moves east")
+	_ok(unit.cell == dest, "unit arrives")
+	_ok(unit.mp == game.config.unit("settler").move - game.config.land("plains").move_cost, "plains cost is spent")
+	_ok(game.fog.sight(0, seen) == FogState.Sight.REVEALED, "left-behind tiles stay revealed and leave vision")
+	var ahead := _step(dest, Hex.EAST, game.config.unit_vision)
+	_ok(game.fog.sight(0, ahead) == FogState.Sight.VISIBLE, "the move reveals new tiles")
+	game.end_turn()
+	_ok(game.turn == 2, "end turn advances the turn")
+	_ok(unit.mp == game.config.unit("settler").move, "end turn resets movement")
+
+
+func _test_found_city() -> void:
+	print("[found city]")
+	var game := _blank_setup()
+	var origin := Vector2i(10, 8)
+	var unit := game.spawn_unit(0, "settler", origin)
+	var edge_distance := game.config.border_start_radius + game.config.city_vision_beyond_border
+	var edge := _step(origin, Hex.EAST, edge_distance)
+	var beyond := _step(origin, Hex.EAST, edge_distance + 1)
+	_ok(game.fog.sight(0, edge) == FogState.Sight.UNREVEALED, "the settler does not see the future city ring")
+	var city := game.found_city(unit)
+	_ok(city != null and game.players[0].units.is_empty(), "founding consumes the settler")
+	_ok(city.player == 0 and city.population == 1 and city.cell == origin, "city owner, population, and tile")
+	_ok(city.radius == game.config.border_start_radius, "territory radius is the founding radius")
+	_ok(city.city_name == str((game.config.city_names[0] as PackedStringArray)[0]), "name comes from the player's list")
+	_ok(game.territory_cells(city).size() == Hex.disk(Hex.offset_to_axial(origin), city.radius).size(), "claims the whole founding disk")
+	_ok(game.owner_at(_step(origin, Hex.EAST, city.radius + 1)) == -1, "territory stops at the founding radius")
+	_ok(game.fog.sight(0, edge) == FogState.Sight.VISIBLE, "city vision reveals territory plus the extra radius")
+	_ok(game.fog.sight(0, beyond) == FogState.Sight.UNREVEALED, "city vision stops at territory plus radius")
+	game = _blank_setup()
+	game.config.unit_vision = 1
+	origin = Vector2i(8, 8)
+	var rival := game.spawn_unit(1, "settler", origin)
+	var rival_city := game.found_city(rival)
+	var hidden := _step(origin, Hex.EAST, 2)
+	_ok(rival_city != null and Hex.distance(Hex.offset_to_axial(origin), Hex.offset_to_axial(hidden)) == 2, "rival city sits two tiles away")
+	var human := game.spawn_unit(0, "settler", hidden)
+	_ok(game.fog.sight(0, origin) == FogState.Sight.UNREVEALED, "rival city is under fog")
+	_ok(game.can_found(human) == GameSetup.REASON_DISTANCE, "distance rejects a fogged city inside 3")
+	_ok(game.found_city(human) == null and game.players[0].units.size() == 1, "rejected founding keeps the settler")
+	game = _blank_setup()
+	origin = Vector2i(8, 8)
+	game.found_city(game.spawn_unit(1, "settler", origin))
+	var spot := _step(origin, Hex.EAST, game.config.city_min_distance)
+	_ok(Hex.distance(Hex.offset_to_axial(origin), Hex.offset_to_axial(spot)) == 3, "spot is exactly the minimum distance")
+	human = game.spawn_unit(0, "settler", spot)
+	_ok(game.can_found(human).is_empty(), "distance 3 is allowed")
+	var second := game.found_city(human)
+	_ok(second != null and second.city_name == str((game.config.city_names[0] as PackedStringArray)[0]), "a first city uses the player's first name")
+	game = _blank_setup()
+	var water_at := Vector2i(4, 4)
+	game.map.set_land(water_at, "water")
+	human = game.spawn_unit(0, "settler", Vector2i(5, 4))
+	human.cell = water_at
+	_ok(game.can_found(human) == GameSetup.REASON_WATER, "cannot found on water")
+	_ok(game.spawn_unit(0, "settler", water_at) == null, "cannot spawn a settler on water")
+	game = _blank_setup()
+	game.config.city_min_distance = 1
+	origin = Vector2i(8, 8)
+	game.found_city(game.spawn_unit(1, "settler", origin))
+	var owned := _step(origin, Hex.EAST, 1)
+	_ok(game.owner_at(owned) == 1, "rival founding claims the neighbor")
+	human = game.spawn_unit(0, "settler", owned)
+	_ok(game.can_found(human) == GameSetup.REASON_OWNED, "cannot found on a rival-owned tile")
+	game = _blank_setup()
+	game.config.borders_can_claim_water = false
+	origin = Vector2i(8, 8)
+	var shore := _step(origin, Hex.EAST, 1)
+	game.map.set_land(shore, "water")
+	city = game.found_city(game.spawn_unit(0, "settler", origin))
+	_ok(city != null and game.owner_at(shore) == -1 and game.owner_at(origin) == 0, "water claim follows the config flag")
+	game = _blank_setup()
+	game.config.city_names[0] = PackedStringArray(["Only"])
+	var first := game.found_city(game.spawn_unit(0, "settler", Vector2i(2, 2)))
+	var later := game.found_city(game.spawn_unit(0, "settler", _step(Vector2i(2, 2), Hex.EAST, game.config.city_min_distance)))
+	_ok(first.city_name == "Only" and later.city_name == "Only 2", "names past the list stay unique")
 
 
 func _same_setup(a: GameSetup, b: GameSetup) -> bool:

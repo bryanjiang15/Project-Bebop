@@ -26,6 +26,8 @@ func _run() -> void:
 		return
 	if not _assert_new_game(game):
 		return
+	if not _found_city(game):
+		return
 	(game.get_node("%EndTurnButton") as Button).pressed.emit()
 	var turn := (game.get_node("%TurnLabel") as Label).text
 	if turn != "2 / 50":
@@ -147,6 +149,66 @@ func _assert_new_game(game: Node) -> bool:
 		return false
 	print("PASS new game seed ", setup.seed_used, " sprites ", shown)
 	return true
+
+
+func _found_city(game: Node) -> bool:
+	var setup := game.get("setup") as GameSetup
+	var cell := setup.human_settler_cell()
+	_click_cell(game, cell)
+	var found := game.get_node("%FoundCityButton") as Button
+	var reason := (game.get_node("%FoundCityReason") as Label).text
+	if found.disabled or reason != "":
+		print("FAIL found city available: disabled=", found.disabled, " reason='", reason, "'")
+		quit(1)
+		return false
+	print("PASS settler selected")
+	found.pressed.emit()
+	var human_settlers := 0
+	for unit in setup.players[setup.human_index].units:
+		if unit.unit_type == "settler":
+			human_settlers += 1
+	if human_settlers != 0 or setup.cities.size() != 1 or setup.unit_total() != 2:
+		print("FAIL founded city settlers=", human_settlers, " cities=", setup.cities.size(), " units=", setup.unit_total())
+		quit(1)
+		return false
+	var city_nodes := 0
+	var unit_nodes := 0
+	var city_name := ""
+	for child in game.get_node("%Actors").get_children():
+		var node_name := str(child.name)
+		if node_name.begins_with("City_"):
+			city_nodes += 1
+			city_name = (child.get_node("Name") as Label).text
+		elif node_name.begins_with("Unit_"):
+			unit_nodes += 1
+	if city_nodes != 1 or unit_nodes != 0 or city_name == "":
+		print("FAIL city view cities=", city_nodes, " units=", unit_nodes, " name='", city_name, "'")
+		quit(1)
+		return false
+	if setup.cities[0].population != 1:
+		print("FAIL city population")
+		quit(1)
+		return false
+	print("PASS founded ", city_name)
+	return true
+
+
+func _click_cell(game: Node, cell: Vector2i) -> void:
+	var map := game.get_node("%Map") as TileMapLayer
+	var world: Vector2 = map.to_global(map.map_to_local(cell))
+	var screen: Vector2 = game.get_viewport().get_canvas_transform() * world
+	var press := InputEventMouseButton.new()
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.pressed = true
+	press.position = screen
+	press.global_position = screen
+	game._unhandled_input(press)
+	var release := InputEventMouseButton.new()
+	release.button_index = MOUSE_BUTTON_LEFT
+	release.pressed = false
+	release.position = screen
+	release.global_position = screen
+	game._unhandled_input(release)
 
 
 func _assert_unrevealed_atlas(game: Node, setup: GameSetup) -> bool:

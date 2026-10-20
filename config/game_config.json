@@ -7,7 +7,12 @@
     "human_index": 0,
     "starting_mana": 10,
     "starting_units": ["settler"],
-    "colors": ["#3D7EDB", "#D94A3D", "#E2A23A"]
+    "colors": ["#3D7EDB", "#D94A3D", "#E2A23A"],
+    "city_names": [
+      ["Haven", "Westford", "Ashfield", "Millhaven", "Oakrest", "Fairwater"],
+      ["Redoubt", "Cinder", "Marrow", "Ashfort", "Kiln", "Ember"],
+      ["Gale", "Brine", "Hollow", "Drift", "Saltmere", "Mistral"]
+    ]
   },
   "map": {
     "width": 28,

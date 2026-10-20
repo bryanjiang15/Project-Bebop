@@ -21,6 +21,7 @@ var human_index: int
 var starting_mana: int
 var starting_units: PackedStringArray = PackedStringArray()
 var player_colors: PackedStringArray = PackedStringArray()
+var city_names: Array = []
 var map_width: int
 var map_height: int
 var map_seed: int
@@ -231,6 +232,7 @@ static func required_paths() -> PackedStringArray:
 		"players.starting_mana",
 		"players.starting_units",
 		"players.colors",
+		"players.city_names",
 		"map.width",
 		"map.height",
 		"map.seed",
@@ -379,6 +381,15 @@ func _check_players() -> void:
 			_fail("game_config.json players.colors entries are #RRGGBB")
 			_abort()
 			return
+	if city_names.size() != player_count:
+		_fail("game_config.json players.city_names must list one name list per player")
+		_abort()
+		return
+	for row in city_names:
+		if not (row is PackedStringArray) or (row as PackedStringArray).is_empty():
+			_fail("game_config.json players.city_names entries are non-empty string lists")
+			_abort()
+			return
 	if start_attempts < 1 or generation_attempts < 1:
 		_fail("game_config.json map generation attempts must be at least 1")
 		_abort()
@@ -439,6 +450,7 @@ func to_dict() -> Dictionary:
 			"starting_mana": starting_mana,
 			"starting_units": _plain_strings(starting_units),
 			"colors": _plain_strings(player_colors),
+			"city_names": _name_lists(city_names),
 		},
 		"map": {
 			"width": map_width,
@@ -553,6 +565,7 @@ func _read(data: Dictionary) -> void:
 	starting_mana = _int(data, "players.starting_mana")
 	starting_units = _strings(data, "players.starting_units")
 	player_colors = _strings(data, "players.colors")
+	city_names = _string_matrix(data, "players.city_names")
 	map_width = _int(data, "map.width")
 	map_height = _int(data, "map.height")
 	map_seed = _int(data, "map.seed")
@@ -761,6 +774,33 @@ static func _floats(data: Dictionary, path: String, count: int) -> Array[float]:
 			_bad_type(path, "array of %d numbers" % count, item)
 			out.clear()
 			return out
+	return out
+
+
+static func _name_lists(rows: Array) -> Array:
+	var out: Array = []
+	for row in rows:
+		out.append(_plain_strings(row as PackedStringArray))
+	return out
+
+
+static func _string_matrix(data: Dictionary, path: String) -> Array:
+	var value: Variant = _at(data, path)
+	var out: Array = []
+	if not (value is Array):
+		_bad_type(path, "array of string arrays", value)
+		return out
+	for row in value:
+		if not (row is Array):
+			_bad_type(path, "array of string arrays", row)
+			return []
+		var names := PackedStringArray()
+		for item in row:
+			if not (item is String):
+				_bad_type(path, "array of string arrays", item)
+				return []
+			names.append(item)
+		out.append(names)
 	return out
 
 
