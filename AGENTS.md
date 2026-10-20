@@ -1,8 +1,6 @@
 # Agent guide
 
-Project Bebop is a turn-based terraforming 4X on a hex map. This repository is the Godot 4.7 skeleton: menus, config, hex math, and an isometric art view. Map generation, cities, spells, units, and AI are later tickets. Do not add them here.
-
-The in-game scene places one test settler and one test city so the art pipeline can be seen. They are fixtures, not gameplay.
+Project Bebop is a turn-based terraforming 4X on a hex map. This repository is the Godot 4.7 prototype. New Game builds a seeded hex map, three players, one starting settler each, and per-player fog of war. Cities, spells, movement, combat, and AI are later tickets.
 
 Notion is the source of truth for design. Copies live in `docs/`. If the brief and the design doc disagree, the design doc wins. `docs/agreed_defaults.md` is the approved engineering record and overrides the design doc's chance-based volcanic proposal with the brief's flat 10 damage.
 
@@ -11,8 +9,9 @@ Notion is the source of truth for design. Copies live in `docs/`. If the brief a
 ```
 scenes/           main_menu.tscn, game.tscn, victory.tscn, defeat.tscn
 scenes/ui/        menu_button.tscn (instanced buttons)
-scripts/core/     RefCounted rules: hex.gd, game_config.gd
-scripts/view/     rendering and input
+scenes/actors/    unit.tscn (instanced once per visible unit)
+scripts/core/     RefCounted rules: hex.gd, game_config.gd, map_state.gd, map_generator.gd, player_state.gd, fog_state.gd, game_setup.gd
+scripts/view/     rendering and input, including fog_overlay.gd
 config/game_config.json
 assets/art/       greybox art v0.2, bebop_tileset.tres, team_tint.gdshader
 tests/            unit tests, missing-key check, smoke test
@@ -44,9 +43,17 @@ Tile size and texture origin live only on `assets/art/bebop_tileset.tres`. The a
 
 Hover calls `TileMapLayer.local_to_map` on that TileSet. `Hex.pixel_to_hex` / `pixel_to_offset` match `local_to_map` for the same `tile_size`. The unit tests load the art TileSet and compare the two.
 
-The stripe map is not a generator. Columns 0–5 plains, 6–11 forest, 12–16 hills, 17–22 water, 23–27 volcanic.
+## Map, starts, and fog
 
-`Actors` is a `Node2D` with `y_sort_enabled`. The test settler (offset cell `(9, 6)`, sprite offset `(0, -20)`, blue `#3D7EDB`) and the test city (cell `(14, 9)`, offset `(0, -10)`, red `#D94A3D`) sit at `map_to_local`. Both use `assets/art/team_tint.gdshader`.
+`GameSetup.start` reads `map.seed`. **0 rolls a new non-zero seed** on every New Game and Restart. Any other value is used as-is. The seed that actually built the map is printed to stdout as `map seed: N`. Putting that N back into `map.seed` replays the map and the starts. If a seed cannot place fair starts, the next try uses a derived seed, at most `map.generation_attempts` maps and `map.start_attempts` shuffles each. The printed seed is the one that worked, and it replays on the first try.
+
+`MapGenerator` builds clusters with integer value noise, then assigns exact tile counts (largest remainder on `map.land_mix`). Low noise is water, then plains, forest, hills, volcanic. The counts are integer math so the same seed matches on macOS and Linux.
+
+Each player in `players.count` is spawned at a passable tile (not water) with at least `map.start_quality_min` passable tiles inside radius `map.start_quality_radius`. Pairwise hex distance is at least `map.start_min_distance`. The human is `players.human_index`. Everyone else is a rival with no AI yet. `players.starting_units` is the list spawned on that tile, in order. It is currently `["settler"]`. A later ticket adds the warrior by appending to that list. Sprites are instances of `scenes/actors/unit.tscn` on the y-sorted `Actors` node, tinted with `players.colors` through `assets/art/team_tint.gdshader`. A unit whose tile is not currently visible to the human is not instanced.
+
+`FogState` keeps unrevealed / revealed / visible **per player** in core. At game start every tile is unrevealed, then each unit reveals a disk of `fog.unit_vision`. There are no cities yet. A city's disk will be its border radius plus `fog.city_vision_beyond_border`. Leaving a tile (a later movement ticket) drops it from visible to revealed. The view draws the human's fog. An unrevealed cell is erased from the terrain `TileMapLayer`, so its atlas does not depend on the land type, and a neutral fill (`fog.hidden_color`) covers the hole. A revealed-but-not-visible cell keeps its land tile and is dimmed with `fog.dim_color`. Visible cells are uncovered. The hover tooltip shows the land id for revealed and visible tiles. An unrevealed tile shows axial coordinates and the word Unexplored, never the land id.
+
+The camera starts centered on the human settler.
 
 ## Commands
 
