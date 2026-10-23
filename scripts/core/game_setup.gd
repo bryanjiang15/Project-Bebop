@@ -6,11 +6,24 @@ extends RefCounted
 ## as "map seed: N". Writing N back into map.seed replays that map and those starts.
 ## A failed placement retries with a derived seed, up to generation_attempts.
 
+const REASON_SETTLER := "Select a settler"
+const REASON_WATER := "Cannot found on water"
+const REASON_OWNED := "Cannot found on another player's tile"
+const REASON_DISTANCE := "Too close to another city"
+const REASON_OFF_MAP := "Cannot found off the map"
+
+var config: GameConfig
 var seed_used: int
+var turn: int = 1
 var map: MapState
 var players: Array[PlayerState] = []
+var cities: Array[MapCity] = []
 var fog: FogState
 var human_index: int
+var _owners: Dictionary = {}
+var _next_unit_id: int = 1
+var _next_city_id: int = 1
+var _moving: PlayerState.UnitState
 
 
 static func start(cfg: GameConfig) -> GameSetup:
@@ -39,7 +52,9 @@ static func start_with_seed(cfg: GameConfig, seed_value: int) -> GameSetup:
 
 static func _assemble(cfg: GameConfig, map: MapState, starts: Array[Vector2i], seed_value: int) -> GameSetup:
 	var setup := GameSetup.new()
+	setup.config = cfg
 	setup.seed_used = seed_value
+	setup.turn = 1
 	setup.map = map
 	setup.human_index = cfg.human_index
 	for index in cfg.player_count:
@@ -47,31 +62,15 @@ static func _assemble(cfg: GameConfig, map: MapState, starts: Array[Vector2i], s
 		player.index = index
 		player.human = index == cfg.human_index
 		player.color = cfg.player_colors[index]
-		for unit_type in cfg.starting_units:
-			var unit := PlayerState.UnitState.new()
-			unit.unit_type = unit_type
-			unit.cell = starts[index]
-			unit.owner = index
-			player.units.append(unit)
 		setup.players.append(player)
 	setup.fog = FogState.new()
 	setup.fog.resize(map.width, map.height, cfg.player_count)
-	# No cities yet. A later ticket adds a source per city with radius
-	# border_radius + city_vision_beyond_border.
-	setup.fog.compute_initial(_unit_sources(setup, cfg.unit_vision))
+	for index in cfg.player_count:
+		for unit_type in cfg.starting_units:
+			if setup.spawn_unit(index, unit_type, starts[index]) == null:
+				push_error("starting %s could not be placed for player %d" % [unit_type, index])
+				return null
 	return setup
-
-
-static func _unit_sources(setup: GameSetup, radius: int) -> Array:
-	var sources: Array = []
-	for player in setup.players:
-		for unit in player.units:
-			sources.append({
-				"player": player.index,
-				"cell": unit.cell,
-				"radius": radius,
-			})
-	return sources
 
 
 static func _place_starts(cfg: GameConfig, map: MapState, seed_value: int) -> Array[Vector2i]:
@@ -143,3 +142,199 @@ func unit_total() -> int:
 	for player in players:
 		count += player.units.size()
 	return count
+
+
+## The only way to create a unit. `pos` is an odd-r offset cell, same as UnitState.cell.
+func spawn_unit(player: int, type: String, pos: Vector2i) -> PlayerState.UnitState:
+	if config == null or not config.units.has(type):
+		return null
+	if player < 0 or player >= players.size():
+		return null
+	if map == null or not map.is_passable(pos, config):
+		return null
+	var unit := PlayerState.UnitState.new()
+	unit.unit_type = type
+	unit.cell = pos
+	unit.owner = player
+	unit.mp = config.unit(type).move
+	if not _can_enter(unit, pos):
+		return null
+	unit.id = _next_unit_id
+	_next_unit_id += 1
+	players[player].units.append(unit)
+	_refresh_fog()
+	return unit
+
+
+func reachable_tiles(unit: PlayerState.UnitState) -> Dictionary:
+	if unit == null or unit.mp <= 0 or config == null:
+		return {}
+	_moving = unit
+	var axial_tiles := Pathfinder.reachable(
+		Hex.offset_to_axial(unit.cell),
+		unit.mp,
+		map.width,
+		map.height,
+		Callable(self, "_enter_cost_axial"),
+		Callable(self, "_blocked_axial"),
+		config.allow_enter_over_budget_if_mp_left,
+	)
+	_moving = null
+	var cells := {}
+	for key in axial_tiles.keys():
+		cells[Hex.axial_to_offset(key as Vector2i)] = axial_tiles[key]
+	return cells
+
+
+func move_unit(unit: PlayerState.UnitState, dest: Vector2i) -> bool:
+	var tiles := reachable_tiles(unit)
+	if not tiles.has(dest):
+		return false
+	unit.cell = dest
+	unit.mp = int(tiles[dest])
+	_refresh_fog()
+	return true
+
+
+func end_turn() -> void:
+	turn += 1
+	for player in players:
+		for unit in player.units:
+			unit.mp = config.unit(unit.unit_type).move
+
+
+func can_found(unit: PlayerState.UnitState) -> String:
+	if unit == null or unit.unit_type != "settler":
+		return REASON_SETTLER
+	if map == null or not map.in_bounds(unit.cell):
+		return REASON_OFF_MAP
+	if map.land_at(unit.cell) == "water":
+		return REASON_WATER
+	var owner := owner_at(unit.cell)
+	if owner != -1 and owner != unit.owner:
+		return REASON_OWNED
+	var axial := Hex.offset_to_axial(unit.cell)
+	for city in cities:
+		if Hex.distance(axial, Hex.offset_to_axial(city.cell)) < config.city_min_distance:
+			return REASON_DISTANCE
+	return ""
+
+
+func found_city(unit: PlayerState.UnitState) -> MapCity:
+	if not can_found(unit).is_empty():
+		return null
+	var city := MapCity.new()
+	city.id = _next_city_id
+	_next_city_id += 1
+	city.player = unit.owner
+	city.cell = unit.cell
+	city.population = 1
+	city.radius = config.border_start_radius
+	city.city_name = _next_city_name(unit.owner)
+	cities.append(city)
+	_claim(city)
+	players[unit.owner].units.erase(unit)
+	_refresh_fog()
+	return city
+
+
+func owner_at(cell: Vector2i) -> int:
+	if not _owners.has(cell):
+		return -1
+	return int(_owners[cell])
+
+
+func owned_cells() -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	for key in _owners.keys():
+		out.append(key as Vector2i)
+	return out
+
+
+func territory_cells(city: MapCity) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	for hex in Hex.disk(Hex.offset_to_axial(city.cell), city.radius):
+		var cell := Hex.axial_to_offset(hex)
+		if owner_at(cell) == city.player:
+			out.append(cell)
+	return out
+
+
+func _refresh_fog() -> void:
+	if fog == null or config == null:
+		return
+	fog.recompute(_vision_sources())
+
+
+func _vision_sources() -> Array:
+	var sources: Array = []
+	for player in players:
+		for unit in player.units:
+			sources.append({
+				"player": player.index,
+				"cell": unit.cell,
+				"radius": config.unit_vision,
+			})
+	for city in cities:
+		sources.append({
+			"player": city.player,
+			"cell": city.cell,
+			"radius": city.radius + config.city_vision_beyond_border,
+		})
+	return sources
+
+
+func _enter_cost_axial(axial: Vector2i) -> int:
+	var cell := Hex.axial_to_offset(axial)
+	if not map.in_bounds(cell):
+		return -1
+	var stats := config.land(map.land_at(cell))
+	if not stats.passable or stats.move_cost < 0:
+		return -1
+	return stats.move_cost
+
+
+func _blocked_axial(axial: Vector2i) -> bool:
+	return not _can_enter(_moving, Hex.axial_to_offset(axial))
+
+
+func _can_enter(unit: PlayerState.UnitState, cell: Vector2i) -> bool:
+	for player in players:
+		for other in player.units:
+			if other == unit or other.cell != cell:
+				continue
+			if other.owner != unit.owner:
+				return false
+			if config.one_military_and_one_civilian_per_tile:
+				var moving_civilian := not config.unit(unit.unit_type).combatant
+				var other_civilian := not config.unit(other.unit_type).combatant
+				if moving_civilian == other_civilian:
+					return false
+	return true
+
+
+func _claim(city: MapCity) -> void:
+	for hex in Hex.disk(Hex.offset_to_axial(city.cell), city.radius):
+		var cell := Hex.axial_to_offset(hex)
+		if not map.in_bounds(cell):
+			continue
+		if _owners.has(cell) and not config.can_claim_owned_tiles:
+			continue
+		if map.land_at(cell) == "water" and not config.borders_can_claim_water:
+			continue
+		_owners[cell] = city.player
+
+
+func _next_city_name(player: int) -> String:
+	var index := 0
+	for city in cities:
+		if city.player == player:
+			index += 1
+	if player < 0 or player >= config.city_names.size():
+		return "City %d" % [index + 1]
+	var names := config.city_names[player] as PackedStringArray
+	if names.is_empty():
+		return "City %d" % [index + 1]
+	if index < names.size():
+		return names[index]
+	return "%s %d" % [names[names.size() - 1], index + 1]

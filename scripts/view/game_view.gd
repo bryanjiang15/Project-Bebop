@@ -2,6 +2,9 @@ extends Node2D
 
 const _TERRAIN_SOURCE := 0
 const _HIGHLIGHT_SOURCE := 1
+const _CLICK_SLOP := 8.0
+const _REACHABLE := Color(0.45, 0.95, 0.55, 0.95)
+const _SELECTED := Color(1, 1, 1, 0.95)
 const _LAND_COLUMN := {
 	"plains": 0,
 	"forest": 1,
@@ -9,7 +12,20 @@ const _LAND_COLUMN := {
 	"water": 3,
 	"volcanic": 4,
 }
+## Pointy-top edges in Hex direction order. Corner 0 is the top vertex.
+const _EDGE: Array = [
+	[1, 2],
+	[0, 1],
+	[5, 0],
+	[4, 5],
+	[3, 4],
+	[2, 3],
+]
+
 const _UNIT_SCENE: PackedScene = preload("res://scenes/actors/unit.tscn")
+const _CITY_SCENE: PackedScene = preload("res://scenes/view/city_marker.tscn")
+const _HIGHLIGHT_SCENE: PackedScene = preload("res://scenes/view/move_highlight.tscn")
+const _BORDER_SCENE: PackedScene = preload("res://scenes/view/border_segment.tscn")
 const _UNIT_ART := {
 	"settler": ["res://assets/art/unit_settler.png", "res://assets/art/unit_settler_mask.png"],
 	"scout": ["res://assets/art/unit_scout.png", "res://assets/art/unit_scout_mask.png"],
@@ -19,20 +35,31 @@ const _UNIT_ART := {
 
 var _config: GameConfig
 var setup: GameSetup
-var _turn: int = 1
 var _tile_size: Vector2i = Vector2i.ZERO
+var _highlight_origin: Vector2 = Vector2.ZERO
 var _hovered: Vector2i = Vector2i(-999999, -999999)
 var _dragging: bool = false
+var _left_down: bool = false
+var _right_down: bool = false
+var _press_pos: Vector2 = Vector2.ZERO
+var _right_press: Vector2 = Vector2.ZERO
+var _selected_id: int = -1
 
 @onready var _camera: Camera2D = %Camera
 @onready var _map: TileMapLayer = %Map
 @onready var _highlight: TileMapLayer = %Highlight
 @onready var _fog: FogOverlay = %Fog
+@onready var _moves: Node2D = %MoveHighlights
+@onready var _borders: Node2D = %Borders
 @onready var _actors: Node2D = %Actors
 @onready var _turn_label: Label = %TurnLabel
 @onready var _tooltip: Label = %Tooltip
 @onready var _tooltip_panel: PanelContainer = %TooltipPanel
 @onready var _menu: PanelContainer = %InGameMenu
+@onready var _selection_title: Label = %SelectionTitle
+@onready var _selection_detail: Label = %SelectionDetail
+@onready var _found_button: Button = %FoundCityButton
+@onready var _found_reason: Label = %FoundCityReason
 
 
 func _ready() -> void:
@@ -43,16 +70,14 @@ func _ready() -> void:
 		push_error("Map is missing its TileSet")
 		return
 	_tile_size = _map.tile_set.tile_size
+	_highlight_origin = _read_texture_origin()
 	setup = GameSetup.start(_config)
 	if setup == null:
 		return
-	_paint_map()
-	_spawn_units()
-	_fog.show_fog(setup, _config, _map)
-	_refresh_turn()
 	_frame_on_human()
 	_tooltip_panel.visible = false
 	_menu.visible = false
+	_refresh_board()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -67,16 +92,45 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("toggle_menu"):
 		_menu.visible = not _menu.visible
 		return
+	if event.is_action_pressed("found_city"):
+		_on_found_city_pressed()
+		return
+	if event.is_action_pressed("end_turn"):
+		if not event.is_echo() and not _menu.visible:
+			_on_end_turn_pressed()
+		return
 	if event is InputEventMouseButton:
 		var button := event as InputEventMouseButton
-		if button.pressed and button.button_index == MOUSE_BUTTON_WHEEL_UP:
+		if button.button_index == MOUSE_BUTTON_WHEEL_UP and button.pressed:
 			_zoom(1)
-		elif button.pressed and button.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+		elif button.button_index == MOUSE_BUTTON_WHEEL_DOWN and button.pressed:
 			_zoom(-1)
-		elif button.button_index == MOUSE_BUTTON_LEFT or button.button_index == MOUSE_BUTTON_MIDDLE:
+		elif button.button_index == MOUSE_BUTTON_LEFT:
+			if button.pressed:
+				_left_down = true
+				_press_pos = button.position
+				_dragging = false
+			else:
+				var clicked := _left_down and not _dragging and _press_pos.distance_to(button.position) <= _CLICK_SLOP
+				_left_down = false
+				_dragging = false
+				if clicked:
+					_select_at_screen(button.position)
+		elif button.button_index == MOUSE_BUTTON_RIGHT:
+			if button.pressed:
+				_right_down = true
+				_right_press = button.position
+			else:
+				var clicked := _right_down and _right_press.distance_to(button.position) <= _CLICK_SLOP
+				_right_down = false
+				if clicked:
+					_move_at_screen(button.position)
+		elif button.button_index == MOUSE_BUTTON_MIDDLE:
 			_dragging = button.pressed
 	elif event is InputEventMouseMotion:
 		var motion := event as InputEventMouseMotion
+		if _left_down and _press_pos.distance_to(motion.position) > _CLICK_SLOP:
+			_dragging = true
 		if _dragging:
 			_camera.position -= motion.relative / _camera.zoom
 			_clamp_camera()
@@ -101,8 +155,23 @@ func _process(delta: float) -> void:
 
 
 func _on_end_turn_pressed() -> void:
-	_turn += 1
+	if setup == null:
+		return
+	setup.end_turn()
 	_refresh_turn()
+	_refresh_selection()
+
+
+func _on_found_city_pressed() -> void:
+	if setup == null or _menu.visible:
+		return
+	var unit := _selected_unit()
+	if unit == null or not setup.can_found(unit).is_empty():
+		_refresh_selection()
+		return
+	setup.found_city(unit)
+	_selected_id = -1
+	_refresh_board()
 
 
 func _on_menu_pressed() -> void:
@@ -117,6 +186,84 @@ func _on_restart_pressed() -> void:
 
 func _on_main_menu_pressed() -> void:
 	get_tree().change_scene_to_file("res://scenes/main_menu.tscn")
+
+
+func _select_at_screen(screen: Vector2) -> void:
+	if _menu.visible:
+		return
+	var cell := _cell_at_screen(screen)
+	var axial := Hex.offset_to_axial(cell)
+	if not Hex.in_map(axial, _config.map_width, _config.map_height):
+		_selected_id = -1
+		_refresh_selection()
+		return
+	var own := _own_unit_at(cell)
+	_selected_id = own.id if own != null else -1
+	_refresh_selection()
+
+
+func _move_at_screen(screen: Vector2) -> void:
+	if _menu.visible:
+		return
+	var unit := _selected_unit()
+	if unit == null:
+		return
+	var cell := _cell_at_screen(screen)
+	if not Hex.in_map(Hex.offset_to_axial(cell), _config.map_width, _config.map_height):
+		return
+	if not setup.reachable_tiles(unit).has(cell):
+		return
+	setup.move_unit(unit, cell)
+	_refresh_board()
+
+
+func _refresh_board() -> void:
+	_paint_map()
+	_fog.show_fog(setup, _config, _map)
+	_refresh_actors()
+	_refresh_borders()
+	_refresh_turn()
+	_refresh_selection()
+
+
+func _refresh_turn() -> void:
+	_turn_label.text = "%d / %d" % [setup.turn, _config.turn_limit]
+
+
+func _refresh_selection() -> void:
+	var unit := _selected_unit()
+	if unit == null:
+		_selection_title.text = "No unit selected"
+		_selection_detail.text = ""
+		_found_button.disabled = true
+		_found_reason.text = GameSetup.REASON_SETTLER
+	else:
+		var stats := _config.unit(unit.unit_type)
+		_selection_title.text = unit.unit_type.capitalize()
+		_selection_detail.text = "Moves %d / %d" % [unit.mp, stats.move]
+		var reason := setup.can_found(unit)
+		_found_button.disabled = not reason.is_empty()
+		_found_reason.text = reason
+	_rebuild_move_highlights()
+
+
+func _selected_unit() -> PlayerState.UnitState:
+	var human := setup.players[_config.human_index]
+	for unit in human.units:
+		if unit.id == _selected_id:
+			return unit
+	return null
+
+
+func _own_unit_at(cell: Vector2i) -> PlayerState.UnitState:
+	var fallback: PlayerState.UnitState = null
+	for unit in setup.players[_config.human_index].units:
+		if unit.cell != cell:
+			continue
+		if not _config.unit(unit.unit_type).combatant:
+			return unit
+		fallback = unit
+	return fallback
 
 
 func _paint_map() -> void:
@@ -135,30 +282,109 @@ func _paint_map() -> void:
 			_map.set_cell(cell, _TERRAIN_SOURCE, atlas)
 
 
-func _spawn_units() -> void:
-	for child in _actors.get_children():
-		_actors.remove_child(child)
-		child.free()
+func _refresh_actors() -> void:
+	_clear(_actors)
 	var viewer := _config.human_index
+	for city in setup.cities:
+		if city.player != viewer and setup.fog.sight(viewer, city.cell) == FogState.Sight.UNREVEALED:
+			continue
+		var marker := _CITY_SCENE.instantiate() as Node2D
+		marker.name = "City_%d" % city.id
+		marker.position = _map.map_to_local(city.cell)
+		var sprite := marker.get_node("Sprite") as Sprite2D
+		var mat := (sprite.material as ShaderMaterial).duplicate() as ShaderMaterial
+		mat.set_shader_parameter("team_color", Color.html(setup.players[city.player].color))
+		sprite.material = mat
+		(marker.get_node("Name") as Label).text = city.city_name
+		_actors.add_child(marker)
 	for player in setup.players:
-		var stack := 0
+		var stacks := {}
 		for unit in player.units:
 			if not setup.fog.unit_visible(viewer, unit.cell):
 				continue
 			var art: Array = _UNIT_ART[unit.unit_type]
 			var sprite := _UNIT_SCENE.instantiate() as Sprite2D
+			sprite.name = "Unit_%d" % unit.id
 			sprite.texture = load(str(art[0]))
 			var mat := (sprite.material as ShaderMaterial).duplicate() as ShaderMaterial
 			mat.set_shader_parameter("team_mask", load(str(art[1])))
 			mat.set_shader_parameter("team_color", Color.html(player.color))
 			sprite.material = mat
+			var stack := int(stacks.get(unit.cell, 0))
 			sprite.position = _map.map_to_local(unit.cell) + Vector2(16, 10) * float(stack)
 			_actors.add_child(sprite)
-			stack += 1
+			stacks[unit.cell] = stack + 1
 
 
-func _refresh_turn() -> void:
-	_turn_label.text = "%d / %d" % [_turn, _config.turn_limit]
+func _rebuild_move_highlights() -> void:
+	_clear(_moves)
+	var unit := _selected_unit()
+	if unit == null:
+		return
+	_add_highlight(unit.cell, _SELECTED)
+	for cell in setup.reachable_tiles(unit).keys():
+		_add_highlight(cell as Vector2i, _REACHABLE)
+
+
+func _add_highlight(cell: Vector2i, tint: Color) -> void:
+	var marker := _HIGHLIGHT_SCENE.instantiate() as Sprite2D
+	marker.position = _map.map_to_local(cell)
+	marker.offset = _highlight_origin
+	marker.modulate = tint
+	_moves.add_child(marker)
+
+
+func _refresh_borders() -> void:
+	_clear(_borders)
+	var corners := _face_corners()
+	var viewer := _config.human_index
+	for cell in setup.owned_cells():
+		if setup.fog.sight(viewer, cell) == FogState.Sight.UNREVEALED:
+			continue
+		var owner := setup.owner_at(cell)
+		var color := Color.html(setup.players[owner].color)
+		var center := _map.map_to_local(cell)
+		var axial := Hex.offset_to_axial(cell)
+		for dir in 6:
+			var neighbor := Hex.axial_to_offset(Hex.neighbor(axial, dir))
+			var neighbor_owner := -1
+			if setup.map.in_bounds(neighbor):
+				neighbor_owner = setup.owner_at(neighbor)
+			if neighbor_owner == owner:
+				continue
+			var segment := _BORDER_SCENE.instantiate() as Line2D
+			var pair: Array = _EDGE[dir]
+			segment.points = PackedVector2Array([
+				center + corners[int(pair[0])],
+				center + corners[int(pair[1])],
+			])
+			segment.default_color = color
+			_borders.add_child(segment)
+
+
+func _face_corners() -> PackedVector2Array:
+	var w := float(_tile_size.x) * 0.5
+	var h := float(_tile_size.y) * 0.5
+	return PackedVector2Array([
+		Vector2(0, -h),
+		Vector2(w, -h * 0.5),
+		Vector2(w, h * 0.5),
+		Vector2(0, h),
+		Vector2(-w, h * 0.5),
+		Vector2(-w, -h * 0.5),
+	])
+
+
+func _read_texture_origin() -> Vector2:
+	var source := _map.tile_set.get_source(_TERRAIN_SOURCE) as TileSetAtlasSource
+	var data := source.get_tile_data(Vector2i.ZERO, 0)
+	return Vector2(data.texture_origin)
+
+
+func _clear(node: Node) -> void:
+	for child in node.get_children():
+		node.remove_child(child)
+		child.free()
 
 
 func _frame_on_human() -> void:
@@ -231,3 +457,8 @@ func _clear_hover() -> void:
 	_highlight.clear()
 	_tooltip.text = ""
 	_tooltip_panel.visible = false
+
+
+func _cell_at_screen(screen: Vector2) -> Vector2i:
+	var world: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * screen
+	return _map.local_to_map(_map.to_local(world))

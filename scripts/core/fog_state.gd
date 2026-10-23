@@ -3,7 +3,7 @@ extends RefCounted
 
 ## Per-player sight. The AI will read this same state. The view only draws the human's copy.
 ## UNREVEALED has never been seen. REVEALED was seen and is not currently in vision.
-## VISIBLE is inside a unit disk (or, later, a city disk) right now.
+## VISIBLE is inside a unit disk or a city disk right now.
 
 enum Sight { UNREVEALED, REVEALED, VISIBLE }
 
