@@ -47,6 +47,25 @@ func _run() -> void:
 	if not await _save("/opt/cursor/artifacts/ticket8_move_highlight.png"):
 		return
 	print("HIGHLIGHTS ", highlights, " SEED ", setup.seed_used, " CELL ", cell)
+	var mover: PlayerState.UnitState = null
+	for candidate in setup.players[setup.human_index].units:
+		if candidate.unit_type == "settler":
+			mover = candidate
+			break
+	var dest: Vector2i = setup.reachable_tiles(mover).keys()[0]
+	_click(game, dest, MOUSE_BUTTON_RIGHT)
+	if setup.human_settler_cell() != dest:
+		print("FAIL right click move, still ", setup.human_settler_cell())
+		quit(1)
+		return
+	cell = dest
+	_frame(game, cell)
+	for _frame in 4:
+		await process_frame
+	await RenderingServer.frame_post_draw
+	if not await _save("/opt/cursor/artifacts/ticket8_after_move.png"):
+		return
+	print("MOVED ", cell)
 	var found := game.get_node("%FoundCityButton") as Button
 	if found.disabled:
 		print("FAIL Found City disabled: ", (game.get_node("%FoundCityReason") as Label).text)
@@ -93,18 +112,18 @@ func _frame(game: Node, cell: Vector2i) -> void:
 	camera.position = map.map_to_local(cell) + Vector2(0, 70)
 
 
-func _click(game: Node, cell: Vector2i) -> void:
+func _click(game: Node, cell: Vector2i, button_index: int = MOUSE_BUTTON_LEFT) -> void:
 	var map := game.get_node("%Map") as TileMapLayer
 	var world: Vector2 = map.to_global(map.map_to_local(cell))
 	var screen: Vector2 = game.get_viewport().get_canvas_transform() * world
 	var press := InputEventMouseButton.new()
-	press.button_index = MOUSE_BUTTON_LEFT
+	press.button_index = button_index
 	press.pressed = true
 	press.position = screen
 	press.global_position = screen
 	game._unhandled_input(press)
 	var release := InputEventMouseButton.new()
-	release.button_index = MOUSE_BUTTON_LEFT
+	release.button_index = button_index
 	release.pressed = false
 	release.position = screen
 	release.global_position = screen

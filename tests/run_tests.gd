@@ -19,6 +19,7 @@ func _init() -> void:
 	_test_pathfinding()
 	_test_movement_and_fog()
 	_test_found_city()
+	_test_end_turn_key()
 	print("\nPassed: %d  Failed: %d" % [_passed, _failed])
 	quit(1 if _failed > 0 else 0)
 
@@ -529,6 +530,16 @@ func _test_found_city() -> void:
 	var first := game.found_city(game.spawn_unit(0, "settler", Vector2i(2, 2)))
 	var later := game.found_city(game.spawn_unit(0, "settler", _step(Vector2i(2, 2), Hex.EAST, game.config.city_min_distance)))
 	_ok(first.city_name == "Only" and later.city_name == "Only 2", "names past the list stay unique")
+
+
+func _test_end_turn_key() -> void:
+	print("[end turn key]")
+	_ok(InputMap.has_action("end_turn"), "end_turn action exists")
+	var bound := false
+	for event in InputMap.action_get_events("end_turn"):
+		if event is InputEventKey and (event as InputEventKey).physical_keycode == KEY_ENTER:
+			bound = true
+	_ok(bound, "Enter is bound to end_turn")
 
 
 func _same_setup(a: GameSetup, b: GameSetup) -> bool:

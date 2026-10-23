@@ -64,7 +64,7 @@ The camera starts centered on the human settler.
 
 `Pathfinder.reachable` searches axial hexes and returns movement points left on arrival. The origin is omitted. `GameSetup.reachable_tiles` converts that result to offset cells. The cost is the land of the tile entered (`land.*.move_cost`). Water is impassable. When `movement.allow_enter_over_budget_if_mp_left` is true and any points remain, a costlier tile can still be entered; arrival leaves 0 points and the search does not continue. Another player's unit blocks the tile. `units.one_military_and_one_civilian_per_tile` allows one combatant and one non-combatant together and rejects a second of the same kind.
 
-A left click selects the human unit on that tile. Reachable tiles and the selected tile are instances of `scenes/view/move_highlight.tscn`, using `tile_highlight.png`. The sprite offset is read from the TileSet at runtime. Click a highlighted tile to move. A left drag farther than 8 px still pans. Middle drag, arrow keys, and the wheel are unchanged. `End Turn` increments one global turn and refills every unit from its config move. Rivals do not act. Fog recomputes after each move.
+A left click selects the human unit on that tile, or clears the selection when the tile has none. Reachable tiles and the selected tile are instances of `scenes/view/move_highlight.tscn`, using `tile_highlight.png`. The sprite offset is read from the TileSet at runtime. A right click on a highlighted tile moves the selected unit. A left click never moves. A left drag farther than 8 px still pans. Middle drag, arrow keys, and the wheel are unchanged. `End Turn` and the Enter key (`end_turn`) increment one global turn and refill every unit from its config move. Enter does nothing while the in-game menu is open, and a focused control still receives Enter first. Rivals do not act. Fog recomputes after each move.
 
 `%FoundCityButton` reads **Found City (B)**. The `found_city` input action is B. `%FoundCityReason` shows why the button is disabled:
 
@@ -93,7 +93,7 @@ godot --headless --path . --script res://tests/smoke_game.gd
 
 `expect_missing_key.gd` must exit non-zero and report `game_config.json missing key: players.count`. The others must exit 0. CI greps every log for `SCRIPT ERROR` and `ERROR:` (`set -o pipefail`) except the missing-key step, which requires that specific error.
 
-Play the game with `godot --path .`. Click a settler, then click a highlighted tile to move it. B or **Found City** founds a city on that tile. F9 opens Victory, F10 opens Defeat, Escape toggles the in-game menu.
+Play the game with `godot --path .`. Left-click a settler, then right-click a highlighted tile to move it. B or **Found City** founds a city on that tile. Enter or **End Turn** ends the turn. F9 opens Victory, F10 opens Defeat, Escape toggles the in-game menu.
 
 ## Rules for agents
 

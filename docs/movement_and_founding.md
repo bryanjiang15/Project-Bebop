@@ -4,7 +4,7 @@ Engineering record for the settler-movement and founding rules. Design still liv
 
 ## Who acts
 
-Player ids are `0 .. players.count - 1`. The human is `players.human_index` (0). **End Turn** advances one global turn and refills every unit's movement from `units.<type>.move`. Rivals do not take a turn.
+Player ids are `0 .. players.count - 1`. The human is `players.human_index` (0). **End Turn** and the Enter key advance one global turn and refill every unit's movement from `units.<type>.move`. Enter does nothing while the in-game menu is open. Rivals do not take a turn.
 
 There is no starting warrior. `players.starting_units` stays `["settler"]`. Ticket 14 appends `warrior`.
 
@@ -20,7 +20,7 @@ A tile holds at most one combatant and one non-combatant when `units.one_militar
 
 The cost is the land of the tile being entered. Water (`passable` false, `move_cost` -1) is impassable. When `movement.allow_enter_over_budget_if_mp_left` is true and the unit still has points, it may enter a more expensive tile, arrives with 0, and does not keep searching from there.
 
-A left click selects the human unit on that cell. Highlight sprites mark the selected cell and every reachable cell. A click on a reachable cell moves. A left drag farther than 8 px pans, as do middle drag and the arrow keys. Founding does not spend movement points. Fog recomputes after every move.
+A left click selects the human unit on that cell, or clears the selection when the cell is empty. Highlight sprites mark the selected cell and every reachable cell. A right click on a reachable cell moves. A left click does not move. A left drag farther than 8 px pans, as do middle drag and the arrow keys. Founding does not spend movement points. Fog recomputes after every move.
 
 ## Founding
 

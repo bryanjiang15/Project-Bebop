@@ -40,7 +40,9 @@ var _highlight_origin: Vector2 = Vector2.ZERO
 var _hovered: Vector2i = Vector2i(-999999, -999999)
 var _dragging: bool = false
 var _left_down: bool = false
+var _right_down: bool = false
 var _press_pos: Vector2 = Vector2.ZERO
+var _right_press: Vector2 = Vector2.ZERO
 var _selected_id: int = -1
 
 @onready var _camera: Camera2D = %Camera
@@ -93,6 +95,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("found_city"):
 		_on_found_city_pressed()
 		return
+	if event.is_action_pressed("end_turn"):
+		if not event.is_echo() and not _menu.visible:
+			_on_end_turn_pressed()
+		return
 	if event is InputEventMouseButton:
 		var button := event as InputEventMouseButton
 		if button.button_index == MOUSE_BUTTON_WHEEL_UP and button.pressed:
@@ -109,7 +115,16 @@ func _unhandled_input(event: InputEvent) -> void:
 				_left_down = false
 				_dragging = false
 				if clicked:
-					_click_screen(button.position)
+					_select_at_screen(button.position)
+		elif button.button_index == MOUSE_BUTTON_RIGHT:
+			if button.pressed:
+				_right_down = true
+				_right_press = button.position
+			else:
+				var clicked := _right_down and _right_press.distance_to(button.position) <= _CLICK_SLOP
+				_right_down = false
+				if clicked:
+					_move_at_screen(button.position)
 		elif button.button_index == MOUSE_BUTTON_MIDDLE:
 			_dragging = button.pressed
 	elif event is InputEventMouseMotion:
@@ -173,7 +188,7 @@ func _on_main_menu_pressed() -> void:
 	get_tree().change_scene_to_file("res://scenes/main_menu.tscn")
 
 
-func _click_screen(screen: Vector2) -> void:
+func _select_at_screen(screen: Vector2) -> void:
 	if _menu.visible:
 		return
 	var cell := _cell_at_screen(screen)
@@ -182,14 +197,24 @@ func _click_screen(screen: Vector2) -> void:
 		_selected_id = -1
 		_refresh_selection()
 		return
-	var selected := _selected_unit()
-	if selected != null and setup.reachable_tiles(selected).has(cell):
-		setup.move_unit(selected, cell)
-		_refresh_board()
-		return
 	var own := _own_unit_at(cell)
 	_selected_id = own.id if own != null else -1
 	_refresh_selection()
+
+
+func _move_at_screen(screen: Vector2) -> void:
+	if _menu.visible:
+		return
+	var unit := _selected_unit()
+	if unit == null:
+		return
+	var cell := _cell_at_screen(screen)
+	if not Hex.in_map(Hex.offset_to_axial(cell), _config.map_width, _config.map_height):
+		return
+	if not setup.reachable_tiles(unit).has(cell):
+		return
+	setup.move_unit(unit, cell)
+	_refresh_board()
 
 
 func _refresh_board() -> void:
