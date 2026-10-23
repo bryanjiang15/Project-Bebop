@@ -32,6 +32,8 @@ func _run() -> void:
 		return
 	if not _end_turn_with_enter(game):
 		return
+	if not _train_scout(game):
+		return
 	(game.get_node("%MenuButton") as Button).pressed.emit()
 	(game.get_node("%RestartButton") as Button).pressed.emit()
 	game = await _wait_for("res://scripts/view/game_view.gd")
@@ -200,6 +202,78 @@ func _end_turn_with_enter(game: Node) -> bool:
 		quit(1)
 		return false
 	print("PASS enter ends turn ", turn)
+	return true
+
+
+func _train_scout(game: Node) -> bool:
+	var setup := game.get("setup") as GameSetup
+	if setup.cities.is_empty():
+		print("FAIL no city to open")
+		quit(1)
+		return false
+	var city: MapCity = setup.cities[0]
+	_click_cell(game, city.cell)
+	var panel := game.get_node("%CityPanel") as PanelContainer
+	if not panel.visible:
+		print("FAIL city panel hidden")
+		quit(1)
+		return false
+	var food := (game.get_node("%CityFood") as Label).text
+	var prod := (game.get_node("%CityProduction") as Label).text
+	var mana := (game.get_node("%CityMana") as Label).text
+	var growth := (game.get_node("%GrowthLabel") as Label).text
+	var border := (game.get_node("%BorderLabel") as Label).text
+	var yields: Dictionary = setup.city_yields(city)
+	if food != "Food %d" % int(yields["food"]) or prod != "Production %d" % int(yields["production"]) or mana != "Mana %d" % int(yields["mana"]):
+		print("FAIL panel ", food, " ", prod, " ", mana, " core ", yields)
+		quit(1)
+		return false
+	if not growth.contains("/") or not border.begins_with("Radius"):
+		print("FAIL growth or border '", growth, "' '", border, "'")
+		quit(1)
+		return false
+	print("PASS city panel ", food, " ", prod, " ", mana, " ", growth, " ", border)
+	var tiles_before := setup.territory_cells(city).size()
+	var pop_before := city.population
+	var stored_before := city.food_stored
+	(game.get_node("%BuildScout") as Button).pressed.emit()
+	if city.queue.size() != 1 or city.queue[0].item_id != "scout":
+		print("FAIL scout queue ", city.queue.size())
+		quit(1)
+		return false
+	if game.get_node("%QueueList").get_child_count() != 1:
+		print("FAIL queue row missing")
+		quit(1)
+		return false
+	print("PASS enqueued scout")
+	var trained := 0
+	for _turn in 40:
+		trained = 0
+		for unit in setup.players[setup.human_index].units:
+			if unit.unit_type == "scout":
+				trained += 1
+		if trained == 1:
+			break
+		(game.get_node("%EndTurnButton") as Button).pressed.emit()
+	if trained != 1:
+		print("FAIL scout was not trained by turn ", setup.turn)
+		quit(1)
+		return false
+	var grew := city.population != pop_before or city.food_stored != stored_before
+	var expanded := setup.territory_cells(city).size() > tiles_before
+	if not grew and not expanded:
+		print("FAIL no growth or border change seed ", setup.seed_used)
+		quit(1)
+		return false
+	var scout_sprite := false
+	for child in game.get_node("%Actors").get_children():
+		if str(child.name).begins_with("Unit_"):
+			scout_sprite = true
+	if not scout_sprite:
+		print("FAIL trained scout has no sprite")
+		quit(1)
+		return false
+	print("PASS trained scout pop ", city.population, " food ", city.food_stored, " tiles ", setup.territory_cells(city).size())
 	return true
 
 

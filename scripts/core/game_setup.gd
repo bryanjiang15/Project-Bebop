@@ -11,6 +11,13 @@ const REASON_WATER := "Cannot found on water"
 const REASON_OWNED := "Cannot found on another player's tile"
 const REASON_DISTANCE := "Too close to another city"
 const REASON_OFF_MAP := "Cannot found off the map"
+const REASON_CITY := "Select a city"
+const REASON_UNKNOWN := "Unknown item"
+const REASON_CENTER := "Cannot build on the city center"
+const REASON_BORDERS := "Not in city borders"
+const REASON_OCCUPIED := "Tile already has a building"
+const REASON_BUILD_OFF_MAP := "Cannot build off the map"
+const NO_CELL := Vector2i(-999999, -999999)
 
 var config: GameConfig
 var seed_used: int
@@ -21,6 +28,7 @@ var cities: Array[MapCity] = []
 var fog: FogState
 var human_index: int
 var _owners: Dictionary = {}
+var _city_tiles: Dictionary = {}
 var _next_unit_id: int = 1
 var _next_city_id: int = 1
 var _moving: PlayerState.UnitState
@@ -197,10 +205,16 @@ func move_unit(unit: PlayerState.UnitState, dest: Vector2i) -> bool:
 
 
 func end_turn() -> void:
+	# One global clock: every city resolves here. Rivals have no turn of their own yet.
+	# Growth uses this turn's yields, then production (a settler sees the post-growth pop),
+	# then the border clock. The turn counter advances after that.
+	for city in cities.duplicate():
+		_resolve_city(city)
 	turn += 1
 	for player in players:
 		for unit in player.units:
 			unit.mp = config.unit(unit.unit_type).move
+	_refresh_fog()
 
 
 func can_found(unit: PlayerState.UnitState) -> String:
@@ -253,11 +267,96 @@ func owned_cells() -> Array[Vector2i]:
 
 func territory_cells(city: MapCity) -> Array[Vector2i]:
 	var out: Array[Vector2i] = []
-	for hex in Hex.disk(Hex.offset_to_axial(city.cell), city.radius):
-		var cell := Hex.axial_to_offset(hex)
-		if owner_at(cell) == city.player:
+	if city == null:
+		return out
+	for key in _city_tiles.keys():
+		if int(_city_tiles[key]) == city.id:
+			out.append(key as Vector2i)
+	return out
+
+
+func city_at_cell(cell: Vector2i) -> MapCity:
+	for city in cities:
+		if city.cell == cell:
+			return city
+	return null
+
+
+func city_by_id(city_id: int) -> MapCity:
+	for city in cities:
+		if city.id == city_id:
+			return city
+	return null
+
+
+func city_yields(city: MapCity) -> Dictionary:
+	return CityRules.yields(config, map, city, territory_cells(city))
+
+
+func turns_until_border(city: MapCity) -> int:
+	if city == null or _border_choices(city).is_empty():
+		return -1
+	return config.border_turns_per_growth - city.border_turns
+
+
+func placement_tiles(city: MapCity, item_id: String) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	if city == null:
+		return out
+	for cell in territory_cells(city):
+		if placement_reason(city, item_id, cell).is_empty():
 			out.append(cell)
 	return out
+
+
+func placement_reason(city: MapCity, item_id: String, cell: Vector2i, ignore: MapCity.Item = null) -> String:
+	if city == null:
+		return REASON_CITY
+	if not CityRules.is_building(item_id):
+		return REASON_UNKNOWN
+	if map == null or not map.in_bounds(cell):
+		return REASON_BUILD_OFF_MAP
+	if config.buildings_not_on_city_center and cell == city.cell:
+		return REASON_CENTER
+	if int(_city_tiles.get(cell, -1)) != city.id:
+		return REASON_BORDERS
+	if config.one_building_per_tile and _tile_reserved(cell, ignore):
+		return REASON_OCCUPIED
+	return ""
+
+
+func enqueue(city: MapCity, item_id: String, cell: Vector2i = NO_CELL) -> String:
+	if city == null:
+		return REASON_CITY
+	var reason := _enqueue_reason(city, item_id, cell)
+	if not reason.is_empty():
+		return reason
+	var item := MapCity.Item.new()
+	item.item_id = item_id
+	item.is_building = CityRules.is_building(item_id)
+	if item.is_building:
+		item.cell = cell
+	city.queue.append(item)
+	return ""
+
+
+func cancel_queue(city: MapCity, index: int) -> void:
+	if city == null or index < 0 or index >= city.queue.size():
+		return
+	if index == 0:
+		city.production_stored = 0
+	city.queue.remove_at(index)
+
+
+func move_queue(city: MapCity, index: int, delta: int) -> void:
+	if city == null:
+		return
+	var next := index + delta
+	if index < 0 or next < 0 or index >= city.queue.size() or next >= city.queue.size():
+		return
+	var item: MapCity.Item = city.queue[index]
+	city.queue.remove_at(index)
+	city.queue.insert(next, item)
 
 
 func _refresh_fog() -> void:
@@ -315,14 +414,165 @@ func _can_enter(unit: PlayerState.UnitState, cell: Vector2i) -> bool:
 
 func _claim(city: MapCity) -> void:
 	for hex in Hex.disk(Hex.offset_to_axial(city.cell), city.radius):
-		var cell := Hex.axial_to_offset(hex)
-		if not map.in_bounds(cell):
+		_claim_cell(city, Hex.axial_to_offset(hex))
+
+
+func _claim_cell(city: MapCity, cell: Vector2i) -> void:
+	if map == null or not map.in_bounds(cell):
+		return
+	if _owners.has(cell) and not config.can_claim_owned_tiles:
+		return
+	if map.land_at(cell) == "water" and not config.borders_can_claim_water:
+		return
+	_owners[cell] = city.player
+	_city_tiles[cell] = city.id
+
+
+func _resolve_city(city: MapCity) -> void:
+	var snapshot: Dictionary = city_yields(city)
+	CityRules.apply_growth(config, city, int(snapshot["food"]))
+	_apply_production(city, int(snapshot["production"]))
+	_expand_borders(city)
+
+
+func _apply_production(city: MapCity, production: int) -> void:
+	if city.queue.is_empty():
+		city.production_stored = 0
+		return
+	city.production_stored += production
+	var guard := 0
+	while not city.queue.is_empty() and guard < 32:
+		guard += 1
+		var item: MapCity.Item = city.queue[0]
+		var cost := CityRules.item_cost(config, item.item_id)
+		if cost < 0:
+			city.queue.pop_front()
 			continue
-		if _owners.has(cell) and not config.can_claim_owned_tiles:
+		if not _can_finish(city, item):
+			if cost > 0:
+				city.production_stored = mini(city.production_stored, cost)
+			return
+		if cost > 0 and city.production_stored < cost:
+			return
+		if cost > 0:
+			city.production_stored -= cost
+		if not _finish_item(city, item):
+			city.production_stored += cost
+			if cost > 0:
+				city.production_stored = mini(city.production_stored, cost)
+			return
+		city.queue.pop_front()
+
+
+func _can_finish(city: MapCity, item: MapCity.Item) -> bool:
+	if item.is_building:
+		return placement_reason(city, item.item_id, item.cell, item).is_empty()
+	if not config.units.has(item.item_id):
+		return false
+	var stats := config.unit(item.item_id)
+	if stats.min_city_size > 0 and city.population < stats.min_city_size:
+		return false
+	if config.settler_population_taken_when_finished and stats.population_cost > 0:
+		if city.population - stats.population_cost < config.starve_population_min:
+			return false
+	return _spawn_cell(city, item.item_id) != NO_CELL
+
+
+func _finish_item(city: MapCity, item: MapCity.Item) -> bool:
+	if item.is_building:
+		if not placement_reason(city, item.item_id, item.cell, item).is_empty():
+			return false
+		var building := MapCity.Building.new()
+		building.kind = item.item_id
+		building.cell = item.cell
+		city.buildings.append(building)
+		return true
+	var dest := _spawn_cell(city, item.item_id)
+	if dest == NO_CELL:
+		return false
+	var stats := config.unit(item.item_id)
+	var spent := 0
+	if config.settler_population_taken_when_finished and stats.population_cost > 0:
+		spent = stats.population_cost
+		city.population -= spent
+	var unit := spawn_unit(city.player, item.item_id, dest)
+	if unit == null:
+		city.population += spent
+		return false
+	return true
+
+
+func _spawn_cell(city: MapCity, type: String) -> Vector2i:
+	if config.spawn_on_city_center and _can_spawn_at(city.player, type, city.cell):
+		return city.cell
+	if not config.spawn_nearest_free_if_blocked:
+		return NO_CELL
+	var tiles := territory_cells(city)
+	var center := city.cell
+	tiles.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
+		return CityRules.prefer_near(a, b, center)
+	)
+	for cell in tiles:
+		if cell == center:
 			continue
-		if map.land_at(cell) == "water" and not config.borders_can_claim_water:
-			continue
-		_owners[cell] = city.player
+		if _can_spawn_at(city.player, type, cell):
+			return cell
+	return NO_CELL
+
+
+func _can_spawn_at(player: int, type: String, cell: Vector2i) -> bool:
+	if config == null or map == null or not config.units.has(type):
+		return false
+	if not map.is_passable(cell, config):
+		return false
+	var ghost := PlayerState.UnitState.new()
+	ghost.unit_type = type
+	ghost.owner = player
+	ghost.cell = cell
+	return _can_enter(ghost, cell)
+
+
+func _expand_borders(city: MapCity) -> void:
+	city.border_turns += 1
+	if city.border_turns < config.border_turns_per_growth:
+		return
+	city.border_turns = 0
+	var picks := _border_choices(city)
+	if picks.is_empty():
+		return
+	var cell := picks[0]
+	_claim_cell(city, cell)
+	var dist := Hex.distance(Hex.offset_to_axial(city.cell), Hex.offset_to_axial(cell))
+	if dist > city.radius:
+		city.radius = mini(dist, config.border_max_radius)
+
+
+func _border_choices(city: MapCity) -> Array[Vector2i]:
+	return CityRules.border_candidates(config, map, city, territory_cells(city), Callable(self, "owner_at"))
+
+
+func _enqueue_reason(city: MapCity, item_id: String, cell: Vector2i) -> String:
+	if CityRules.is_building(item_id):
+		return placement_reason(city, item_id, cell)
+	if not config.units.has(item_id):
+		return REASON_UNKNOWN
+	var stats := config.unit(item_id)
+	if stats.min_city_size > 0 and city.population < stats.min_city_size:
+		return "City must be size %d+" % stats.min_city_size
+	return ""
+
+
+func _tile_reserved(cell: Vector2i, ignore: MapCity.Item = null) -> bool:
+	for city in cities:
+		for building in city.buildings:
+			if building.cell == cell:
+				return true
+		for item in city.queue:
+			if item == ignore:
+				continue
+			if item.is_building and item.cell == cell:
+				return true
+	return false
 
 
 func _next_city_name(player: int) -> String:

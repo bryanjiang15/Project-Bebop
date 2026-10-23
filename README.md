@@ -1,6 +1,6 @@
 # Project Bebop
 
-Turn-based terraforming 4X. This tree is the Godot 4.7 prototype: main menu, a seeded isometric hex map, fog of war, settler movement, city founding, victory and defeat placeholders, and one config file. Spells, production, combat, and AI come in later tickets.
+Turn-based terraforming 4X. This tree is the Godot 4.7 prototype: main menu, a seeded isometric hex map, fog of war, settler movement, city founding, city yields, growth, borders, and a production queue, plus victory and defeat placeholders, and one config file. Spells, combat, and AI come in later tickets.
 
 Design sources, and the note that Notion wins over these copies, are in `docs/`.
 
@@ -12,11 +12,11 @@ Install [Godot 4.7 stable](https://github.com/godotengine/godot/releases/tag/4.7
 godot --path .
 ```
 
-The main scene is the main menu. **New Game** generates a hex map, three players, and a starting settler for each, then opens the map centered on the human settler. The top bar shows the turn. **End Turn** (or Enter) increments it and refills movement. Enter does nothing while the in-game menu is open. **Menu** has **Restart** (reloads config and starts another game) and **Main Menu**. Left-click the settler, then right-click a highlighted tile to move. **Found City** (or B) founds a city on that tile and removes the settler. The button stays disabled, with a reason, when the tile is water, too close to a city, or owned by someone else.
+The main scene is the main menu. **New Game** generates a hex map, three players, and a starting settler for each, then opens the map centered on the human settler. The top bar shows the turn. **End Turn** (or Enter) increments it, refills movement, and resolves every city's growth, production, and border claim. Enter does nothing while the in-game menu is open. **Menu** has **Restart** (reloads config and starts another game) and **Main Menu**. Left-click the settler, then right-click a highlighted tile to move. **Found City** (or B) founds a city on that tile and removes the settler. The button stays disabled, with a reason, when the tile is water, too close to a city, or owned by someone else. Left-click the city to open its panel. Click a unit or building to queue it. A building then needs a click on a highlighted tile inside the borders, not the city center.
 
 | Input | Action |
 | --- | --- |
-| Left click | Select the human unit on that tile |
+| Left click | Select the human unit on that tile. Click a city to open its panel. If both are on the tile, the first click selects the unit and the next selects the city |
 | Right click | Move the selected unit onto a highlighted tile |
 | Left drag or middle drag | Pan |
 | Arrow keys | Pan |

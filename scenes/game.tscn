@@ -1,4 +1,4 @@
-[gd_scene load_steps=7 format=3]
+[gd_scene load_steps=9 format=3]
 
 [ext_resource type="Script" path="res://scripts/view/game_view.gd" id="1_game"]
 [ext_resource type="TileSet" path="res://assets/art/bebop_tileset.tres" id="2_tiles"]
@@ -22,6 +22,20 @@ corner_radius_top_left = 4
 corner_radius_top_right = 4
 corner_radius_bottom_right = 4
 corner_radius_bottom_left = 4
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_growth_bg"]
+bg_color = Color(0.06, 0.07, 0.09, 1)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_growth_fill"]
+bg_color = Color(0.42, 0.75, 0.38, 1)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
 
 [node name="Game" type="Node2D"]
 script = ExtResource("1_game")
@@ -194,8 +208,186 @@ unique_name_in_owner = true
 layout_mode = 2
 text = "Main Menu"
 
+[node name="CityPanel" type="PanelContainer" parent="UI"]
+unique_name_in_owner = true
+visible = false
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -468.0
+offset_top = -580.0
+offset_right = -16.0
+offset_bottom = -16.0
+grow_horizontal = 0
+grow_vertical = 0
+theme_override_styles/panel = SubResource("StyleBoxFlat_bar")
+
+[node name="Column" type="VBoxContainer" parent="UI/CityPanel"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="CityName" type="Label" parent="UI/CityPanel/Column"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.96, 0.95, 0.9, 1)
+theme_override_font_sizes/font_size = 22
+text = "City"
+
+[node name="YieldRow" type="HBoxContainer" parent="UI/CityPanel/Column"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="CityFood" type="Label" parent="UI/CityPanel/Column/YieldRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.62, 0.86, 0.55, 1)
+theme_override_font_sizes/font_size = 18
+text = "Food 0"
+
+[node name="CityProduction" type="Label" parent="UI/CityPanel/Column/YieldRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.78, 0.42, 1)
+theme_override_font_sizes/font_size = 18
+text = "Production 0"
+
+[node name="CityMana" type="Label" parent="UI/CityPanel/Column/YieldRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.55, 0.75, 0.98, 1)
+theme_override_font_sizes/font_size = 18
+text = "Mana 0"
+
+[node name="GrowthBar" type="ProgressBar" parent="UI/CityPanel/Column"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 18)
+layout_mode = 2
+theme_override_styles/background = SubResource("StyleBoxFlat_growth_bg")
+theme_override_styles/fill = SubResource("StyleBoxFlat_growth_fill")
+max_value = 16.0
+show_percentage = false
+
+[node name="GrowthLabel" type="Label" parent="UI/CityPanel/Column"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.78, 0.78, 0.74, 1)
+theme_override_font_sizes/font_size = 16
+text = "Growth 0 / 16 (+0)"
+
+[node name="BorderLabel" type="Label" parent="UI/CityPanel/Column"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.78, 0.78, 0.74, 1)
+theme_override_font_sizes/font_size = 16
+text = "Radius 1 · next tile in 4"
+
+[node name="QueueCaption" type="Label" parent="UI/CityPanel/Column"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.96, 0.95, 0.9, 1)
+theme_override_font_sizes/font_size = 18
+text = "Queue"
+
+[node name="QueueScroll" type="ScrollContainer" parent="UI/CityPanel/Column"]
+custom_minimum_size = Vector2(0, 96)
+layout_mode = 2
+horizontal_scroll_mode = 0
+
+[node name="QueueList" type="VBoxContainer" parent="UI/CityPanel/Column/QueueScroll"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+
+[node name="BuildCaption" type="Label" parent="UI/CityPanel/Column"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.96, 0.95, 0.9, 1)
+theme_override_font_sizes/font_size = 18
+text = "Build"
+
+[node name="BuildGrid" type="GridContainer" parent="UI/CityPanel/Column"]
+layout_mode = 2
+theme_override_constants/h_separation = 8
+theme_override_constants/v_separation = 6
+columns = 2
+
+[node name="BuildSettler" parent="UI/CityPanel/Column/BuildGrid" instance=ExtResource("3_button")]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(200, 36)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Settler"
+
+[node name="BuildScout" parent="UI/CityPanel/Column/BuildGrid" instance=ExtResource("3_button")]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(200, 36)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Scout"
+
+[node name="BuildWarrior" parent="UI/CityPanel/Column/BuildGrid" instance=ExtResource("3_button")]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(200, 36)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Warrior"
+
+[node name="BuildArcher" parent="UI/CityPanel/Column/BuildGrid" instance=ExtResource("3_button")]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(200, 36)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Archer"
+
+[node name="BuildGranary" parent="UI/CityPanel/Column/BuildGrid" instance=ExtResource("3_button")]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(200, 36)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Granary"
+
+[node name="BuildManaWell" parent="UI/CityPanel/Column/BuildGrid" instance=ExtResource("3_button")]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(200, 36)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Mana Well"
+
+[node name="BuildLumberMill" parent="UI/CityPanel/Column/BuildGrid" instance=ExtResource("3_button")]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(200, 36)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Lumber Mill"
+
+[node name="CityReason" type="Label" parent="UI/CityPanel/Column"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.62, 0.48, 1)
+theme_override_font_sizes/font_size = 16
+text = ""
+autowrap_mode = 3
+
+[node name="CancelPlaceButton" parent="UI/CityPanel/Column" instance=ExtResource("3_button")]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(200, 36)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Cancel placement"
+
 [connection signal="pressed" from="UI/TopBar/Row/MenuButton" to="." method="_on_menu_pressed"]
 [connection signal="pressed" from="UI/TopBar/Row/EndTurnButton" to="." method="_on_end_turn_pressed"]
 [connection signal="pressed" from="UI/SelectionPanel/Column/FoundCityButton" to="." method="_on_found_city_pressed"]
 [connection signal="pressed" from="UI/InGameMenu/Column/RestartButton" to="." method="_on_restart_pressed"]
 [connection signal="pressed" from="UI/InGameMenu/Column/MainMenuButton" to="." method="_on_main_menu_pressed"]
+[connection signal="pressed" from="UI/CityPanel/Column/BuildGrid/BuildSettler" to="." method="_on_build_settler_pressed"]
+[connection signal="pressed" from="UI/CityPanel/Column/BuildGrid/BuildScout" to="." method="_on_build_scout_pressed"]
+[connection signal="pressed" from="UI/CityPanel/Column/BuildGrid/BuildWarrior" to="." method="_on_build_warrior_pressed"]
+[connection signal="pressed" from="UI/CityPanel/Column/BuildGrid/BuildArcher" to="." method="_on_build_archer_pressed"]
+[connection signal="pressed" from="UI/CityPanel/Column/BuildGrid/BuildGranary" to="." method="_on_build_granary_pressed"]
+[connection signal="pressed" from="UI/CityPanel/Column/BuildGrid/BuildManaWell" to="." method="_on_build_mana_well_pressed"]
+[connection signal="pressed" from="UI/CityPanel/Column/BuildGrid/BuildLumberMill" to="." method="_on_build_lumber_mill_pressed"]
+[connection signal="pressed" from="UI/CityPanel/Column/CancelPlaceButton" to="." method="_on_cancel_place_pressed"]

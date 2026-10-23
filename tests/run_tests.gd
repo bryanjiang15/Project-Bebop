@@ -19,6 +19,7 @@ func _init() -> void:
 	_test_pathfinding()
 	_test_movement_and_fog()
 	_test_found_city()
+	_test_city_economy()
 	_test_end_turn_key()
 	print("\nPassed: %d  Failed: %d" % [_passed, _failed])
 	quit(1 if _failed > 0 else 0)
@@ -530,6 +531,246 @@ func _test_found_city() -> void:
 	var first := game.found_city(game.spawn_unit(0, "settler", Vector2i(2, 2)))
 	var later := game.found_city(game.spawn_unit(0, "settler", _step(Vector2i(2, 2), Hex.EAST, game.config.city_min_distance)))
 	_ok(first.city_name == "Only" and later.city_name == "Only 2", "names past the list stay unique")
+
+
+func _test_city_economy() -> void:
+	print("[city economy]")
+	var cfg: GameConfig = GameConfig.load_file()
+	for land_id in GameConfig.LAND_IDS:
+		if land_id == "water":
+			continue
+		var game := _blank_setup(land_id)
+		var city := game.found_city(game.spawn_unit(0, "settler", Vector2i(8, 8)))
+		var land: GameConfig.LandStats = cfg.land(land_id)
+		var y: Dictionary = game.city_yields(city)
+		var worked: Array = y["worked"]
+		_ok(worked.size() == 1 and not worked.has(city.cell), "%s works one tile besides the center" % land_id)
+		_ok(int(y["food"]) == land.food * 2 + cfg.city_center_food, "%s food includes the center and one tile" % land_id)
+		_ok(int(y["production"]) == land.production * 2 + cfg.city_center_production, "%s production includes the center and one tile" % land_id)
+		city.population = 0
+		y = game.city_yields(city)
+		_ok((y["worked"] as Array).is_empty(), "%s center is not a worked citizen tile" % land_id)
+		_ok(int(y["food"]) == land.food + cfg.city_center_food, "%s center food" % land_id)
+		_ok(int(y["production"]) == land.production + cfg.city_center_production, "%s center production" % land_id)
+	var water_game := _blank_setup("plains")
+	var water_city := water_game.found_city(water_game.spawn_unit(0, "settler", Vector2i(8, 8)))
+	for axial in Hex.neighbors(Hex.offset_to_axial(water_city.cell)):
+		water_game.map.set_land(Hex.axial_to_offset(axial), "water")
+	var water_yield: Dictionary = water_game.city_yields(water_city)
+	_ok((water_yield["worked"] as Array)[0] == Vector2i(7, 8), "tied tiles break toward smaller q, then smaller r")
+	_ok(int(water_yield["food"]) == cfg.land("plains").food + cfg.city_center_food + cfg.land("water").food, "water yield is worked")
+	_ok(int(water_yield["production"]) == cfg.city_center_production, "water adds no production")
+	var tie := _blank_setup("hills")
+	var tie_city := tie.found_city(tie.spawn_unit(0, "settler", Vector2i(8, 8)))
+	tie.map.set_land(Vector2i(9, 8), "volcanic")
+	tie.map.set_land(Vector2i(7, 8), "forest")
+	var tie_yield: Dictionary = tie.city_yields(tie_city)
+	_ok((tie_yield["worked"] as Array)[0] == Vector2i(7, 8), "equal food+production prefers the higher food")
+	tie_city.population = 2
+	tie_yield = tie.city_yields(tie_city)
+	var both: Array = tie_yield["worked"]
+	_ok(both.size() == 2 and both[0] == Vector2i(7, 8) and both.has(Vector2i(9, 8)), "the next citizen takes the next tile")
+	tie_city.population = 9
+	_ok((tie.city_yields(tie_city)["worked"] as Array).size() == 6, "worked tiles stop at the owned ring")
+	tie_city.population = 1
+	_ok(int(tie.city_yields(tie_city)["mana"]) == cfg.city_mana_base, "mana at population 1")
+	tie_city.population = 2
+	_ok(int(tie.city_yields(tie_city)["mana"]) == cfg.city_mana_base + 1, "mana gains floor(pop/2)")
+	tie_city.population = 5
+	_ok(int(tie.city_yields(tie_city)["mana"]) == cfg.city_mana_base + 2, "mana at population 5")
+	var growth := _blank_setup("plains")
+	var growing := growth.found_city(growth.spawn_unit(0, "settler", Vector2i(8, 8)))
+	for _i in 3:
+		growth.end_turn()
+	_ok(growing.population == 1 and growing.food_stored == 12, "surplus fills the growth bar")
+	growth.end_turn()
+	_ok(growing.population == 2 and growing.food_stored == 0, "a full bar grows and keeps the remainder")
+	var chain := _blank_setup("plains")
+	var chained := chain.found_city(chain.spawn_unit(0, "settler", Vector2i(8, 8)))
+	chain.config.growth_base = 2
+	chain.config.growth_per_population = 0
+	chain.end_turn()
+	_ok(chained.population == 3 and chained.food_stored == 0, "leftover food fills the next threshold")
+	var starve := _blank_setup("volcanic")
+	var hungry := starve.found_city(starve.spawn_unit(0, "settler", Vector2i(8, 8)))
+	hungry.population = 3
+	hungry.food_stored = 5
+	starve.end_turn()
+	_ok(hungry.population == 3 and hungry.food_stored == 1, "a shortfall that stays non-negative keeps the population")
+	hungry.food_stored = 0
+	starve.end_turn()
+	_ok(hungry.population == 2 and hungry.food_stored == 0, "an empty bar loses one population")
+	hungry.population = 1
+	hungry.food_stored = 0
+	starve.config.food_per_population = 10
+	starve.end_turn()
+	_ok(hungry.population == 1 and hungry.food_stored == 0, "starvation stops at the minimum")
+	starve.config.shortfall_drains_bar = false
+	hungry.population = 3
+	hungry.food_stored = 4
+	starve.end_turn()
+	_ok(hungry.population == 3 and hungry.food_stored == 4, "the shortfall flag can leave the bar alone")
+	var borders := _blank_setup("plains")
+	var origin := Vector2i(10, 8)
+	var home := borders.found_city(borders.spawn_unit(0, "settler", origin))
+	var best := _step(origin, Hex.EAST, 2)
+	borders.map.set_land(best, "volcanic")
+	var owned_before := borders.territory_cells(home).size()
+	for _i in 3:
+		borders.end_turn()
+	_ok(borders.owner_at(best) == -1 and borders.turns_until_border(home) == 1, "the border clock waits out the interval")
+	borders.end_turn()
+	_ok(borders.territory_cells(home).has(best) and home.radius == 2, "the best yield is claimed and the radius grows")
+	_ok(borders.territory_cells(home).size() == owned_before + 1, "one tile is claimed")
+	_ok(borders.owner_at(_step(origin, Hex.WEST, 2)) == -1, "a weaker tile waits")
+	var seen := _step(origin, Hex.EAST, home.radius + borders.config.city_vision_beyond_border)
+	_ok(borders.fog.sight(0, seen) == FogState.Sight.VISIBLE, "city vision follows the new radius")
+	var capped := _blank_setup("plains")
+	capped.config.border_max_radius = 1
+	var capped_city := capped.found_city(capped.spawn_unit(0, "settler", origin))
+	var capped_size := capped.territory_cells(capped_city).size()
+	for _i in 8:
+		capped.end_turn()
+	_ok(capped.territory_cells(capped_city).size() == capped_size and capped.turns_until_border(capped_city) == -1, "max radius claims nothing further")
+	var crowded := _blank_setup("plains")
+	var human_city := crowded.found_city(crowded.spawn_unit(0, "settler", origin))
+	var wanted := _step(origin, Hex.EAST, 2)
+	crowded.map.set_land(wanted, "volcanic")
+	var rival_city := crowded.found_city(crowded.spawn_unit(1, "settler", _step(origin, Hex.EAST, 3)))
+	_ok(rival_city != null and crowded.owner_at(wanted) == 1, "a rival already owns the best tile")
+	var human_before := crowded.territory_cells(human_city).size()
+	for _i in 4:
+		crowded.end_turn()
+	_ok(crowded.owner_at(wanted) == 1, "borders do not take an owned tile")
+	_ok(crowded.territory_cells(human_city).size() == human_before + 1, "the next best free tile is claimed")
+	var shore_game := _blank_setup("plains")
+	shore_game.config.borders_can_claim_water = false
+	shore_game.config.border_max_radius = 1
+	shore_game.config.border_turns_per_growth = 1
+	var shore_origin := Vector2i(8, 8)
+	var shore := _step(shore_origin, Hex.EAST, 1)
+	shore_game.map.set_land(shore, "water")
+	var shore_city := shore_game.found_city(shore_game.spawn_unit(0, "settler", shore_origin))
+	_ok(shore_game.owner_at(shore) == -1, "founding left the water unclaimed")
+	shore_game.end_turn()
+	_ok(shore_game.owner_at(shore) == -1, "water is skipped while claiming it is off")
+	shore_game.config.borders_can_claim_water = true
+	shore_game.end_turn()
+	_ok(shore_game.territory_cells(shore_city).has(shore), "water is claimed when the flag allows it")
+	var queue := _blank_setup("plains")
+	var producer := queue.found_city(queue.spawn_unit(0, "settler", Vector2i(8, 8)))
+	queue.config.unit("scout").cost = 4
+	queue.config.unit("warrior").cost = 30
+	_ok(queue.enqueue(producer, "nope") == GameSetup.REASON_UNKNOWN, "unknown items are rejected")
+	_ok(queue.enqueue(producer, "scout").is_empty() and queue.enqueue(producer, "warrior").is_empty(), "units enqueue")
+	queue.end_turn()
+	_ok(producer.queue.size() == 2 and producer.queue[0].item_id == "scout" and producer.production_stored == 2, "production stays on the first item")
+	queue.move_queue(producer, 1, -1)
+	_ok(producer.queue[0].item_id == "warrior" and producer.production_stored == 2, "reorder keeps stored production on the new head")
+	queue.move_queue(producer, 0, 1)
+	_ok(producer.queue[0].item_id == "scout", "reorder puts the scout back at the head")
+	queue.end_turn()
+	_ok(producer.queue.size() == 1 and producer.queue[0].item_id == "warrior" and producer.production_stored == 0, "a finished item advances the queue")
+	_ok(_count_units(queue, 0, "scout") == 1 and queue.players[0].units[0].cell == producer.cell, "the scout spawns on the city center")
+	queue.end_turn()
+	_ok(producer.production_stored == 2, "the next item receives the next turn's production")
+	queue.cancel_queue(producer, 0)
+	_ok(producer.queue.is_empty() and producer.production_stored == 0, "cancelling the head drops its progress")
+	queue.end_turn()
+	_ok(producer.production_stored == 0, "an empty queue banks nothing")
+	var burst := _blank_setup("volcanic")
+	var factory := burst.found_city(burst.spawn_unit(0, "settler", Vector2i(8, 8)))
+	burst.config.unit("scout").cost = 4
+	burst.config.unit("warrior").cost = 4
+	burst.enqueue(factory, "scout")
+	burst.enqueue(factory, "warrior")
+	burst.end_turn()
+	_ok(factory.queue.is_empty() and factory.production_stored == 0, "overflow finishes the next item in the same turn")
+	_ok(_count_units(burst, 0, "scout") == 1 and _count_units(burst, 0, "warrior") == 1, "both units spawn")
+	var settler_game := _blank_setup("plains")
+	var nursery := settler_game.found_city(settler_game.spawn_unit(0, "settler", Vector2i(8, 8)))
+	var too_small := settler_game.enqueue(nursery, "settler")
+	_ok(too_small == "City must be size %d+" % settler_game.config.unit("settler").min_city_size and nursery.queue.is_empty(), "a size 1 city cannot train a settler")
+	nursery.population = 2
+	settler_game.config.unit("settler").cost = 2
+	_ok(settler_game.enqueue(nursery, "settler").is_empty(), "size 2 can train a settler")
+	settler_game.end_turn()
+	_ok(nursery.population == 1 and _count_units(settler_game, 0, "settler") == 1, "finishing a settler spends one population and spawns")
+	_ok(settler_game.players[0].units[0].cell == nursery.cell, "the new settler uses the open center")
+	var blocked := _blank_setup("plains")
+	var camp := blocked.found_city(blocked.spawn_unit(0, "settler", Vector2i(8, 8)))
+	camp.population = 2
+	blocked.spawn_unit(0, "settler", camp.cell)
+	blocked.config.unit("settler").cost = 2
+	blocked.enqueue(camp, "settler")
+	blocked.end_turn()
+	_ok(camp.population == 1 and _count_units(blocked, 0, "settler") == 2, "a blocked center still trains the settler")
+	var arrived := Vector2i.ZERO
+	for unit in blocked.players[0].units:
+		if unit.cell != camp.cell:
+			arrived = unit.cell
+	_ok(arrived == Vector2i(7, 8), "the settler takes the nearest free border tile")
+	blocked.config.spawn_nearest_free_if_blocked = false
+	camp.population = 2
+	blocked.config.unit("settler").cost = 2
+	blocked.enqueue(camp, "settler")
+	blocked.end_turn()
+	_ok(camp.queue.size() == 1 and camp.population == 2 and _count_units(blocked, 0, "settler") == 2, "with no free-tile fallback the settler waits")
+	var built := _blank_setup("plains")
+	var site := Vector2i(8, 8)
+	var town := built.found_city(built.spawn_unit(0, "settler", site))
+	var plot := _step(site, Hex.EAST, 1)
+	var far := _step(site, Hex.EAST, 3)
+	_ok(built.placement_reason(town, "granary", town.cell) == GameSetup.REASON_CENTER, "cannot build on the city center")
+	_ok(built.placement_reason(town, "granary", far) == GameSetup.REASON_BORDERS, "cannot build outside the borders")
+	_ok(built.placement_reason(town, "granary", Vector2i(-1, -1)) == GameSetup.REASON_BUILD_OFF_MAP, "cannot build off the map")
+	_ok(built.enqueue(town, "granary", plot).is_empty(), "granary enqueues on a border tile")
+	_ok(built.enqueue(town, "mana_well", plot) == GameSetup.REASON_OCCUPIED, "a queued building reserves its tile")
+	built.config.granary_cost = 2
+	var food_before := int(built.city_yields(town)["food"])
+	built.end_turn()
+	_ok(town.buildings.size() == 1 and town.buildings[0].kind == "granary" and town.buildings[0].cell == plot, "granary finishes on that tile")
+	_ok(int(built.city_yields(town)["food"]) == food_before + built.config.granary_food, "granary adds its food to the city")
+	_ok(built.placement_reason(town, "granary", plot) == GameSetup.REASON_OCCUPIED, "a finished building keeps the tile")
+	var second := _step(site, Hex.WEST, 1)
+	built.enqueue(town, "granary", second)
+	built.end_turn()
+	_ok(town.buildings.size() == 2 and int(built.city_yields(town)["food"]) == food_before + built.config.granary_food * 2, "a second granary stacks")
+	var wells := _blank_setup("plains")
+	var well_city := wells.found_city(wells.spawn_unit(0, "settler", site))
+	var mana_before := int(wells.city_yields(well_city)["mana"])
+	wells.config.mana_well_cost = 2
+	wells.enqueue(well_city, "mana_well", _step(site, Hex.EAST, 1))
+	wells.end_turn()
+	_ok(int(wells.city_yields(well_city)["mana"]) == mana_before + wells.config.mana_well_mana, "mana well adds city mana")
+	var mills := _blank_setup("plains")
+	var mill_city := mills.found_city(mills.spawn_unit(0, "settler", site))
+	var mill_at := _step(site, Hex.EAST, 1)
+	mills.map.set_land(mill_at, "forest")
+	var quiet := int(mills.city_yields(mill_city)["production"])
+	mills.config.lumber_mill_cost = 2
+	mills.enqueue(mill_city, "lumber_mill", mill_at)
+	mills.end_turn()
+	_ok(int(mills.city_yields(mill_city)["production"]) == quiet, "a mill ignores forest on its own tile")
+	var bare := _blank_setup("plains")
+	var bare_city := bare.found_city(bare.spawn_unit(0, "settler", site))
+	var bare_mill := _step(site, Hex.EAST, 1)
+	for direction in [Hex.EAST, Hex.NORTHEAST, Hex.SOUTHEAST]:
+		bare.map.set_land(_step(bare_mill, direction, 1), "forest")
+	var bare_prod := int(bare.city_yields(bare_city)["production"])
+	bare.config.lumber_mill_cost = 2
+	bare.enqueue(bare_city, "lumber_mill", bare_mill)
+	bare.end_turn()
+	var bonus := bare.config.lumber_mill_production_per_adjacent_forest * 3
+	_ok(int(bare.city_yields(bare_city)["production"]) == bare_prod + bonus, "lumber mill adds one production per adjacent forest")
+
+
+func _count_units(game: GameSetup, player: int, type: String) -> int:
+	var count := 0
+	for unit in game.players[player].units:
+		if unit.unit_type == type:
+			count += 1
+	return count
 
 
 func _test_end_turn_key() -> void:
