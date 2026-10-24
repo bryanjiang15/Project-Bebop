@@ -19,4 +19,6 @@ class UnitState extends RefCounted:
 var index: int = 0
 var human: bool = false
 var color: String = ""
+## Pooled mana for this player. GameSetup sets it from players.starting_mana.
+var mana: int = 0
 var units: Array[UnitState] = []

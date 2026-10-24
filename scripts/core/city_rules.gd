@@ -2,7 +2,8 @@ class_name CityRules
 extends RefCounted
 
 ## City yields, growth, and border choice. GameSetup owns the queue and applies
-## these results. Worked tiles and border claims share one ordering:
+## these results. city_mana is the only mana-per-turn formula. Worked tiles and
+## border claims share one ordering:
 ## higher food + production, then higher food, then nearer the city center,
 ## then smaller axial q, then smaller axial r.
 ## The center is always counted on its own and is not one of the worked tiles.
@@ -47,6 +48,19 @@ static func work_tiles(cfg: GameConfig, map: MapState, city: MapCity, owned: Arr
 	return worked
 
 
+## One city's mana this turn: city.mana_base + floor(population / divisor),
+## plus buildings.mana_well_mana for each Mana Well on the live building list.
+static func city_mana(cfg: GameConfig, city: MapCity) -> int:
+	var mana := cfg.city_mana_base
+	if cfg.city_mana_per_population_divisor > 0:
+		mana += int(city.population / cfg.city_mana_per_population_divisor)
+	for building in city.buildings:
+		var placed := building as MapCity.Building
+		if placed.kind == "mana_well":
+			mana += cfg.mana_well_mana
+	return mana
+
+
 static func yields(cfg: GameConfig, map: MapState, city: MapCity, owned: Array[Vector2i]) -> Dictionary:
 	var worked := work_tiles(cfg, map, city, owned)
 	var center := cfg.land(map.land_at(city.cell))
@@ -56,15 +70,11 @@ static func yields(cfg: GameConfig, map: MapState, city: MapCity, owned: Array[V
 		var stats := cfg.land(map.land_at(cell))
 		food += stats.food
 		production += stats.production
-	var mana := cfg.city_mana_base
-	if cfg.city_mana_per_population_divisor > 0:
-		mana += int(city.population / cfg.city_mana_per_population_divisor)
+	var mana := city_mana(cfg, city)
 	for building in city.buildings:
 		var placed := building as MapCity.Building
 		if placed.kind == "granary":
 			food += cfg.granary_food
-		elif placed.kind == "mana_well":
-			mana += cfg.mana_well_mana
 		elif placed.kind == "lumber_mill":
 			production += cfg.lumber_mill_production_per_adjacent_forest * adjacent_forests(map, placed.cell)
 	return {

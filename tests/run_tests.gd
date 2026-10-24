@@ -20,6 +20,7 @@ func _init() -> void:
 	_test_movement_and_fog()
 	_test_found_city()
 	_test_city_economy()
+	_test_mana_pool()
 	_test_combat()
 	_test_end_turn_key()
 	print("\nPassed: %d  Failed: %d" % [_passed, _failed])
@@ -398,6 +399,7 @@ func _blank_setup(fill: String = "plains") -> GameSetup:
 		player.index = index
 		player.human = index == cfg.human_index
 		player.color = cfg.player_colors[index]
+		player.mana = cfg.starting_mana
 		game.players.append(player)
 	return game
 
@@ -796,6 +798,135 @@ func _test_city_economy() -> void:
 	bare.end_turn()
 	var bonus := bare.config.lumber_mill_production_per_adjacent_forest * 3
 	_ok(int(bare.city_yields(bare_city)["production"]) == bare_prod + bonus, "lumber mill adds one production per adjacent forest")
+
+
+func _test_mana_pool() -> void:
+	print("[mana pool]")
+	var fresh := _blank_setup()
+	_ok(fresh.config.starting_mana == 10, "config starting mana is 10")
+	for player in fresh.players:
+		_ok(player.mana == 10, "player %d starts at 10 mana" % player.index)
+		_ok(fresh.mana_per_turn(player.index) == 0, "player %d gains 0 with no cities" % player.index)
+	for _i in 3:
+		fresh.end_turn()
+	for player in fresh.players:
+		_ok(player.mana == 10, "player %d stays at 10 with no cities" % player.index)
+	var tuned_start: GameConfig = GameConfig.load_file()
+	tuned_start.starting_mana = 21
+	var started := GameSetup.start_with_seed(tuned_start, 12345)
+	_ok(started != null, "tuned starting mana still builds a game")
+	if started != null:
+		for player in started.players:
+			_ok(player.mana == 21, "player %d uses the tuned starting mana" % player.index)
+	var rates: Array[int] = [2, 3, 3, 4]
+	var rated := _blank_setup()
+	var rated_city := rated.found_city(rated.spawn_unit(0, "settler", Vector2i(8, 8)))
+	for pop in [1, 2, 3, 4]:
+		rated_city.population = pop
+		var got := CityRules.city_mana(rated.config, rated_city)
+		_ok(got == rates[pop - 1], "mana at population %d is %d" % [pop, rates[pop - 1]])
+		_ok(int(rated.city_yields(rated_city)["mana"]) == got, "yields mana matches city_mana at pop %d" % pop)
+		_ok(rated.mana_per_turn(0) == got, "one city is the whole per-turn gain at pop %d" % pop)
+	var site := Vector2i(8, 8)
+	var east := _step(site, Hex.EAST, 1)
+	var west := _step(site, Hex.WEST, 1)
+	_place_building(rated_city, "mana_well", east)
+	_ok(CityRules.city_mana(rated.config, rated_city) == 6, "one mana well adds +2 at population 4")
+	_place_building(rated_city, "mana_well", west)
+	_ok(CityRules.city_mana(rated.config, rated_city) == 8, "two mana wells add +4")
+	rated_city.buildings.pop_back()
+	_ok(CityRules.city_mana(rated.config, rated_city) == 6, "removing a well drops the live rate")
+	rated_city.buildings.clear()
+	rated_city.population = 1
+	var second := rated.found_city(rated.spawn_unit(0, "settler", _step(site, Hex.EAST, rated.config.city_min_distance)))
+	_ok(second != null, "a second city founds for the sum")
+	if second != null:
+		second.population = 3
+		_ok(rated.mana_per_turn(0) == 2 + 3, "two cities sum their mana")
+		rated.config.growth_base = 1000
+		var pooled := rated.players[0].mana
+		rated.end_turn()
+		_ok(rated.players[0].mana == pooled + 5, "one end turn adds the summed snapshot")
+		_ok(rated.players[1].mana == 10 and rated.players[2].mana == 10, "rivals with no cities stay at 10")
+	var banked := _blank_setup()
+	banked.config.growth_base = 1000
+	var home := banked.found_city(banked.spawn_unit(0, "settler", site))
+	var away := banked.found_city(banked.spawn_unit(1, "settler", _step(site, Hex.EAST, banked.config.city_min_distance)))
+	_ok(home != null and away != null, "human and rival cities founded")
+	if home == null or away == null:
+		return
+	home.population = 4
+	away.population = 2
+	banked.end_turn()
+	_ok(banked.players[0].mana == 10 + 4, "the human pool gains its own cities")
+	_ok(banked.players[1].mana == 10 + 3, "a rival pool gains its own cities")
+	_ok(banked.players[2].mana == 10, "a player with no city gains 0")
+	_ok(banked.mana_per_turn(0) == 4 and banked.mana_per_turn(1) == 3, "live rates stay with the current population")
+	for _i in 3:
+		banked.end_turn()
+	_ok(banked.players[0].mana == 10 + 4 * 4, "the pool accumulates over several end turns")
+	_ok(banked.players[1].mana == 10 + 3 * 4, "the rival pool accumulates on the same clock")
+	var wells := _blank_setup()
+	wells.config.growth_base = 1000
+	wells.config.mana_well_cost = 2
+	var well_city := wells.found_city(wells.spawn_unit(0, "settler", site))
+	var plot := _step(site, Hex.EAST, 1)
+	_ok(wells.enqueue(well_city, "mana_well", plot).is_empty(), "mana well queues for the timing test")
+	var paid := CityRules.city_mana(wells.config, well_city)
+	wells.end_turn()
+	_ok(well_city.buildings.size() == 1 and well_city.buildings[0].kind == "mana_well", "the well finishes this turn")
+	_ok(wells.players[0].mana == 10 + paid, "a well finished this turn is not paid until the next end turn")
+	_ok(wells.mana_per_turn(0) == paid + wells.config.mana_well_mana, "the live rate includes the new well immediately")
+	wells.end_turn()
+	_ok(wells.players[0].mana == 10 + paid + paid + wells.config.mana_well_mana, "the next end turn pays the well")
+	var other := _step(site, Hex.WEST, 1)
+	wells.enqueue(well_city, "mana_well", other)
+	wells.end_turn()
+	_ok(well_city.buildings.size() == 2, "a second well finishes")
+	_ok(wells.mana_per_turn(0) == paid + wells.config.mana_well_mana * 2, "two finished wells add +4")
+	var grown := _blank_setup()
+	grown.config.growth_base = 1
+	grown.config.growth_per_population = 0
+	var growing := grown.found_city(grown.spawn_unit(0, "settler", site))
+	var before_growth := CityRules.city_mana(grown.config, growing)
+	grown.end_turn()
+	_ok(growing.population > 1, "the city grows during the turn")
+	_ok(grown.players[0].mana == 10 + before_growth, "mana paid this turn uses the pre-growth population")
+	_ok(grown.mana_per_turn(0) == CityRules.city_mana(grown.config, growing), "the rate after the turn uses the new population")
+	var custom := _blank_setup()
+	custom.config.growth_base = 1000
+	custom.config.city_mana_base = 9
+	custom.config.city_mana_per_population_divisor = 3
+	custom.config.mana_well_mana = 5
+	var custom_city := custom.found_city(custom.spawn_unit(0, "settler", site))
+	custom_city.population = 4
+	_ok(CityRules.city_mana(custom.config, custom_city) == 10, "tuned base and divisor change the rate")
+	_place_building(custom_city, "mana_well", _step(site, Hex.EAST, 1))
+	_ok(custom.mana_per_turn(0) == 15, "tuned well bonus changes the rate")
+	var saved := custom.players[0].mana
+	custom.end_turn()
+	_ok(custom.players[0].mana == saved + 15, "end turn pays the tuned rate")
+	var raw: Dictionary = GameConfig.read_json(GameConfig.PATH)
+	var missing_base: Dictionary = raw.duplicate(true)
+	var city_block: Dictionary = missing_base["city"]
+	city_block.erase("mana_base")
+	_ok(GameConfig.missing_paths(missing_base).has("city.mana_base"), "missing city.mana_base is reported")
+	var missing_div: Dictionary = raw.duplicate(true)
+	(missing_div["city"] as Dictionary).erase("mana_per_population_divisor")
+	_ok(GameConfig.missing_paths(missing_div).has("city.mana_per_population_divisor"), "missing mana divisor is reported")
+	var missing_well: Dictionary = raw.duplicate(true)
+	(missing_well["buildings"] as Dictionary).erase("mana_well_mana")
+	_ok(GameConfig.missing_paths(missing_well).has("buildings.mana_well_mana"), "missing mana well bonus is reported")
+	var missing_start: Dictionary = raw.duplicate(true)
+	(missing_start["players"] as Dictionary).erase("starting_mana")
+	_ok(GameConfig.missing_paths(missing_start).has("players.starting_mana"), "missing starting mana is reported")
+
+
+func _place_building(city: MapCity, kind: String, cell: Vector2i) -> void:
+	var building := MapCity.Building.new()
+	building.kind = kind
+	building.cell = cell
+	city.buildings.append(building)
 
 
 func _count_units(game: GameSetup, player: int, type: String) -> int:
