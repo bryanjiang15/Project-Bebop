@@ -5,6 +5,8 @@ const _HIGHLIGHT_SOURCE := 1
 const _CLICK_SLOP := 8.0
 const _REACHABLE := Color(0.45, 0.95, 0.55, 0.95)
 const _SELECTED := Color(1, 1, 1, 0.95)
+const _WORKED := Color(0.95, 0.82, 0.35, 0.92)
+const _PLACE := Color(0.4, 0.85, 0.95, 0.95)
 const _LAND_COLUMN := {
 	"plains": 0,
 	"forest": 1,
@@ -26,6 +28,8 @@ const _UNIT_SCENE: PackedScene = preload("res://scenes/actors/unit.tscn")
 const _CITY_SCENE: PackedScene = preload("res://scenes/view/city_marker.tscn")
 const _HIGHLIGHT_SCENE: PackedScene = preload("res://scenes/view/move_highlight.tscn")
 const _BORDER_SCENE: PackedScene = preload("res://scenes/view/border_segment.tscn")
+const _QUEUE_SCENE: PackedScene = preload("res://scenes/ui/queue_row.tscn")
+const _BUILDING_SCENE: PackedScene = preload("res://scenes/view/building_marker.tscn")
 const _UNIT_ART := {
 	"settler": ["res://assets/art/unit_settler.png", "res://assets/art/unit_settler_mask.png"],
 	"scout": ["res://assets/art/unit_scout.png", "res://assets/art/unit_scout_mask.png"],
@@ -44,6 +48,8 @@ var _right_down: bool = false
 var _press_pos: Vector2 = Vector2.ZERO
 var _right_press: Vector2 = Vector2.ZERO
 var _selected_id: int = -1
+var _selected_city_id: int = -1
+var _placing: String = ""
 
 @onready var _camera: Camera2D = %Camera
 @onready var _map: TileMapLayer = %Map
@@ -60,6 +66,24 @@ var _selected_id: int = -1
 @onready var _selection_detail: Label = %SelectionDetail
 @onready var _found_button: Button = %FoundCityButton
 @onready var _found_reason: Label = %FoundCityReason
+@onready var _city_panel: PanelContainer = %CityPanel
+@onready var _city_name: Label = %CityName
+@onready var _city_food: Label = %CityFood
+@onready var _city_production: Label = %CityProduction
+@onready var _city_mana: Label = %CityMana
+@onready var _growth_bar: ProgressBar = %GrowthBar
+@onready var _growth_label: Label = %GrowthLabel
+@onready var _border_label: Label = %BorderLabel
+@onready var _queue_list: VBoxContainer = %QueueList
+@onready var _city_reason: Label = %CityReason
+@onready var _cancel_place: Button = %CancelPlaceButton
+@onready var _build_settler: Button = %BuildSettler
+@onready var _build_scout: Button = %BuildScout
+@onready var _build_warrior: Button = %BuildWarrior
+@onready var _build_archer: Button = %BuildArcher
+@onready var _build_granary: Button = %BuildGranary
+@onready var _build_mana_well: Button = %BuildManaWell
+@onready var _build_lumber_mill: Button = %BuildLumberMill
 
 
 func _ready() -> void:
@@ -158,8 +182,7 @@ func _on_end_turn_pressed() -> void:
 	if setup == null:
 		return
 	setup.end_turn()
-	_refresh_turn()
-	_refresh_selection()
+	_refresh_board()
 
 
 func _on_found_city_pressed() -> void:
@@ -171,6 +194,8 @@ func _on_found_city_pressed() -> void:
 		return
 	setup.found_city(unit)
 	_selected_id = -1
+	_selected_city_id = -1
+	_placing = ""
 	_refresh_board()
 
 
@@ -194,12 +219,40 @@ func _select_at_screen(screen: Vector2) -> void:
 	var cell := _cell_at_screen(screen)
 	var axial := Hex.offset_to_axial(cell)
 	if not Hex.in_map(axial, _config.map_width, _config.map_height):
+		if not _placing.is_empty():
+			_refresh_city_panel(GameSetup.REASON_BUILD_OFF_MAP)
+			return
 		_selected_id = -1
+		_selected_city_id = -1
+		_placing = ""
 		_refresh_selection()
+		_refresh_city_panel()
+		return
+	if not _placing.is_empty():
+		_try_place(cell)
 		return
 	var own := _own_unit_at(cell)
-	_selected_id = own.id if own != null else -1
+	var city := setup.city_at_cell(cell)
+	var own_city := city != null and city.player == setup.human_index
+	if own != null and own_city:
+		if _selected_id == own.id and _selected_city_id < 0:
+			_selected_id = -1
+			_selected_city_id = city.id
+		else:
+			_selected_id = own.id
+			_selected_city_id = -1
+	elif own != null:
+		_selected_id = own.id
+		_selected_city_id = -1
+	elif own_city:
+		_selected_id = -1
+		_selected_city_id = city.id
+	else:
+		_selected_id = -1
+		_selected_city_id = -1
+	_placing = ""
 	_refresh_selection()
+	_refresh_city_panel()
 
 
 func _move_at_screen(screen: Vector2) -> void:
@@ -224,6 +277,7 @@ func _refresh_board() -> void:
 	_refresh_borders()
 	_refresh_turn()
 	_refresh_selection()
+	_refresh_city_panel()
 
 
 func _refresh_turn() -> void:
@@ -297,6 +351,19 @@ func _refresh_actors() -> void:
 		sprite.material = mat
 		(marker.get_node("Name") as Label).text = city.city_name
 		_actors.add_child(marker)
+		for building in city.buildings:
+			var placed := building as MapCity.Building
+			if setup.fog.sight(viewer, placed.cell) == FogState.Sight.UNREVEALED:
+				continue
+			var mark := _BUILDING_SCENE.instantiate() as Node2D
+			mark.name = "Building_%d_%d_%d" % [city.id, placed.cell.x, placed.cell.y]
+			mark.position = _map.map_to_local(placed.cell)
+			var poly := mark.get_node("Mark") as Polygon2D
+			var tint := Color.html(setup.players[city.player].color)
+			tint.a = 0.95
+			poly.color = tint
+			(mark.get_node("Name") as Label).text = placed.kind.capitalize()
+			_actors.add_child(mark)
 	for player in setup.players:
 		var stacks := {}
 		for unit in player.units:
@@ -319,11 +386,22 @@ func _refresh_actors() -> void:
 func _rebuild_move_highlights() -> void:
 	_clear(_moves)
 	var unit := _selected_unit()
-	if unit == null:
+	if unit != null:
+		_add_highlight(unit.cell, _SELECTED)
+		for cell in setup.reachable_tiles(unit).keys():
+			_add_highlight(cell as Vector2i, _REACHABLE)
 		return
-	_add_highlight(unit.cell, _SELECTED)
-	for cell in setup.reachable_tiles(unit).keys():
-		_add_highlight(cell as Vector2i, _REACHABLE)
+	var city := _selected_city()
+	if city == null:
+		return
+	if not _placing.is_empty():
+		for cell in setup.placement_tiles(city, _placing):
+			_add_highlight(cell, _PLACE)
+		return
+	_add_highlight(city.cell, _SELECTED)
+	var yields: Dictionary = setup.city_yields(city)
+	for cell in yields["worked"]:
+		_add_highlight(cell as Vector2i, _WORKED)
 
 
 func _add_highlight(cell: Vector2i, tint: Color) -> void:
@@ -462,3 +540,168 @@ func _clear_hover() -> void:
 func _cell_at_screen(screen: Vector2) -> Vector2i:
 	var world: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * screen
 	return _map.local_to_map(_map.to_local(world))
+
+
+func _selected_city() -> MapCity:
+	if setup == null or _selected_city_id < 0:
+		return null
+	var city := setup.city_by_id(_selected_city_id)
+	if city == null or city.player != setup.human_index:
+		return null
+	return city
+
+
+func _on_build_settler_pressed() -> void:
+	_choose_build("settler")
+
+
+func _on_build_scout_pressed() -> void:
+	_choose_build("scout")
+
+
+func _on_build_warrior_pressed() -> void:
+	_choose_build("warrior")
+
+
+func _on_build_archer_pressed() -> void:
+	_choose_build("archer")
+
+
+func _on_build_granary_pressed() -> void:
+	_choose_build("granary")
+
+
+func _on_build_mana_well_pressed() -> void:
+	_choose_build("mana_well")
+
+
+func _on_build_lumber_mill_pressed() -> void:
+	_choose_build("lumber_mill")
+
+
+func _on_cancel_place_pressed() -> void:
+	if _menu.visible:
+		return
+	_placing = ""
+	_refresh_city_panel()
+	_rebuild_move_highlights()
+
+
+func _choose_build(item_id: String) -> void:
+	if setup == null or _menu.visible:
+		return
+	var city := _selected_city()
+	if city == null:
+		return
+	if CityRules.is_building(item_id):
+		_placing = item_id
+		_refresh_city_panel("Click a tile for %s" % item_id.capitalize())
+		_rebuild_move_highlights()
+		return
+	var reason := setup.enqueue(city, item_id)
+	_placing = ""
+	_refresh_selection()
+	_refresh_city_panel(reason)
+
+
+func _try_place(cell: Vector2i) -> void:
+	var city := _selected_city()
+	if city == null:
+		_placing = ""
+		_refresh_city_panel()
+		_rebuild_move_highlights()
+		return
+	var reason := setup.enqueue(city, _placing, cell)
+	if reason.is_empty():
+		_placing = ""
+		_refresh_selection()
+		_refresh_city_panel()
+		return
+	_refresh_city_panel(reason)
+
+
+func _on_queue_move(index: int, delta: int) -> void:
+	if setup == null or _menu.visible:
+		return
+	setup.move_queue(_selected_city(), index, delta)
+	call_deferred("_refresh_after_queue")
+
+
+func _on_queue_cancel(index: int) -> void:
+	if setup == null or _menu.visible:
+		return
+	setup.cancel_queue(_selected_city(), index)
+	call_deferred("_refresh_after_queue")
+
+
+func _refresh_after_queue() -> void:
+	_refresh_city_panel()
+	_rebuild_move_highlights()
+
+
+func _refresh_city_panel(notice: String = "") -> void:
+	var city := _selected_city()
+	if city == null:
+		_city_panel.visible = false
+		_cancel_place.visible = false
+		_clear_queue_rows()
+		return
+	_city_panel.visible = true
+	_cancel_place.visible = not _placing.is_empty()
+	var snapshot: Dictionary = setup.city_yields(city)
+	_city_name.text = city.city_name
+	_city_food.text = "Food %d" % int(snapshot["food"])
+	_city_production.text = "Production %d" % int(snapshot["production"])
+	_city_mana.text = "Mana %d" % int(snapshot["mana"])
+	var threshold := int(snapshot["threshold"])
+	var surplus := int(snapshot["surplus"])
+	_growth_bar.max_value = maxi(threshold, 1)
+	_growth_bar.value = city.food_stored
+	var sign := "+" if surplus >= 0 else ""
+	_growth_label.text = "Growth %d / %d (%s%d)" % [city.food_stored, threshold, sign, surplus]
+	var turns := setup.turns_until_border(city)
+	if turns < 0:
+		_border_label.text = "Radius %d · borders full" % city.radius
+	else:
+		_border_label.text = "Radius %d · next tile in %d" % [city.radius, turns]
+	_build_settler.text = "Settler %d" % _config.unit("settler").cost
+	_build_scout.text = "Scout %d" % _config.unit("scout").cost
+	_build_warrior.text = "Warrior %d" % _config.unit("warrior").cost
+	_build_archer.text = "Archer %d" % _config.unit("archer").cost
+	_build_granary.text = "Granary %d" % _config.granary_cost
+	_build_mana_well.text = "Mana Well %d" % _config.mana_well_cost
+	_build_lumber_mill.text = "Lumber Mill %d" % _config.lumber_mill_cost
+	_rebuild_queue(city)
+	if not notice.is_empty():
+		_city_reason.text = notice
+	elif not _placing.is_empty():
+		_city_reason.text = "Click a tile for %s" % _placing.capitalize()
+	else:
+		_city_reason.text = ""
+
+
+func _rebuild_queue(city: MapCity) -> void:
+	_clear_queue_rows()
+	for i in city.queue.size():
+		var item: MapCity.Item = city.queue[i]
+		var row := _QUEUE_SCENE.instantiate() as HBoxContainer
+		var cost := CityRules.item_cost(_config, item.item_id)
+		var label := row.get_node("ItemLabel") as Label
+		if i == 0:
+			label.text = "%s  %d / %d" % [item.item_id.capitalize(), city.production_stored, cost]
+		else:
+			label.text = "%s  %d" % [item.item_id.capitalize(), cost]
+		var up := row.get_node("UpButton") as Button
+		var down := row.get_node("DownButton") as Button
+		up.disabled = i == 0
+		down.disabled = i == city.queue.size() - 1
+		up.pressed.connect(_on_queue_move.bind(i, -1))
+		down.pressed.connect(_on_queue_move.bind(i, 1))
+		(row.get_node("CancelButton") as Button).pressed.connect(_on_queue_cancel.bind(i))
+		_queue_list.add_child(row)
+
+
+func _clear_queue_rows() -> void:
+	for child in _queue_list.get_children():
+		_queue_list.remove_child(child)
+		child.queue_free()

@@ -31,19 +31,19 @@ grow_vertical = 2
 
 [node name="Column" type="VBoxContainer" parent="Center"]
 layout_mode = 2
-theme_override_constants/separation = 16
+theme_override_constants/separation = 28
 
 [node name="Title" type="Label" parent="Center/Column"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.94, 0.9, 1)
-theme_override_font_sizes/font_size = 48
+theme_override_font_sizes/font_size = 96
 text = "Project Bebop"
 horizontal_alignment = 1
 
 [node name="Subtitle" type="Label" parent="Center/Column"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.75, 0.76, 0.72, 1)
-theme_override_font_sizes/font_size = 18
+theme_override_font_sizes/font_size = 36
 text = "Terraforming 4X"
 horizontal_alignment = 1
 

@@ -46,4 +46,4 @@ Unrevealed cells have no land atlas. Revealed cells that are not currently visib
 
 ## Follow-ups
 
-Ticket 9 trains settlers through the production queue and calls `spawn_unit`. Border growth is also ticket 9. Combat and capture are tickets 14 and 15. AI turns are later.
+Settler training and border growth are in `docs/cities.md`. The queue calls `spawn_unit`. Combat and capture are tickets 14 and 15. AI turns are later.

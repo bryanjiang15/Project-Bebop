@@ -1,0 +1,33 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/ui/menu_button.tscn" id="1_button"]
+
+[node name="QueueRow" type="HBoxContainer"]
+theme_override_constants/separation = 8
+
+[node name="ItemLabel" type="Label" parent="."]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.96, 0.95, 0.9, 1)
+theme_override_font_sizes/font_size = 32
+text = "Item"
+vertical_alignment = 1
+autowrap_mode = 3
+
+[node name="UpButton" parent="." instance=ExtResource("1_button")]
+custom_minimum_size = Vector2(96, 72)
+layout_mode = 2
+theme_override_font_sizes/font_size = 28
+text = "Up"
+
+[node name="DownButton" parent="." instance=ExtResource("1_button")]
+custom_minimum_size = Vector2(128, 72)
+layout_mode = 2
+theme_override_font_sizes/font_size = 28
+text = "Down"
+
+[node name="CancelButton" parent="." instance=ExtResource("1_button")]
+custom_minimum_size = Vector2(80, 72)
+layout_mode = 2
+theme_override_font_sizes/font_size = 28
+text = "X"
