@@ -20,6 +20,7 @@ func _init() -> void:
 	_test_movement_and_fog()
 	_test_found_city()
 	_test_city_economy()
+	_test_combat()
 	_test_end_turn_key()
 	print("\nPassed: %d  Failed: %d" % [_passed, _failed])
 	quit(1 if _failed > 0 else 0)
@@ -89,7 +90,7 @@ func _test_config() -> void:
 	_ok(cfg.ai_obeys_fog and cfg.unit_vision == 2 and cfg.city_vision_beyond_border == 2, "fog")
 	_ok(cfg.map_seed == 0, "seed 0 rolls a seed at new game")
 	_ok(cfg.human_index == 0, "human index 0")
-	_ok(cfg.starting_units.size() == 1 and cfg.starting_units[0] == "settler", "starting units are a settler")
+	_ok(cfg.starting_units.size() == 2 and cfg.starting_units[0] == "settler" and cfg.starting_units[1] == "warrior", "starting units are settler then warrior")
 	_ok(cfg.player_colors.size() == cfg.player_count, "one color per player")
 	_ok(cfg.city_names.size() == cfg.player_count and not (cfg.city_names[0] as PackedStringArray).is_empty(), "one city-name list per player")
 	_ok(cfg.start_quality_radius == 2 and cfg.start_quality_min == 10, "start land quality")
@@ -103,7 +104,7 @@ func _test_config() -> void:
 	_ok(cfg.tie_order.size() == 3 and cfg.tie_order[0] == "tiles" and cfg.tie_order[1] == "cities" and cfg.tie_order[2] == "human_loses", "tie break")
 	_ok(is_equal_approx(cfg.capture_hp_fraction, 0.5) and cfg.capture_population_loss == 1, "capture resets")
 	_ok(cfg.only_target_must_be_in_range and cfg.drop_off_map and cfg.city_center_never_terraformed, "line and terraforming limits")
-	_ok(cfg.one_military_and_one_civilian_per_tile and cfg.capture_lone_settler, "stacking")
+	_ok(cfg.one_unit_per_tile and cfg.capture_lone_settler, "one unit per tile")
 	_ok(cfg.spawn_on_city_center and cfg.spawn_nearest_free_if_blocked and cfg.heal_only_if_idle, "spawn and heal")
 	_ok(cfg.settler_population_taken_when_finished, "settler pop cost timing")
 	_ok(cfg.skip_water_if_land_unit_present and cfg.cooldown_uses_caster_turns, "water skip and cooldown")
@@ -299,16 +300,23 @@ func _test_map_and_fog() -> void:
 		var share := float(counts[land_id]) / total
 		var target := float(cfg.land_mix[land_id])
 		_ok(absf(share - target) <= LAND_MIX_TOLERANCE, "%s mix %.3f within %.2f of %.2f" % [land_id, share, LAND_MIX_TOLERANCE, target])
-	_ok(first.players.size() == 3 and first.unit_total() == 3, "exactly 3 players and 3 settlers")
+	_ok(first.players.size() == 3 and first.unit_total() == cfg.player_count * cfg.starting_units.size(), "3 players each spawn the starting roster")
 	_ok(first.players[0].units[0].mp == cfg.unit(first.players[0].units[0].unit_type).move, "starting units begin with full movement")
 	for player in first.players:
 		_ok(player.units.size() == cfg.starting_units.size(), "player %d spawned the starting unit list" % player.index)
+		var occupied := {}
 		for i in player.units.size():
 			var unit := player.units[i]
 			_ok(unit.unit_type == cfg.starting_units[i], "player %d unit %d is %s" % [player.index, i, cfg.starting_units[i]])
 			_ok(first.map.is_passable(unit.cell, cfg), "start %s is passable land" % unit.cell)
-			var quality := first.map.passable_count(unit.cell, cfg.start_quality_radius, cfg)
-			_ok(quality >= cfg.start_quality_min, "start %s quality %d" % [unit.cell, quality])
+			_ok(not occupied.has(unit.cell), "player %d keeps one unit on %s" % [player.index, unit.cell])
+			occupied[unit.cell] = true
+		var anchor := player.units[0].cell
+		var quality := first.map.passable_count(anchor, cfg.start_quality_radius, cfg)
+		_ok(quality >= cfg.start_quality_min, "start %s quality %d" % [anchor, quality])
+		_ok(player.units.size() >= 2 and player.units[0].cell != player.units[1].cell, "player %d warrior stands on its own tile" % player.index)
+		_ok(_is_nearest_open(first, player.units[0].cell, player.units[1].cell), "player %d warrior takes the nearest free tile" % player.index)
+		_ok(player.units[1].hp == cfg.unit("warrior").hp and player.units[1].max_hp == cfg.unit("warrior").hp, "player %d warrior starts at full HP" % player.index)
 		if player.index == cfg.human_index:
 			_ok(player.human, "human index is the human")
 		else:
@@ -318,11 +326,16 @@ func _test_map_and_fog() -> void:
 			var dist := Hex.distance(Hex.offset_to_axial(first.players[a].units[0].cell), Hex.offset_to_axial(first.players[b].units[0].cell))
 			_ok(dist >= cfg.start_min_distance, "starts %d and %d are %d apart" % [a, b, dist])
 	for player in first.players:
-		var origin := Hex.offset_to_axial(player.units[0].cell)
+		var origins: Array[Vector2i] = []
+		for unit in player.units:
+			origins.append(Hex.offset_to_axial(unit.cell))
 		for row in first.map.height:
 			for col in first.map.width:
 				var cell := Vector2i(col, row)
-				var dist := Hex.distance(origin, Hex.offset_to_axial(cell))
+				var dist := 999999
+				var axial := Hex.offset_to_axial(cell)
+				for origin in origins:
+					dist = mini(dist, Hex.distance(origin, axial))
 				var state := first.fog.sight(player.index, cell)
 				if dist <= cfg.unit_vision:
 					if state != FogState.Sight.VISIBLE:
@@ -331,7 +344,7 @@ func _test_map_and_fog() -> void:
 				elif state != FogState.Sight.UNREVEALED:
 					_ok(false, "player %d should not have seen %s" % [player.index, cell])
 					return
-	_ok(true, "opening vision matches each settler disk")
+	_ok(true, "opening vision matches each starting unit")
 	for player in first.players:
 		if player.index == first.human_index:
 			continue
@@ -343,7 +356,7 @@ func _test_map_and_fog() -> void:
 	var all_seeds := true
 	for seed_value in range(1, 31):
 		var game := GameSetup.start_with_seed(cfg, seed_value)
-		if game == null or game.players.size() != cfg.player_count or game.unit_total() != cfg.player_count:
+		if game == null or game.players.size() != cfg.player_count or game.unit_total() != cfg.player_count * cfg.starting_units.size():
 			print("    seed failed ", seed_value)
 			all_seeds = false
 			break
@@ -396,6 +409,24 @@ func _step(cell: Vector2i, direction: int, steps: int) -> Vector2i:
 	return Hex.axial_to_offset(axial)
 
 
+func _is_nearest_open(game: GameSetup, anchor: Vector2i, chosen: Vector2i) -> bool:
+	if chosen == anchor or not game.map.is_passable(chosen, game.config):
+		return false
+	var taken := {}
+	for player in game.players:
+		for unit in player.units:
+			if unit.cell != chosen:
+				taken[unit.cell] = true
+	for row in game.map.height:
+		for col in game.map.width:
+			var cell := Vector2i(col, row)
+			if cell == chosen or taken.has(cell) or not game.map.is_passable(cell, game.config):
+				continue
+			if CityRules.prefer_near(cell, chosen, anchor):
+				return false
+	return true
+
+
 func _test_pathfinding() -> void:
 	print("[pathfinding]")
 	var origin := Vector2i(8, 8)
@@ -434,15 +465,17 @@ func _test_pathfinding() -> void:
 	var too_far := _step(origin, Hex.EAST, game.config.unit("scout").move + 1)
 	reach = game.reachable_tiles(scout)
 	_ok(reach.has(far) and not reach.has(too_far), "scout walks its own movement points")
-	var civilian := game.spawn_unit(0, "settler", origin)
+	var civilian := game.spawn_unit(0, "settler", _step(origin, Hex.NORTHEAST, 1))
 	var other := game.spawn_unit(0, "settler", neighbor)
 	_ok(civilian != null and other != null, "two settlers on different tiles")
-	_ok(not game.reachable_tiles(civilian).has(other.cell), "one civilian per tile")
-	_ok(game.spawn_unit(0, "settler", other.cell) == null, "spawn rejects a second civilian")
-	_ok(game.spawn_unit(0, "warrior", other.cell) != null, "one military unit may share a civilian's tile")
-	_ok(game.spawn_unit(0, "scout", other.cell) == null, "one military unit per tile")
+	_ok(not game.reachable_tiles(civilian).has(other.cell), "one unit per tile")
+	_ok(game.spawn_unit(0, "settler", other.cell) == null, "spawn rejects a second unit")
+	_ok(game.spawn_unit(0, "warrior", other.cell) == null, "a combatant cannot share a tile")
+	_ok(game.spawn_unit(0, "scout", other.cell) == null, "a second combatant is rejected")
 	var enemy := game.spawn_unit(1, "warrior", _step(origin, Hex.WEST, 1))
 	_ok(enemy != null and not game.reachable_tiles(civilian).has(enemy.cell), "cannot enter another player's unit")
+	game.config.one_unit_per_tile = false
+	_ok(game.spawn_unit(0, "warrior", other.cell) != null, "friendly stacking follows the config flag")
 	_ok(game.spawn_unit(0, "boat", origin) == null, "unknown unit type is rejected")
 
 
@@ -773,6 +806,153 @@ func _count_units(game: GameSetup, player: int, type: String) -> int:
 	return count
 
 
+func _test_combat() -> void:
+	print("[combat]")
+	var cfg: GameConfig = GameConfig.load_file()
+	_ok(Combat.damage(cfg, 20.0, 20.0) == 30, "equal strength deals 30")
+	_ok(Combat.damage(cfg, 0.0, 100.0) == 5, "damage clamps to 5")
+	_ok(Combat.damage(cfg, 100.0, 0.0) == 60, "damage clamps to 60")
+	_ok(Combat.damage(cfg, 5.0, 20.0) == 17, "scout strength into a warrior is 17")
+	_ok(Combat.damage(cfg, 20.0, 5.0) == 54, "warrior strength into a scout is 54")
+	var game := _blank_setup("plains")
+	var origin := Vector2i(8, 8)
+	var neighbor := _step(origin, Hex.EAST, 1)
+	var attacker := game.spawn_unit(0, "warrior", origin)
+	var defender := game.spawn_unit(1, "warrior", neighbor)
+	var even := game.preview_attack(attacker, defender)
+	_ok(bool(even["ok"]) and int(even["damage"]) == 30 and int(even["counter"]) == 30, "melee mirror is 30 and 30")
+	attacker.hp = 10
+	var wounded := game.preview_attack(attacker, defender)
+	_ok(int(wounded["damage"]) == 30 and int(wounded["counter"]) == 30, "HP does not change strength")
+	attacker.hp = 100
+	game.map.set_land(neighbor, "hills")
+	var hills := game.preview_attack(attacker, defender)
+	_ok(int(hills["damage"]) == 25 and int(hills["counter"]) == 36, "hills multiply defender strength by 1.25")
+	game.config.hills_defense_multiplier = 1.0
+	var flat_hills := game.preview_attack(attacker, defender)
+	_ok(int(flat_hills["damage"]) == 30 and int(flat_hills["counter"]) == 30, "hills bonus follows the config multiplier")
+	game.config.hills_defense_multiplier = 1.25
+	game.map.set_land(neighbor, "plains")
+	defender.fortified = true
+	var fort := game.preview_attack(attacker, defender)
+	_ok(int(fort["damage"]) == 25 and int(fort["counter"]) == 36, "fortify adds 25 percent defense")
+	game.map.set_land(neighbor, "hills")
+	var both := game.preview_attack(attacker, defender)
+	_ok(int(both["damage"]) == 19 and int(both["counter"]) == 47, "hills and fortify stack")
+	game.config.fortify_defense_bonus = 0.0
+	var no_fort := game.preview_attack(attacker, defender)
+	_ok(int(no_fort["damage"]) == 25 and int(no_fort["counter"]) == 36, "fortify bonus follows the config")
+	game.config.fortify_defense_bonus = 0.25
+	defender.fortified = false
+	game.map.set_land(neighbor, "plains")
+	var archer := game.spawn_unit(0, "archer", _step(origin, Hex.WEST, 2))
+	var shot := game.preview_attack(archer, defender)
+	_ok(not bool(shot["ok"]) and str(shot["reason"]) == GameSetup.REASON_RANGE, "archer at distance 3 is out of range")
+	var range_tile := _step(neighbor, Hex.EAST, 2)
+	archer.cell = range_tile
+	game._refresh_fog()
+	shot = game.preview_attack(archer, defender)
+	_ok(Hex.distance(Hex.offset_to_axial(archer.cell), Hex.offset_to_axial(defender.cell)) == 2, "archer stands at distance 2")
+	_ok(bool(shot["ok"]) and int(shot["damage"]) == 36 and int(shot["counter"]) == 0, "archer at range 2 deals 36 and takes no counter")
+	var beside := _step(neighbor, Hex.NORTHEAST, 1)
+	archer.cell = beside
+	game._refresh_fog()
+	var adjacent_shot := game.preview_attack(archer, defender)
+	_ok(Hex.distance(Hex.offset_to_axial(archer.cell), Hex.offset_to_axial(defender.cell)) == 1, "archer stands next to the defender")
+	_ok(bool(adjacent_shot["ok"]) and int(adjacent_shot["counter"]) == 0, "an adjacent archer shot is still ranged")
+	var before_archer := archer.hp
+	_ok(game.attack_unit(archer, defender).is_empty(), "ranged attack resolves")
+	_ok(archer.hp == before_archer and defender.hp == 100 - 36 and archer.mp == 0, "ranged attack spends movement and skips counter")
+	_ok(archer.cell == beside, "a ranged attacker stays on its tile")
+	_ok(game.attack_unit(archer, defender) == GameSetup.REASON_NO_MOVES, "a unit with no moves cannot attack")
+	defender.hp = 100
+	var foe := game.spawn_unit(1, "archer", _step(origin, Hex.NORTHWEST, 1))
+	var melee_archer := game.preview_attack(attacker, foe)
+	_ok(int(melee_archer["damage"]) == 41 and int(melee_archer["counter"]) == 22, "a melee hit uses the archer's defense of 12")
+	var scout := game.spawn_unit(1, "scout", _step(origin, Hex.WEST, 2))
+	var two := game.preview_attack(attacker, scout)
+	_ok(not bool(two["ok"]), "a warrior cannot melee at distance 2")
+	var own := game.spawn_unit(0, "scout", _step(origin, Hex.SOUTHEAST, 1))
+	_ok(game.can_attack(attacker, own) == GameSetup.REASON_OWN_UNIT, "cannot attack your own unit")
+	var hidden := game.spawn_unit(1, "warrior", _step(origin, Hex.SOUTHEAST, 8))
+	_ok(game.can_attack(attacker, hidden) == GameSetup.REASON_UNSEEN, "cannot attack a unit outside vision")
+	var settler := game.spawn_unit(1, "settler", _step(origin, Hex.NORTHEAST, 1))
+	var settler_mp := attacker.mp
+	_ok(game.can_attack(attacker, settler) == GameSetup.REASON_ATTACK_SETTLER, "cannot attack a settler")
+	_ok(game.attack_unit(attacker, settler) == GameSetup.REASON_ATTACK_SETTLER and attacker.mp == settler_mp, "a rejected settler attack spends nothing")
+	_ok(game.players[1].units.has(settler), "the settler stays on the map")
+	defender.hp = 5
+	var defender_cell := defender.cell
+	var attacker_cell := attacker.cell
+	_ok(game.attack_unit(attacker, defender).is_empty(), "a killing melee attack resolves")
+	_ok(not game.players[1].units.has(defender), "a unit at 0 HP is removed")
+	_ok(attacker.cell == attacker_cell and attacker.cell != defender_cell, "a melee attacker does not advance")
+	_ok(attacker.hp == 70 and attacker.mp == 0 and attacker.acted, "counter damage lands and the attack spends the turn")
+	attacker.hp = 5
+	attacker.mp = 2
+	var rival := game.spawn_unit(1, "warrior", defender_cell)
+	rival.hp = 5
+	_ok(game.attack_unit(attacker, rival).is_empty(), "mutual kill resolves")
+	_ok(not game.players[0].units.has(attacker) and not game.players[1].units.has(rival), "both units at 0 HP are removed")
+	game.config.ranged_takes_no_counter = false
+	var shooter := game.spawn_unit(0, "archer", origin)
+	var target := game.spawn_unit(1, "warrior", neighbor)
+	var answered := game.preview_attack(shooter, target)
+	_ok(int(answered["counter"]) == 25, "ranged counter follows the config flag")
+	print("[orders and healing]")
+	game = _blank_setup("plains")
+	var idle := game.spawn_unit(0, "warrior", Vector2i(4, 4))
+	idle.hp = 50
+	game.end_turn()
+	_ok(idle.hp == 60, "an idle unit heals 10")
+	idle.hp = 95
+	game.end_turn()
+	_ok(idle.hp == 100, "healing stops at max HP")
+	idle.hp = 40
+	idle.acted = true
+	game.end_turn()
+	_ok(idle.hp == 40 and not idle.acted and idle.mp == cfg.unit("warrior").move, "a unit that acted does not heal, and movement refills")
+	idle.hp = 40
+	_ok(game.skip_unit(idle) and idle.order == GameSetup.ORDER_SKIP and not idle.acted, "skip is an order and does not count as acting")
+	_ok(not game.has_unordered_moves(0), "skip satisfies the end-turn warning")
+	game.end_turn()
+	_ok(idle.hp == 50 and idle.order.is_empty(), "skip heals, then clears on the next turn")
+	_ok(game.has_unordered_moves(0), "a cleared skip warns again while moves remain")
+	idle.hp = 40
+	_ok(game.fortify_unit(idle) and idle.fortified and idle.order == GameSetup.ORDER_FORTIFY, "fortify sets the defense order")
+	_ok(not game.has_unordered_moves(0), "fortify satisfies the end-turn warning")
+	game.end_turn()
+	_ok(idle.hp == 50 and idle.fortified and idle.order == GameSetup.ORDER_FORTIFY, "fortify heals and persists")
+	var stepped := _step(idle.cell, Hex.EAST, 1)
+	_ok(game.move_unit(idle, stepped), "a fortified unit can still move")
+	_ok(not idle.fortified and idle.order.is_empty() and idle.acted, "moving clears fortify")
+	var hp_after_move := idle.hp
+	game.end_turn()
+	_ok(idle.hp == hp_after_move, "a unit that moved does not heal")
+	idle.hp = 40
+	idle.acted = true
+	game.config.heal_only_if_idle = false
+	game.end_turn()
+	_ok(idle.hp == 50, "healing ignores the idle rule when the flag is off")
+	game.config.heal_only_if_idle = true
+	game.config.unit_heal = 3
+	idle.hp = 40
+	idle.acted = false
+	game.end_turn()
+	_ok(idle.hp == 43, "heal amount follows the config")
+	game.config.end_turn_warns_if_unordered = false
+	idle.order = ""
+	_ok(not game.has_unordered_moves(0), "the warning flag can turn the check off")
+	game.config.end_turn_warns_if_unordered = true
+	var partial := game.spawn_unit(0, "settler", Vector2i(8, 8))
+	idle.order = GameSetup.ORDER_FORTIFY
+	idle.fortified = true
+	_ok(game.move_unit(partial, _step(partial.cell, Hex.EAST, 1)), "settler steps once")
+	_ok(partial.mp > 0 and game.has_unordered_moves(0), "moves left after a step still need an order")
+	partial.mp = 0
+	_ok(not game.has_unordered_moves(0), "a unit with no moves left does not warn")
+
+
 func _test_end_turn_key() -> void:
 	print("[end turn key]")
 	_ok(InputMap.has_action("end_turn"), "end_turn action exists")
@@ -781,6 +961,17 @@ func _test_end_turn_key() -> void:
 		if event is InputEventKey and (event as InputEventKey).physical_keycode == KEY_ENTER:
 			bound = true
 	_ok(bound, "Enter is bound to end_turn")
+	_ok(_key_bound("skip_unit", KEY_S), "S is bound to skip_unit")
+	_ok(_key_bound("fortify_unit", KEY_F), "F is bound to fortify_unit")
+
+
+func _key_bound(action: String, keycode: int) -> bool:
+	if not InputMap.has_action(action):
+		return false
+	for event in InputMap.action_get_events(action):
+		if event is InputEventKey and (event as InputEventKey).physical_keycode == keycode:
+			return true
+	return false
 
 
 func _same_setup(a: GameSetup, b: GameSetup) -> bool:

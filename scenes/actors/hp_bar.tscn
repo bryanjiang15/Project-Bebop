@@ -1,0 +1,11 @@
+[gd_scene format=3]
+
+[node name="HpBar" type="Node2D"]
+
+[node name="Back" type="Polygon2D" parent="."]
+color = Color(0.22, 0.22, 0.24, 0.95)
+polygon = PackedVector2Array(-24, -52, 24, -52, 24, -44, -24, -44)
+
+[node name="Fill" type="Polygon2D" parent="."]
+color = Color(0.45, 0.82, 0.38, 1)
+polygon = PackedVector2Array(-24, -52, 24, -52, 24, -44, -24, -44)

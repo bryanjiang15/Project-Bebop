@@ -1,6 +1,6 @@
 # Agent guide
 
-Project Bebop is a turn-based terraforming 4X on a hex map. This repository is the Godot 4.7 prototype. New Game builds a seeded hex map, three players, one starting settler each, and per-player fog of war. The human can move that settler, found a city, and run that city's yields, growth, borders, and production queue. Spells, combat, and AI are later tickets.
+Project Bebop is a turn-based terraforming 4X on a hex map. This repository is the Godot 4.7 prototype. New Game builds a seeded hex map, three players, one starting settler and one warrior each, and per-player fog of war. The human can move those units, attack a visible enemy, found a city, and run that city's yields, growth, borders, and production queue. Spells and AI are later tickets.
 
 Notion is the source of truth for design. Copies live in `docs/`. If the brief and the design doc disagree, the design doc wins. `docs/agreed_defaults.md` is the approved engineering record and overrides the design doc's chance-based volcanic proposal with the brief's flat 10 damage.
 
@@ -9,9 +9,9 @@ Notion is the source of truth for design. Copies live in `docs/`. If the brief a
 ```
 scenes/           main_menu.tscn, game.tscn, victory.tscn, defeat.tscn
 scenes/ui/        menu_button.tscn (instanced buttons), queue_row.tscn
-scenes/actors/    unit.tscn (instanced once per visible unit)
+scenes/actors/    unit.tscn (instanced once per visible unit), hp_bar.tscn
 scenes/view/      move_highlight.tscn, city_marker.tscn, border_segment.tscn, building_marker.tscn
-scripts/core/     RefCounted rules: hex.gd, game_config.gd, map_state.gd, map_generator.gd, player_state.gd, fog_state.gd, game_setup.gd, pathfinder.gd, map_city.gd, city_rules.gd
+scripts/core/     RefCounted rules: hex.gd, game_config.gd, map_state.gd, map_generator.gd, player_state.gd, fog_state.gd, game_setup.gd, pathfinder.gd, map_city.gd, city_rules.gd, combat.gd
 scripts/view/     rendering and input, including fog_overlay.gd
 config/game_config.json
 assets/art/       greybox art v0.2, bebop_tileset.tres, team_tint.gdshader
@@ -54,7 +54,7 @@ Hover calls `TileMapLayer.local_to_map` on that TileSet. `Hex.pixel_to_hex` / `p
 
 `MapGenerator` builds clusters with integer value noise, then assigns exact tile counts (largest remainder on `map.land_mix`). Low noise is water, then plains, forest, hills, volcanic. The counts are integer math so the same seed matches on macOS and Linux.
 
-Each player in `players.count` is spawned at a passable tile (not water) with at least `map.start_quality_min` passable tiles inside radius `map.start_quality_radius`. Pairwise hex distance is at least `map.start_min_distance`. The human is `players.human_index`. Everyone else is a rival with no AI yet. `players.starting_units` is the list spawned on that tile, in order. It is currently `["settler"]`. A later ticket adds the warrior by appending to that list. Sprites are instances of `scenes/actors/unit.tscn` on the y-sorted `Actors` node, tinted with `players.colors` through `assets/art/team_tint.gdshader`. A unit whose tile is not currently visible to the human is not instanced. Two units that share a tile are offset from each other; a unit on its own tile is not.
+Each player in `players.count` is spawned at a passable tile (not water) with at least `map.start_quality_min` passable tiles inside radius `map.start_quality_radius`. Pairwise hex distance is at least `map.start_min_distance`. The human is `players.human_index`. Everyone else is a rival with no AI yet. `players.starting_units` is `["settler", "warrior"]`, spawned in order through `spawn_unit`. The settler takes the start tile. Each later unit takes the nearest free passable tile (distance, then smaller axial q, then smaller r), because `units.one_unit_per_tile` allows one unit on a tile. Sprites are instances of `scenes/actors/unit.tscn` on the y-sorted `Actors` node, tinted with `players.colors` through `assets/art/team_tint.gdshader`. A unit whose tile is not currently visible to the human is not instanced. Each sprite sits on the cell center. `scenes/actors/hp_bar.tscn` is a child of each sprite and is hidden when max HP is 0.
 
 `GameSetup.spawn_unit(player, type, pos)` is the only way to create a unit. `pos` is an odd-r offset cell, the same space as `UnitState.cell`. It rejects an unknown type, a bad player, impassable land, and an illegal stack, then recomputes fog. Starting units go through it.
 
@@ -66,9 +66,9 @@ The camera starts centered on the human settler, at `camera.default_zoom`.
 
 ## Movement and founding
 
-`Pathfinder.reachable` searches axial hexes and returns movement points left on arrival. The origin is omitted. `GameSetup.reachable_tiles` converts that result to offset cells. The cost is the land of the tile entered (`land.*.move_cost`). Water is impassable. When `movement.allow_enter_over_budget_if_mp_left` is true and any points remain, a costlier tile can still be entered; arrival leaves 0 points and the search does not continue. Another player's unit blocks the tile. `units.one_military_and_one_civilian_per_tile` allows one combatant and one non-combatant together and rejects a second of the same kind.
+`Pathfinder.reachable` searches axial hexes and returns movement points left on arrival. The origin is omitted. `GameSetup.reachable_tiles` converts that result to offset cells. The cost is the land of the tile entered (`land.*.move_cost`). Water is impassable. When `movement.allow_enter_over_budget_if_mp_left` is true and any points remain, a costlier tile can still be entered; arrival leaves 0 points and the search does not continue. `units.one_unit_per_tile` rejects any tile that already holds a unit. Another player's unit blocks the tile either way.
 
-A left click selects the human unit on that tile, or clears the selection when the tile has none. Reachable tiles and the selected tile are instances of `scenes/view/move_highlight.tscn`, using `tile_highlight.png`. The sprite offset is read from the TileSet at runtime. A right click on a highlighted tile moves the selected unit. A left click never moves. A left drag farther than 8 px still pans. Middle drag, arrow keys, and the wheel are unchanged. `End Turn` and the Enter key (`end_turn`) increment one global turn and refill every unit from its config move. Enter does nothing while the in-game menu is open, and a focused control still receives Enter first. Rivals do not act. Fog recomputes after each move.
+A left click selects the human unit on that tile. The human's city on that tile comes after the unit. An empty tile clears the selection. Reachable tiles and the selected tile are instances of `scenes/view/move_highlight.tscn`, using `tile_highlight.png`. The sprite offset is read from the TileSet at runtime. Attackable tiles use the same scene tinted red. A right click on a visible enemy attacks and does not move. A right click on an empty highlighted tile moves the selected unit. A left click never moves. A left drag farther than 8 px still pans. Middle drag, arrow keys, and the wheel are unchanged. `End Turn` and the Enter key (`end_turn`) heal idle units, increment one global turn, and refill every unit from its config move. When a human unit still has movement and no order, the first press warns (`End anyway (Enter)`) and the second press confirms. Enter does nothing while the in-game menu is open, and a focused control still receives Enter first. Rivals do not act. Fog recomputes after each move and attack.
 
 `%FoundCityButton` reads **Found City (B)**. The `found_city` input action is B. `%FoundCityReason` shows why the button is disabled:
 
@@ -81,6 +81,12 @@ A left click selects the human unit on that tile, or clears the selection when t
 Distance is center to center. Less than `city.min_distance` rejects, including a city under fog. Exactly that distance accepts. Founding does not spend movement. It consumes the settler, stores population 1, and claims a disk of `city.border_start_radius`. Water is claimed only when `borders.can_claim_water` is true. An owned tile is left alone when `borders.can_claim_owned_tiles` is false. Own territory can be founded on when the distance rule passes. Names come from `players.city_names`, one non-empty list per player. Past the end of a list, the last name is reused with a number (`Only`, then `Only 2`).
 
 Cities are instances of `scenes/view/city_marker.tscn` on `Actors`, tinted with the owner's color. Territory edges are instances of `scenes/view/border_segment.tscn` under `%Borders`, one segment per outer edge of an explored owned tile. `players.city_names` is one non-empty name list per player. Details of movement and founding live in `docs/movement_and_founding.md`.
+
+## Combat and orders
+
+`Combat.damage` is `30 × 1.04^(attack − defense)`, then `roundi`, then clamped to `combat.min_damage`..`combat.max_damage`. Hills (`combat.hills_defense_multiplier`) and Fortify (`1 + units.fortify_defense_bonus`) multiply the defender's strength and stack. HP does not change strength. Melee is adjacent and the defender strikes back. An archer shoots to `units.archer.range` with no counter, and uses defense 12 when struck in melee. A hit sets the attacker's movement to 0. A unit at 0 HP is removed and the attacker does not step onto that tile. A settler cannot be targeted. Only a currently visible enemy can.
+
+Skip (`skip_unit`, S) and Fortify (`fortify_unit`, F) are orders. Fortify lasts until the unit moves. Healing is `units.heal` at the end of the global turn, after cities and before movement is refilled, only for a unit that did not move or attack, capped at max HP. `%CombatPreview` and the hover tooltip show predicted damage and counter-damage. The formula, reasons, and the End Turn confirm are in `docs/combat.md`.
 
 ## Cities
 
@@ -113,7 +119,7 @@ godot --headless --path . --script res://tests/smoke_game.gd
 
 `expect_missing_key.gd` must exit non-zero and report `game_config.json missing key: players.count`. The others must exit 0. CI greps every log for `SCRIPT ERROR` and `ERROR:` (`set -o pipefail`) except the missing-key step, which requires that specific error.
 
-Play the game with `godot --path .`. Left-click a settler, then right-click a highlighted tile to move it. B or **Found City** founds a city on that tile. Left-click the city to open its panel, then click a build button (for a building, click a highlighted tile next). Enter or **End Turn** ends the turn and resolves growth, production, and borders. F9 opens Victory, F10 opens Defeat, Escape toggles the in-game menu.
+Play the game with `godot --path .`. Left-click the start tile to select the settler, and again to select the warrior. Right-click a green tile to move. Right-click a red enemy tile to attack. S skips and F fortifies. B or **Found City** founds a city. Left-click the city to open its panel, then click a build button (for a building, click a highlighted tile next). Enter or **End Turn** ends the turn. If units still have moves, that press warns and the next one confirms. The turn resolves healing, growth, production, and borders. F9 opens Victory, F10 opens Defeat, Escape toggles the in-game menu.
 
 ## Rules for agents
 

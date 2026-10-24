@@ -28,6 +28,10 @@ func _run() -> void:
 		return
 	if not _move_settler(game):
 		return
+	if not _warrior_orders(game):
+		return
+	if not _scripted_combat(game):
+		return
 	if not _found_city(game):
 		return
 	if not _end_turn_with_enter(game):
@@ -97,7 +101,8 @@ func _assert_new_game(game: Node) -> bool:
 		print("FAIL map size")
 		quit(1)
 		return false
-	if setup.players.size() != 3 or setup.unit_total() != 3:
+	var roster := setup.players.size() * setup.config.starting_units.size()
+	if setup.players.size() != 3 or setup.unit_total() != roster:
 		print("FAIL players ", setup.players.size(), " units ", setup.unit_total())
 		quit(1)
 		return false
@@ -116,11 +121,18 @@ func _assert_new_game(game: Node) -> bool:
 	var hidden := Vector2i(-1, -1)
 	var shown := 0
 	for player in setup.players:
-		for unit in player.units:
-			if unit.unit_type != "settler":
-				print("FAIL unexpected unit ", unit.unit_type)
+		if player.units.size() != setup.config.starting_units.size():
+			print("FAIL roster size ", player.units.size())
+			quit(1)
+			return false
+		var occupied := {}
+		for i in player.units.size():
+			var unit := player.units[i]
+			if unit.unit_type != setup.config.starting_units[i] or occupied.has(unit.cell):
+				print("FAIL start unit ", unit.unit_type, " ", unit.cell)
 				quit(1)
 				return false
+			occupied[unit.cell] = true
 			if setup.fog.unit_visible(setup.human_index, unit.cell):
 				shown += 1
 	for row in setup.map.height:
@@ -186,23 +198,188 @@ func _move_settler(game: Node) -> bool:
 
 
 func _end_turn_with_enter(game: Node) -> bool:
+	var setup := game.get("setup") as GameSetup
+	var during := "%d / 50" % setup.turn
 	(game.get_node("%MenuButton") as Button).pressed.emit()
 	_press_action(game, "end_turn")
 	var turn := (game.get_node("%TurnLabel") as Label).text
-	if turn != "1 / 50":
+	if turn != during:
 		print("FAIL enter during menu: '", turn, "'")
 		quit(1)
 		return false
 	print("PASS enter ignored while menu is open")
+	var before := setup.turn
 	(game.get_node("%MenuButton") as Button).pressed.emit()
 	_press_action(game, "end_turn")
 	turn = (game.get_node("%TurnLabel") as Label).text
-	if turn != "2 / 50":
-		print("FAIL enter turn: '", turn, "'")
+	if setup.turn != before + 1 or turn != "%d / 50" % setup.turn:
+		print("FAIL enter turn: '", turn, "' core ", setup.turn, " before ", before)
 		quit(1)
 		return false
 	print("PASS enter ends turn ", turn)
 	return true
+
+
+func _warrior_orders(game: Node) -> bool:
+	var setup := game.get("setup") as GameSetup
+	var warrior := _human_unit(setup, "warrior")
+	if warrior == null:
+		print("FAIL no warrior")
+		quit(1)
+		return false
+	_click_cell(game, warrior.cell)
+	if (game.get_node("%SelectionTitle") as Label).text != "Warrior":
+		print("FAIL selected ", (game.get_node("%SelectionTitle") as Label).text)
+		quit(1)
+		return false
+	var dest := _other_reachable(setup, warrior, setup.human_settler_cell())
+	if dest.x < 0:
+		var anywhere: Dictionary = setup.reachable_tiles(warrior)
+		if anywhere.is_empty():
+			print("FAIL warrior has no move")
+			quit(1)
+			return false
+		dest = anywhere.keys()[0]
+	_click_cell(game, dest, MOUSE_BUTTON_RIGHT)
+	if warrior.cell != dest:
+		print("FAIL warrior did not move ", warrior.cell)
+		quit(1)
+		return false
+	(game.get_node("%SkipButton") as Button).pressed.emit()
+	var detail := (game.get_node("%SelectionDetail") as Label).text
+	if not detail.contains("Order Skip") or not detail.contains("HP %d / %d" % [warrior.hp, warrior.max_hp]):
+		print("FAIL skip panel '", detail, "'")
+		quit(1)
+		return false
+	_press_action(game, "fortify_unit")
+	detail = (game.get_node("%SelectionDetail") as Label).text
+	if not detail.contains("Order Fortify") or not warrior.fortified:
+		print("FAIL fortify panel '", detail, "'")
+		quit(1)
+		return false
+	print("PASS skip and fortify")
+	var settler := _human_unit(setup, "settler")
+	if settler != null and settler.mp <= 0 and not setup.has_unordered_moves(setup.human_index):
+		settler.mp = 1
+		settler.order = ""
+	(game.get_node("%EndTurnButton") as Button).pressed.emit()
+	var turn := (game.get_node("%TurnLabel") as Label).text
+	var warning := (game.get_node("%EndTurnWarning") as Label).text
+	var button := (game.get_node("%EndTurnButton") as Button).text
+	if turn != "1 / 50" or warning.is_empty() or button != "End anyway (Enter)":
+		print("FAIL warning turn='", turn, "' warning='", warning, "' button='", button, "'")
+		quit(1)
+		return false
+	print("PASS end turn warning")
+	(game.get_node("%EndTurnButton") as Button).pressed.emit()
+	turn = (game.get_node("%TurnLabel") as Label).text
+	warning = (game.get_node("%EndTurnWarning") as Label).text
+	button = (game.get_node("%EndTurnButton") as Button).text
+	if turn != "2 / 50" or not warning.is_empty() or button != "End Turn (Enter)":
+		print("FAIL confirm turn='", turn, "' warning='", warning, "' button='", button, "'")
+		quit(1)
+		return false
+	if not warrior.fortified or warrior.mp != setup.config.unit("warrior").move:
+		print("FAIL fortify did not persist mp ", warrior.mp)
+		quit(1)
+		return false
+	print("PASS end turn confirmed")
+	return true
+
+
+func _scripted_combat(game: Node) -> bool:
+	var setup := game.get("setup") as GameSetup
+	var warrior := _human_unit(setup, "warrior")
+	if warrior == null or warrior.mp <= 0:
+		print("FAIL warrior cannot attack")
+		quit(1)
+		return false
+	var dest := _open_neighbor(setup, warrior.cell)
+	if dest.x < 0:
+		print("FAIL no adjacent tile")
+		quit(1)
+		return false
+	setup.map.set_land(dest, "plains")
+	var rival := setup.spawn_unit(1, "warrior", dest)
+	if rival == null:
+		print("FAIL rival did not spawn at ", dest)
+		quit(1)
+		return false
+	game._refresh_board()
+	_click_cell(game, warrior.cell)
+	if (game.get_node("%SelectionTitle") as Label).text != "Warrior":
+		_click_cell(game, warrior.cell)
+	if (game.get_node("%SelectionTitle") as Label).text != "Warrior":
+		print("FAIL combat selection ", (game.get_node("%SelectionTitle") as Label).text)
+		quit(1)
+		return false
+	if not _hover(game, dest, true):
+		return false
+	var preview := (game.get_node("%CombatPreview") as Label).text
+	var tip := (game.get_node("%Tooltip") as Label).text
+	if not preview.contains("Damage") or not preview.contains("Counter") or not tip.contains("Damage") or not tip.contains("Counter"):
+		print("FAIL preview '", preview, "' tip '", tip, "'")
+		quit(1)
+		return false
+	var attack_mark := false
+	for child in game.get_node("%MoveHighlights").get_children():
+		var tint := (child as CanvasItem).modulate
+		if tint.r > tint.g and tint.r > tint.b:
+			attack_mark = true
+	if not attack_mark:
+		print("FAIL no attack highlight")
+		quit(1)
+		return false
+	print("PASS combat preview ", preview)
+	var attacker_hp := warrior.hp
+	var defender_hp := rival.hp
+	var attacker_cell := warrior.cell
+	_click_cell(game, dest, MOUSE_BUTTON_RIGHT)
+	if warrior.cell != attacker_cell:
+		print("FAIL attacker advanced to ", warrior.cell)
+		quit(1)
+		return false
+	if warrior.hp >= attacker_hp or rival.hp >= defender_hp or warrior.mp != 0:
+		print("FAIL hp ", warrior.hp, " ", rival.hp, " mp ", warrior.mp)
+		quit(1)
+		return false
+	if not setup.players[1].units.has(rival):
+		print("FAIL rival was removed")
+		quit(1)
+		return false
+	print("PASS attack ", attacker_hp, "->", warrior.hp, " ", defender_hp, "->", rival.hp)
+	return true
+
+
+func _human_unit(setup: GameSetup, unit_type: String) -> PlayerState.UnitState:
+	for unit in setup.players[setup.human_index].units:
+		if unit.unit_type == unit_type:
+			return unit
+	return null
+
+
+func _other_reachable(setup: GameSetup, unit: PlayerState.UnitState, avoid: Vector2i) -> Vector2i:
+	for key in setup.reachable_tiles(unit).keys():
+		var cell := key as Vector2i
+		if cell != avoid:
+			return cell
+	return Vector2i(-1, -1)
+
+
+func _open_neighbor(setup: GameSetup, origin: Vector2i) -> Vector2i:
+	var axial := Hex.offset_to_axial(origin)
+	for dir in 6:
+		var cell := Hex.axial_to_offset(Hex.neighbor(axial, dir))
+		if not setup.map.in_bounds(cell):
+			continue
+		var occupied := false
+		for player in setup.players:
+			for unit in player.units:
+				if unit.cell == cell:
+					occupied = true
+		if not occupied:
+			return cell
+	return Vector2i(-1, -1)
 
 
 func _train_scout(game: Node) -> bool:
@@ -300,8 +477,12 @@ func _found_city(game: Node) -> bool:
 	for unit in setup.players[setup.human_index].units:
 		if unit.unit_type == "settler":
 			human_settlers += 1
-	if human_settlers != 0 or setup.cities.size() != 1 or setup.unit_total() != 2:
-		print("FAIL founded city settlers=", human_settlers, " cities=", setup.cities.size(), " units=", setup.unit_total())
+	var human_warriors := 0
+	for unit in setup.players[setup.human_index].units:
+		if unit.unit_type == "warrior":
+			human_warriors += 1
+	if human_settlers != 0 or human_warriors != 1 or setup.cities.size() != 1:
+		print("FAIL founded city settlers=", human_settlers, " warriors=", human_warriors, " cities=", setup.cities.size(), " units=", setup.unit_total())
 		quit(1)
 		return false
 	var city_nodes := 0
@@ -314,7 +495,7 @@ func _found_city(game: Node) -> bool:
 			city_name = (child.get_node("Name") as Label).text
 		elif node_name.begins_with("Unit_"):
 			unit_nodes += 1
-	if city_nodes != 1 or unit_nodes != 0 or city_name == "":
+	if city_nodes != 1 or unit_nodes < 1 or city_name == "":
 		print("FAIL city view cities=", city_nodes, " units=", unit_nodes, " name='", city_name, "'")
 		quit(1)
 		return false

@@ -6,13 +6,13 @@ Engineering record for the settler-movement and founding rules. Design still liv
 
 Player ids are `0 .. players.count - 1`. The human is `players.human_index` (0). **End Turn** and the Enter key advance one global turn and refill every unit's movement from `units.<type>.move`. Enter does nothing while the in-game menu is open. Rivals do not take a turn.
 
-There is no starting warrior. `players.starting_units` stays `["settler"]`. Ticket 14 appends `warrior`.
+`players.starting_units` is `["settler", "warrior"]`. The settler takes the start tile. The warrior takes the nearest free passable tile. Combat, healing, and Skip/Fortify are in `docs/combat.md`.
 
 ## Units
 
 `GameSetup.spawn_unit(player, type, pos)` is the only constructor. `pos` is an odd-r offset cell. The call rejects an unknown type, a player id outside the match, a tile off the map, impassable land (water), and an illegal stack. It then recomputes fog.
 
-A tile holds at most one combatant and one non-combatant when `units.one_military_and_one_civilian_per_tile` is true. Another player's unit blocks entry completely. A tile the unit cannot stop on cannot be entered.
+A tile holds one unit when `units.one_unit_per_tile` is true. Another player's unit blocks entry either way. A tile the unit cannot stop on cannot be entered.
 
 ## Movement
 
@@ -20,7 +20,7 @@ A tile holds at most one combatant and one non-combatant when `units.one_militar
 
 The cost is the land of the tile being entered. Water (`passable` false, `move_cost` -1) is impassable. When `movement.allow_enter_over_budget_if_mp_left` is true and the unit still has points, it may enter a more expensive tile, arrives with 0, and does not keep searching from there.
 
-A left click selects the human unit on that cell, or clears the selection when the cell is empty. Highlight sprites mark the selected cell and every reachable cell. A right click on a reachable cell moves. A left click does not move. A left drag farther than 8 px pans, as do middle drag and the arrow keys. Founding does not spend movement points. Fog recomputes after every move.
+A move sets the unit as having acted and clears Fortify. A left click selects the human unit on that cell, or clears the selection when the cell is empty. The city on that cell comes after the unit. Highlight sprites mark the selected cell and every reachable cell. A right click on a reachable cell moves. A right click on a visible enemy attacks instead; see `docs/combat.md`. A left click does not move. A left drag farther than 8 px pans, as do middle drag and the arrow keys. Founding does not spend movement points. Fog recomputes after every move.
 
 ## Founding
 

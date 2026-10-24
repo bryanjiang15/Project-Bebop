@@ -71,7 +71,7 @@ var spells_change_tile_ownership: bool
 var skip_water_if_land_unit_present: bool
 var cooldown_uses_caster_turns: bool
 var spells: Dictionary = {}
-var one_military_and_one_civilian_per_tile: bool
+var one_unit_per_tile: bool
 var capture_lone_settler: bool
 var spawn_on_city_center: bool
 var spawn_nearest_free_if_blocked: bool
@@ -291,7 +291,7 @@ static func required_paths() -> PackedStringArray:
 		for field in SPELL_FIELDS:
 			paths.append("spells.%s.%s" % [spell_id, field])
 	paths.append_array(PackedStringArray([
-		"units.one_military_and_one_civilian_per_tile",
+		"units.one_unit_per_tile",
 		"units.capture_lone_settler",
 		"units.spawn_on_city_center",
 		"units.spawn_nearest_free_if_blocked",
@@ -424,7 +424,7 @@ func to_dict() -> Dictionary:
 	for spell_id in SPELL_IDS:
 		spell_out[spell_id] = (spells[spell_id] as SpellStats).to_dict()
 	var unit_out := {
-		"one_military_and_one_civilian_per_tile": one_military_and_one_civilian_per_tile,
+		"one_unit_per_tile": one_unit_per_tile,
 		"capture_lone_settler": capture_lone_settler,
 		"spawn_on_city_center": spawn_on_city_center,
 		"spawn_nearest_free_if_blocked": spawn_nearest_free_if_blocked,
@@ -638,7 +638,7 @@ func _read(data: Dictionary) -> void:
 		spell_stats.cooldown = _int(data, prefix + ".cooldown")
 		spell_stats.land = _string(data, prefix + ".land")
 		spells[spell_id] = spell_stats
-	one_military_and_one_civilian_per_tile = _bool(data, "units.one_military_and_one_civilian_per_tile")
+	one_unit_per_tile = _bool(data, "units.one_unit_per_tile")
 	capture_lone_settler = _bool(data, "units.capture_lone_settler")
 	spawn_on_city_center = _bool(data, "units.spawn_on_city_center")
 	spawn_nearest_free_if_blocked = _bool(data, "units.spawn_nearest_free_if_blocked")

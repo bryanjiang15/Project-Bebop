@@ -50,7 +50,7 @@ Cancelling the item in front discards the stored production. Cancelling a later 
 
 A settler can be queued and can finish only when the population is at least `units.settler.min_city_size`. When `growth.settler_population_taken_when_finished` is true, finishing subtracts `units.settler.population_cost` and the result is not allowed to pass below `growth.starve_population_min`. If the city is too small, or no legal spawn tile exists, the item stays in front and stored production stops at its cost until it can finish.
 
-Units spawn through `GameSetup.spawn_unit`. The tile is the city center when `units.spawn_on_city_center` allows it and the stack rule allows it. Otherwise, when `units.spawn_nearest_free_if_blocked` is true, the nearest passable tile inside this city's borders is used (distance, then smaller q, then smaller r). Water is not a spawn tile.
+Units spawn through `GameSetup.spawn_unit`. The tile is the city center when `units.spawn_on_city_center` allows it and the tile is empty. Otherwise, when `units.spawn_nearest_free_if_blocked` is true, the nearest passable tile inside this city's borders is used (distance, then smaller q, then smaller r). Water is not a spawn tile. A tile already holding a unit is not empty.
 
 ## Buildings
 
@@ -69,6 +69,6 @@ The panel button starts placement. The next left click on a legal tile enqueues 
 
 `%CityPanel` in `scenes/game.tscn` opens when the human left-clicks their city. Food, production, mana, the growth bar, the border line, and the queue are filled from core. The build buttons are instances of `scenes/ui/menu_button.tscn`. Each queue row is an instance of `scenes/ui/queue_row.tscn`. A finished building is an instance of `scenes/view/building_marker.tscn` on `Actors`, drawn once its tile has been explored.
 
-A left click still selects a human unit, and a right click still moves it. If the tile has both the human's unit and the human's city, the first click selects the unit and the next click on that tile selects the city. Enter still ends the turn, and it does nothing while the in-game menu is open. City actions also do nothing while that menu is open.
+A left click still selects a human unit, and a right click still moves it or attacks a visible enemy. If the tile has the human's unit and the human's city, the first click selects the unit and the next click selects the city. Enter still ends the turn, and it does nothing while the in-game menu is open. City actions also do nothing while that menu is open.
 
 While a city is selected, gold highlights mark the worked tiles. During building placement, cyan highlights mark the legal tiles.

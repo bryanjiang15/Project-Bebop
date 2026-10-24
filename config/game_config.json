@@ -6,7 +6,7 @@
     "ai": 2,
     "human_index": 0,
     "starting_mana": 10,
-    "starting_units": ["settler"],
+    "starting_units": ["settler", "warrior"],
     "colors": ["#3D7EDB", "#D94A3D", "#E2A23A"],
     "city_names": [
       ["Haven", "Westford", "Ashfield", "Millhaven", "Oakrest", "Fairwater"],
@@ -90,7 +90,7 @@
     "restore_plains": {"shape": "radius", "radius": 1, "length": 0, "mana": 10, "range": 3, "cooldown": 2, "land": "plains"}
   },
   "units": {
-    "one_military_and_one_civilian_per_tile": true,
+    "one_unit_per_tile": true,
     "capture_lone_settler": true,
     "spawn_on_city_center": true,
     "spawn_nearest_free_if_blocked": true,
