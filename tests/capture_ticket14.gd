@@ -41,8 +41,8 @@ func _run() -> void:
 		return
 	var warrior := _human_unit(setup, "warrior")
 	var settler := _human_unit(setup, "settler")
-	if warrior == null or settler == null or warrior.cell != settler.cell:
-		print("FAIL start stack")
+	if warrior == null or settler == null or warrior.cell == settler.cell:
+		print("FAIL units share a tile")
 		quit(1)
 		return
 	_frame(game, warrior.cell)
@@ -93,7 +93,7 @@ func _run() -> void:
 		return
 	print("PREVIEW ", preview)
 	_click(game, dest, MOUSE_BUTTON_RIGHT)
-	if warrior.hp != 70 or rival.hp != 70 or warrior.cell != settler.cell:
+	if warrior.hp != 70 or rival.hp != 70 or warrior.cell == settler.cell:
 		print("FAIL after ", warrior.hp, " ", rival.hp, " cell ", warrior.cell)
 		quit(1)
 		return

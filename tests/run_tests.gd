@@ -104,7 +104,7 @@ func _test_config() -> void:
 	_ok(cfg.tie_order.size() == 3 and cfg.tie_order[0] == "tiles" and cfg.tie_order[1] == "cities" and cfg.tie_order[2] == "human_loses", "tie break")
 	_ok(is_equal_approx(cfg.capture_hp_fraction, 0.5) and cfg.capture_population_loss == 1, "capture resets")
 	_ok(cfg.only_target_must_be_in_range and cfg.drop_off_map and cfg.city_center_never_terraformed, "line and terraforming limits")
-	_ok(cfg.one_military_and_one_civilian_per_tile and cfg.capture_lone_settler, "stacking")
+	_ok(cfg.one_unit_per_tile and cfg.capture_lone_settler, "one unit per tile")
 	_ok(cfg.spawn_on_city_center and cfg.spawn_nearest_free_if_blocked and cfg.heal_only_if_idle, "spawn and heal")
 	_ok(cfg.settler_population_taken_when_finished, "settler pop cost timing")
 	_ok(cfg.skip_water_if_land_unit_present and cfg.cooldown_uses_caster_turns, "water skip and cooldown")
@@ -304,13 +304,18 @@ func _test_map_and_fog() -> void:
 	_ok(first.players[0].units[0].mp == cfg.unit(first.players[0].units[0].unit_type).move, "starting units begin with full movement")
 	for player in first.players:
 		_ok(player.units.size() == cfg.starting_units.size(), "player %d spawned the starting unit list" % player.index)
+		var occupied := {}
 		for i in player.units.size():
 			var unit := player.units[i]
 			_ok(unit.unit_type == cfg.starting_units[i], "player %d unit %d is %s" % [player.index, i, cfg.starting_units[i]])
 			_ok(first.map.is_passable(unit.cell, cfg), "start %s is passable land" % unit.cell)
-			var quality := first.map.passable_count(unit.cell, cfg.start_quality_radius, cfg)
-			_ok(quality >= cfg.start_quality_min, "start %s quality %d" % [unit.cell, quality])
-		_ok(player.units.size() >= 2 and player.units[0].cell == player.units[1].cell, "player %d warrior shares the settler's tile" % player.index)
+			_ok(not occupied.has(unit.cell), "player %d keeps one unit on %s" % [player.index, unit.cell])
+			occupied[unit.cell] = true
+		var anchor := player.units[0].cell
+		var quality := first.map.passable_count(anchor, cfg.start_quality_radius, cfg)
+		_ok(quality >= cfg.start_quality_min, "start %s quality %d" % [anchor, quality])
+		_ok(player.units.size() >= 2 and player.units[0].cell != player.units[1].cell, "player %d warrior stands on its own tile" % player.index)
+		_ok(_is_nearest_open(first, player.units[0].cell, player.units[1].cell), "player %d warrior takes the nearest free tile" % player.index)
 		_ok(player.units[1].hp == cfg.unit("warrior").hp and player.units[1].max_hp == cfg.unit("warrior").hp, "player %d warrior starts at full HP" % player.index)
 		if player.index == cfg.human_index:
 			_ok(player.human, "human index is the human")
@@ -321,11 +326,16 @@ func _test_map_and_fog() -> void:
 			var dist := Hex.distance(Hex.offset_to_axial(first.players[a].units[0].cell), Hex.offset_to_axial(first.players[b].units[0].cell))
 			_ok(dist >= cfg.start_min_distance, "starts %d and %d are %d apart" % [a, b, dist])
 	for player in first.players:
-		var origin := Hex.offset_to_axial(player.units[0].cell)
+		var origins: Array[Vector2i] = []
+		for unit in player.units:
+			origins.append(Hex.offset_to_axial(unit.cell))
 		for row in first.map.height:
 			for col in first.map.width:
 				var cell := Vector2i(col, row)
-				var dist := Hex.distance(origin, Hex.offset_to_axial(cell))
+				var dist := 999999
+				var axial := Hex.offset_to_axial(cell)
+				for origin in origins:
+					dist = mini(dist, Hex.distance(origin, axial))
 				var state := first.fog.sight(player.index, cell)
 				if dist <= cfg.unit_vision:
 					if state != FogState.Sight.VISIBLE:
@@ -334,7 +344,7 @@ func _test_map_and_fog() -> void:
 				elif state != FogState.Sight.UNREVEALED:
 					_ok(false, "player %d should not have seen %s" % [player.index, cell])
 					return
-	_ok(true, "opening vision matches each settler disk")
+	_ok(true, "opening vision matches each starting unit")
 	for player in first.players:
 		if player.index == first.human_index:
 			continue
@@ -399,6 +409,24 @@ func _step(cell: Vector2i, direction: int, steps: int) -> Vector2i:
 	return Hex.axial_to_offset(axial)
 
 
+func _is_nearest_open(game: GameSetup, anchor: Vector2i, chosen: Vector2i) -> bool:
+	if chosen == anchor or not game.map.is_passable(chosen, game.config):
+		return false
+	var taken := {}
+	for player in game.players:
+		for unit in player.units:
+			if unit.cell != chosen:
+				taken[unit.cell] = true
+	for row in game.map.height:
+		for col in game.map.width:
+			var cell := Vector2i(col, row)
+			if cell == chosen or taken.has(cell) or not game.map.is_passable(cell, game.config):
+				continue
+			if CityRules.prefer_near(cell, chosen, anchor):
+				return false
+	return true
+
+
 func _test_pathfinding() -> void:
 	print("[pathfinding]")
 	var origin := Vector2i(8, 8)
@@ -437,15 +465,17 @@ func _test_pathfinding() -> void:
 	var too_far := _step(origin, Hex.EAST, game.config.unit("scout").move + 1)
 	reach = game.reachable_tiles(scout)
 	_ok(reach.has(far) and not reach.has(too_far), "scout walks its own movement points")
-	var civilian := game.spawn_unit(0, "settler", origin)
+	var civilian := game.spawn_unit(0, "settler", _step(origin, Hex.NORTHEAST, 1))
 	var other := game.spawn_unit(0, "settler", neighbor)
 	_ok(civilian != null and other != null, "two settlers on different tiles")
-	_ok(not game.reachable_tiles(civilian).has(other.cell), "one civilian per tile")
-	_ok(game.spawn_unit(0, "settler", other.cell) == null, "spawn rejects a second civilian")
-	_ok(game.spawn_unit(0, "warrior", other.cell) != null, "one military unit may share a civilian's tile")
-	_ok(game.spawn_unit(0, "scout", other.cell) == null, "one military unit per tile")
+	_ok(not game.reachable_tiles(civilian).has(other.cell), "one unit per tile")
+	_ok(game.spawn_unit(0, "settler", other.cell) == null, "spawn rejects a second unit")
+	_ok(game.spawn_unit(0, "warrior", other.cell) == null, "a combatant cannot share a tile")
+	_ok(game.spawn_unit(0, "scout", other.cell) == null, "a second combatant is rejected")
 	var enemy := game.spawn_unit(1, "warrior", _step(origin, Hex.WEST, 1))
 	_ok(enemy != null and not game.reachable_tiles(civilian).has(enemy.cell), "cannot enter another player's unit")
+	game.config.one_unit_per_tile = false
+	_ok(game.spawn_unit(0, "warrior", other.cell) != null, "friendly stacking follows the config flag")
 	_ok(game.spawn_unit(0, "boat", origin) == null, "unknown unit type is rejected")
 
 

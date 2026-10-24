@@ -125,13 +125,14 @@ func _assert_new_game(game: Node) -> bool:
 			print("FAIL roster size ", player.units.size())
 			quit(1)
 			return false
-		var start_cell := player.units[0].cell
+		var occupied := {}
 		for i in player.units.size():
 			var unit := player.units[i]
-			if unit.unit_type != setup.config.starting_units[i] or unit.cell != start_cell:
+			if unit.unit_type != setup.config.starting_units[i] or occupied.has(unit.cell):
 				print("FAIL start unit ", unit.unit_type, " ", unit.cell)
 				quit(1)
 				return false
+			occupied[unit.cell] = true
 			if setup.fog.unit_visible(setup.human_index, unit.cell):
 				shown += 1
 	for row in setup.map.height:

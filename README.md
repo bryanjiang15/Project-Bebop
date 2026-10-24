@@ -16,7 +16,7 @@ The main scene is the main menu. **New Game** generates a hex map, three players
 
 | Input | Action |
 | --- | --- |
-| Left click | Select the human unit on that tile. Another click cycles a stacked unit, then the city |
+| Left click | Select the human unit on that tile. Another click selects the city on that tile |
 | Right click | Attack a visible enemy in range, or move onto a green tile |
 | Left drag or middle drag | Pan |
 | Arrow keys | Pan |
@@ -30,7 +30,7 @@ The main scene is the main menu. **New Game** generates a hex map, three players
 | F10 | Defeat placeholder |
 | Escape | Toggle the in-game menu |
 
-`map.seed` of `0` in `config/game_config.json` rolls a new seed every New Game and prints `map seed: <n>` so that game can be replayed. Any other seed repeats the map and the start positions. Unrevealed tiles are hidden. Rival units outside the human's vision are not drawn. A rival city and its borders stay visible once explored. The starting unit list is `players.starting_units` (a settler and a warrior on the same tile). City names are `players.city_names`.
+`map.seed` of `0` in `config/game_config.json` rolls a new seed every New Game and prints `map seed: <n>` so that game can be replayed. Any other seed repeats the map and the start positions. Unrevealed tiles are hidden. Rival units outside the human's vision are not drawn. A rival city and its borders stay visible once explored. The starting unit list is `players.starting_units` (a settler on the start tile, and a warrior on the nearest free tile). City names are `players.city_names`.
 
 ## Tests
 

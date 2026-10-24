@@ -4,7 +4,7 @@ Engineering record for ticket 14. Design still lives in `design_doc.md` and `pro
 
 ## Roster
 
-`players.starting_units` is `["settler", "warrior"]`. Each player spawns that list, in order, through `spawn_unit`. The warrior starts on the settler's tile. One civilian and one combatant may share a tile, so no nearest-free search runs at game start. `units.spawn_nearest_free_if_blocked` is still only the city-production rule.
+`players.starting_units` is `["settler", "warrior"]`. Each player spawns that list, in order, through `spawn_unit`. The settler takes the start tile. The warrior takes the nearest free passable tile, because `units.one_unit_per_tile` allows one unit on a tile. `units.spawn_nearest_free_if_blocked` is still the city-production rule.
 
 A unit stores current HP and max HP from `units.<type>.hp`. The settler's HP is 0. That unit is non-combat, so it has no HP bar and combat never removes it for being at 0.
 
@@ -31,7 +31,7 @@ A unit at 0 HP is removed. The attacker does not step onto a tile this emptied. 
 
 ## Who can be attacked
 
-The target has to be another player's unit on a tile the attacker can currently see. Own units are rejected. A settler is rejected with `Cannot attack a settler`. Cities are not targets. A tile that holds an enemy combatant and a settler is an attack on the combatant.
+The target has to be another player's unit on a tile the attacker can currently see. Own units are rejected. A settler is rejected with `Cannot attack a settler`. Cities are not targets. A tile holds one unit, so that unit is the target.
 
 Other reasons, shown in the unit panel and the hover tooltip:
 
@@ -57,9 +57,9 @@ Skip (`skip_unit`, S) and Fortify (`fortify_unit`, F) are the orders. Fortify se
 
 `%SkipButton` and `%FortifyButton` sit in the unit panel with the HP, strength, moves, and order lines. `%CombatPreview` and the hover tooltip show `Damage N   Counter N` over a legal target. Attackable tiles use the move-highlight scene tinted red. Reachable tiles stay green. A right click on a visible enemy attacks and does not move. A right click on an empty reachable tile still moves. A left click still selects.
 
-When several human units share a tile, left clicks cycle them, civilian first. If that tile also has the human's city, the city comes after the last unit.
+A left click selects the unit on that tile. If the tile also has the human's city, the next click selects the city.
 
-A shared tile draws the units side by side, 72 px between centers. A unit alone stays on the cell center. `scenes/actors/hp_bar.tscn` is instanced on each unit and sits on the top of the sprite. It is hidden when max HP is 0. The fill width is the HP fraction.
+Each sprite sits on the cell center. `scenes/actors/hp_bar.tscn` is instanced on each unit and sits on the top of the sprite. It is hidden when max HP is 0. The fill width is the HP fraction.
 
 ## Out of scope
 

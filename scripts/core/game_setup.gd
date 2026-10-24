@@ -82,8 +82,10 @@ static func _assemble(cfg: GameConfig, map: MapState, starts: Array[Vector2i], s
 	setup.fog = FogState.new()
 	setup.fog.resize(map.width, map.height, cfg.player_count)
 	for index in cfg.player_count:
+		var anchor := starts[index]
 		for unit_type in cfg.starting_units:
-			if setup.spawn_unit(index, unit_type, starts[index]) == null:
+			var cell := setup._open_start_cell(index, unit_type, anchor)
+			if cell == NO_CELL or setup.spawn_unit(index, unit_type, cell) == null:
 				push_error("starting %s could not be placed for player %d" % [unit_type, index])
 				return null
 	return setup
@@ -571,14 +573,28 @@ func _can_enter(unit: PlayerState.UnitState, cell: Vector2i) -> bool:
 		for other in player.units:
 			if other == unit or other.cell != cell:
 				continue
-			if other.owner != unit.owner:
+			if other.owner != unit.owner or config.one_unit_per_tile:
 				return false
-			if config.one_military_and_one_civilian_per_tile:
-				var moving_civilian := not config.unit(unit.unit_type).combatant
-				var other_civilian := not config.unit(other.unit_type).combatant
-				if moving_civilian == other_civilian:
-					return false
 	return true
+
+
+## First free passable tile, preferring the anchor, then nearer tiles, then smaller q, then smaller r.
+func _open_start_cell(player: int, type: String, anchor: Vector2i) -> Vector2i:
+	if _can_spawn_at(player, type, anchor):
+		return anchor
+	var tiles: Array[Vector2i] = []
+	for row in map.height:
+		for col in map.width:
+			var cell := Vector2i(col, row)
+			if cell != anchor:
+				tiles.append(cell)
+	tiles.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
+		return CityRules.prefer_near(a, b, anchor)
+	)
+	for cell in tiles:
+		if _can_spawn_at(player, type, cell):
+			return cell
+	return NO_CELL
 
 
 func _claim(city: MapCity) -> void:
