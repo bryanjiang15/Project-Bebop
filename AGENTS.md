@@ -28,6 +28,10 @@ docs/
 - Every tunable from brief section 5 and every agreed default is a key in `config/game_config.json`. `GameConfig.load_file()` push_errors and quits on a missing or mistyped key. There are no silent defaults.
 - Restart on the in-game menu and on the victory and defeat screens calls `GameConfig.load_file()` and then opens the game scene, whose `_ready` loads the file again.
 
+## Window
+
+The root viewport is **2560×1440**. Stretch mode is `canvas_items`, aspect is `expand`, scale mode is `fractional`, and `allow_hidpi` stays on. The window is resizable. A smaller window scales the whole canvas down, so panels stay inside the screen; a wider window keeps the anchored bars and panels on the edges and shows more of the map. The top bar is a full-width anchor. Corner panels stay on their anchors. `camera.default_zoom` is `0.72` so the 28×18 map fills that window the way `0.36` filled 1280×720. Hit tests go through the canvas transform. Do not hardcode the window size in scripts.
+
 ## Hexes and art
 
 Axial `(q, r)`, pointy top. `+q` east, `+r` southeast. Six directions, in order: east, northeast, northwest, west, southwest, southeast.
@@ -58,7 +62,7 @@ Each player in `players.count` is spawned at a passable tile (not water) with at
 
 Rival units are drawn only while their tile is visible. A rival city is drawn once its tile has been explored, and a territory edge is drawn once that owned tile has been explored. Both stay as last-known information after they leave vision. The distance rule still sees cities that have never been explored; the reason text does not reveal them.
 
-The camera starts centered on the human settler.
+The camera starts centered on the human settler, at `camera.default_zoom`.
 
 ## Movement and founding
 

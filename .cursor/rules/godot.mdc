@@ -9,6 +9,7 @@ alwaysApply: true
 - Engine is Godot 4.7 stable. GDScript is typed (`var n: int`, explicit returns). The project renderer is GL Compatibility.
 - `scripts/core/` extends `RefCounted` only. No `Node`, scenes, `get_node`, or `Input` there.
 - `scripts/view/` is rendering and input. Static layout lives in `.tscn`. Read nodes with `%UniqueName` and `@onready`. Do not build UI in code.
+- The root viewport is 2560×1440. Stretch is `canvas_items` with aspect `expand`, fractional scale, and hidpi on. The window is resizable. The top bar is anchored to the full width. `camera.default_zoom` is 0.72 so the map fills that window. Do not hardcode the window size in scripts.
 - Repeated controls are instanced scenes. `scenes/ui/menu_button.tscn` is the menu button.
 - Tunables live only in `config/game_config.json`. `GameConfig.load_file()` push_errors and quits when a key is missing or mistyped. Restart loads the file again.
 - Hex math is axial `(q, r)` in `scripts/core/hex.gd`. `+q` is east, `+r` is southeast. The `TileMapLayer` uses odd-r offset: `TILE_SHAPE_HEXAGON`, `TILE_LAYOUT_STACKED`, `TILE_OFFSET_AXIS_HORIZONTAL`.
