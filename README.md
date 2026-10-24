@@ -1,6 +1,6 @@
 # Project Bebop
 
-Turn-based terraforming 4X. This tree is the Godot 4.7 prototype: main menu, a seeded isometric hex map, fog of war, settler movement, city founding, city yields, growth, borders, and a production queue, plus victory and defeat placeholders, and one config file. Spells, combat, and AI come in later tickets.
+Turn-based terraforming 4X. This tree is the Godot 4.7 prototype: main menu, a seeded isometric hex map, fog of war, unit movement and combat, city founding, city yields, growth, borders, and a production queue, plus victory and defeat placeholders, and one config file. Spells and AI come in later tickets.
 
 Design sources, and the note that Notion wins over these copies, are in `docs/`.
 
@@ -12,23 +12,25 @@ Install [Godot 4.7 stable](https://github.com/godotengine/godot/releases/tag/4.7
 godot --path .
 ```
 
-The main scene is the main menu. **New Game** generates a hex map, three players, and a starting settler for each, then opens the map centered on the human settler. The top bar shows the turn. **End Turn** (or Enter) increments it, refills movement, and resolves every city's growth, production, and border claim. Enter does nothing while the in-game menu is open. **Menu** has **Restart** (reloads config and starts another game) and **Main Menu**. Left-click the settler, then right-click a highlighted tile to move. **Found City** (or B) founds a city on that tile and removes the settler. The button stays disabled, with a reason, when the tile is water, too close to a city, or owned by someone else. Left-click the city to open its panel. Click a unit or building to queue it. A building then needs a click on a highlighted tile inside the borders, not the city center.
+The main scene is the main menu. **New Game** generates a hex map, three players, and a settler plus a warrior for each, then opens the map centered on the human settler. The top bar shows the turn. **End Turn** (or Enter) resolves every city's growth, production, and border claim, heals idle units, and refills movement. If a human unit still has movement and no order, the first press warns and the next press confirms. Enter does nothing while the in-game menu is open. **Menu** has **Restart** (reloads config and starts another game) and **Main Menu**. Left-click a unit, then right-click a green tile to move or a red enemy tile to attack. **Skip** (S) and **Fortify** (F) are orders. **Found City** (or B) founds a city on the settler's tile and removes the settler. The button stays disabled, with a reason, when the tile is water, too close to a city, or owned by someone else. Left-click the city to open its panel. Click a unit or building to queue it. A building then needs a click on a highlighted tile inside the borders, not the city center.
 
 | Input | Action |
 | --- | --- |
-| Left click | Select the human unit on that tile. Click a city to open its panel. If both are on the tile, the first click selects the unit and the next selects the city |
-| Right click | Move the selected unit onto a highlighted tile |
+| Left click | Select the human unit on that tile. Another click cycles a stacked unit, then the city |
+| Right click | Attack a visible enemy in range, or move onto a green tile |
 | Left drag or middle drag | Pan |
 | Arrow keys | Pan |
 | Mouse wheel | Zoom |
-| Hover | Tile coordinates. Land type only after the tile has been revealed |
+| Hover | Tile coordinates. Land type only after the tile has been revealed. Damage and counter-damage over an enemy |
 | B | Found a city with the selected settler |
-| Enter | End the turn, unless the in-game menu is open |
+| S | Skip the selected unit |
+| F | Fortify the selected unit |
+| Enter | End the turn, unless the in-game menu is open. A second Enter confirms the unordered-unit warning |
 | F9 | Victory placeholder |
 | F10 | Defeat placeholder |
 | Escape | Toggle the in-game menu |
 
-`map.seed` of `0` in `config/game_config.json` rolls a new seed every New Game and prints `map seed: <n>` so that game can be replayed. Any other seed repeats the map and the start positions. Unrevealed tiles are hidden. Rival units outside the human's vision are not drawn. A rival city and its borders stay visible once explored. The starting unit list is `players.starting_units` (a settler for now). City names are `players.city_names`.
+`map.seed` of `0` in `config/game_config.json` rolls a new seed every New Game and prints `map seed: <n>` so that game can be replayed. Any other seed repeats the map and the start positions. Unrevealed tiles are hidden. Rival units outside the human's vision are not drawn. A rival city and its borders stay visible once explored. The starting unit list is `players.starting_units` (a settler and a warrior on the same tile). City names are `players.city_names`.
 
 ## Tests
 

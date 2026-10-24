@@ -17,6 +17,14 @@ const REASON_CENTER := "Cannot build on the city center"
 const REASON_BORDERS := "Not in city borders"
 const REASON_OCCUPIED := "Tile already has a building"
 const REASON_BUILD_OFF_MAP := "Cannot build off the map"
+const REASON_SELECT_COMBAT := "Select a combat unit"
+const REASON_NO_MOVES := "No moves left"
+const REASON_OWN_UNIT := "Cannot attack your own unit"
+const REASON_ATTACK_SETTLER := "Cannot attack a settler"
+const REASON_RANGE := "Out of range"
+const REASON_UNSEEN := "Cannot see that unit"
+const ORDER_SKIP := "skip"
+const ORDER_FORTIFY := "fortify"
 const NO_CELL := Vector2i(-999999, -999999)
 
 var config: GameConfig
@@ -160,11 +168,14 @@ func spawn_unit(player: int, type: String, pos: Vector2i) -> PlayerState.UnitSta
 		return null
 	if map == null or not map.is_passable(pos, config):
 		return null
+	var stats := config.unit(type)
 	var unit := PlayerState.UnitState.new()
 	unit.unit_type = type
 	unit.cell = pos
 	unit.owner = player
-	unit.mp = config.unit(type).move
+	unit.hp = stats.hp
+	unit.max_hp = stats.hp
+	unit.mp = stats.move
 	if not _can_enter(unit, pos):
 		return null
 	unit.id = _next_unit_id
@@ -200,19 +211,135 @@ func move_unit(unit: PlayerState.UnitState, dest: Vector2i) -> bool:
 		return false
 	unit.cell = dest
 	unit.mp = int(tiles[dest])
+	unit.acted = true
+	unit.fortified = false
+	unit.order = ""
 	_refresh_fog()
 	return true
+
+
+## Empty string means the attack is legal. Cities are not targets.
+func can_attack(attacker: PlayerState.UnitState, defender: PlayerState.UnitState) -> String:
+	if attacker == null or config == null or not config.unit(attacker.unit_type).combatant:
+		return REASON_SELECT_COMBAT
+	if defender == null:
+		return REASON_RANGE
+	if defender.owner == attacker.owner:
+		return REASON_OWN_UNIT
+	if fog == null or not fog.unit_visible(attacker.owner, defender.cell):
+		return REASON_UNSEEN
+	if not config.unit(defender.unit_type).combatant:
+		return REASON_ATTACK_SETTLER
+	if attacker.mp <= 0:
+		return REASON_NO_MOVES
+	var dist := Hex.distance(Hex.offset_to_axial(attacker.cell), Hex.offset_to_axial(defender.cell))
+	var reach := config.unit(attacker.unit_type).range
+	if reach > 0:
+		if dist < 1 or dist > reach:
+			return REASON_RANGE
+	elif dist != 1:
+		return REASON_RANGE
+	return ""
+
+
+## `ok` is false when `can_attack` has a reason. Damage numbers are the prediction.
+func preview_attack(attacker: PlayerState.UnitState, defender: PlayerState.UnitState) -> Dictionary:
+	var reason := can_attack(attacker, defender)
+	if not reason.is_empty():
+		return {"ok": false, "reason": reason, "damage": 0, "counter": 0}
+	var dealt := _blow(attacker, defender)
+	var counter := 0
+	if _uses_melee(attacker) or not config.ranged_takes_no_counter:
+		counter = _counter(defender, attacker)
+	return {"ok": true, "reason": "", "damage": dealt, "counter": counter}
+
+
+## Applies damage, sets the attacker's movement to 0, and removes units at 0 HP.
+## The attacker does not step onto a tile this emptied. Returns the reject reason.
+func attack_unit(attacker: PlayerState.UnitState, defender: PlayerState.UnitState) -> String:
+	var preview := preview_attack(attacker, defender)
+	if not bool(preview["ok"]):
+		return str(preview["reason"])
+	defender.hp = maxi(0, defender.hp - int(preview["damage"]))
+	attacker.hp = maxi(0, attacker.hp - int(preview["counter"]))
+	attacker.mp = 0
+	attacker.acted = true
+	attacker.order = ORDER_FORTIFY if attacker.fortified else ""
+	_remove_if_dead(defender)
+	_remove_if_dead(attacker)
+	_refresh_fog()
+	return ""
+
+
+## Combatant on the tile, or the civilian when that is all the enemy has there.
+func enemy_at(attacker: PlayerState.UnitState, cell: Vector2i) -> PlayerState.UnitState:
+	if attacker == null:
+		return null
+	var civilian: PlayerState.UnitState = null
+	for player in players:
+		if player.index == attacker.owner:
+			continue
+		for other in player.units:
+			if other.cell != cell:
+				continue
+			if config.unit(other.unit_type).combatant:
+				return other
+			civilian = other
+	return civilian
+
+
+func attackable_cells(unit: PlayerState.UnitState) -> Array[Vector2i]:
+	var cells: Array[Vector2i] = []
+	if unit == null:
+		return cells
+	for player in players:
+		if player.index == unit.owner:
+			continue
+		for other in player.units:
+			if can_attack(unit, other).is_empty():
+				cells.append(other.cell)
+	return cells
+
+
+func skip_unit(unit: PlayerState.UnitState) -> bool:
+	if unit == null or config == null or not config.skip_enabled:
+		return false
+	unit.order = ORDER_SKIP
+	return true
+
+
+func fortify_unit(unit: PlayerState.UnitState) -> bool:
+	if unit == null or config == null or not config.fortify_enabled:
+		return false
+	unit.fortified = true
+	unit.order = ORDER_FORTIFY
+	return true
+
+
+func has_unordered_moves(player: int) -> bool:
+	if config == null or not config.end_turn_warns_if_unordered:
+		return false
+	if player < 0 or player >= players.size():
+		return false
+	for unit in players[player].units:
+		if unit.mp > 0 and unit.order.is_empty():
+			return true
+	return false
 
 
 func end_turn() -> void:
 	# One global clock: every city resolves here. Rivals have no turn of their own yet.
 	# Growth uses this turn's yields, then production (a settler sees the post-growth pop),
-	# then the border clock. The turn counter advances after that.
+	# then the border clock. Idle units heal, then the turn counter advances and movement refills.
 	for city in cities.duplicate():
 		_resolve_city(city)
+	_heal_idle_units()
 	turn += 1
 	for player in players:
 		for unit in player.units:
+			if unit.order == ORDER_SKIP:
+				unit.order = ORDER_FORTIFY if unit.fortified else ""
+			unit.acted = false
 			unit.mp = config.unit(unit.unit_type).move
 	_refresh_fog()
 
@@ -357,6 +484,48 @@ func move_queue(city: MapCity, index: int, delta: int) -> void:
 	var item: MapCity.Item = city.queue[index]
 	city.queue.remove_at(index)
 	city.queue.insert(next, item)
+
+
+func _uses_melee(unit: PlayerState.UnitState) -> bool:
+	return config.unit(unit.unit_type).range <= 0
+
+
+func _blow(attacker: PlayerState.UnitState, defender: PlayerState.UnitState) -> int:
+	var attack := float(config.unit(attacker.unit_type).attack)
+	return Combat.damage(config, attack, _defense_strength(defender))
+
+
+## Counter uses the defender's modified strength against the attacker's attack.
+## The attacker's tile and Fortify do not change that number.
+func _counter(defender: PlayerState.UnitState, attacker: PlayerState.UnitState) -> int:
+	var attack := float(config.unit(attacker.unit_type).attack)
+	return Combat.damage(config, _defense_strength(defender), attack)
+
+
+func _defense_strength(unit: PlayerState.UnitState) -> float:
+	var defense := float(config.unit(unit.unit_type).defense)
+	var on_hills := map != null and map.land_at(unit.cell) == "hills"
+	return Combat.defender_strength(config, defense, on_hills, unit.fortified)
+
+
+func _remove_if_dead(unit: PlayerState.UnitState) -> void:
+	if unit == null or unit.max_hp <= 0 or unit.hp > 0:
+		return
+	if unit.owner < 0 or unit.owner >= players.size():
+		return
+	players[unit.owner].units.erase(unit)
+
+
+func _heal_idle_units() -> void:
+	if config == null:
+		return
+	for player in players:
+		for unit in player.units:
+			if unit.max_hp <= 0:
+				continue
+			if config.heal_only_if_idle and unit.acted:
+				continue
+			unit.hp = mini(unit.max_hp, unit.hp + config.unit_heal)
 
 
 func _refresh_fog() -> void:

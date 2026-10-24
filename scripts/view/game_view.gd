@@ -7,6 +7,11 @@ const _REACHABLE := Color(0.45, 0.95, 0.55, 0.95)
 const _SELECTED := Color(1, 1, 1, 0.95)
 const _WORKED := Color(0.95, 0.82, 0.35, 0.92)
 const _PLACE := Color(0.4, 0.85, 0.95, 0.95)
+const _ATTACK := Color(0.95, 0.32, 0.28, 0.95)
+const _HP_FULL := 48.0
+const _HP_LEFT := -24.0
+const _HP_TOP := -52.0
+const _HP_BOTTOM := -44.0
 const _LAND_COLUMN := {
 	"plains": 0,
 	"forest": 1,
@@ -50,6 +55,7 @@ var _right_press: Vector2 = Vector2.ZERO
 var _selected_id: int = -1
 var _selected_city_id: int = -1
 var _placing: String = ""
+var _end_confirm: bool = false
 
 @onready var _camera: Camera2D = %Camera
 @onready var _map: TileMapLayer = %Map
@@ -66,6 +72,11 @@ var _placing: String = ""
 @onready var _selection_detail: Label = %SelectionDetail
 @onready var _found_button: Button = %FoundCityButton
 @onready var _found_reason: Label = %FoundCityReason
+@onready var _combat_preview: Label = %CombatPreview
+@onready var _skip_button: Button = %SkipButton
+@onready var _fortify_button: Button = %FortifyButton
+@onready var _end_button: Button = %EndTurnButton
+@onready var _end_warning: Label = %EndTurnWarning
 @onready var _city_panel: PanelContainer = %CityPanel
 @onready var _city_name: Label = %CityName
 @onready var _city_food: Label = %CityFood
@@ -118,6 +129,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event.is_action_pressed("found_city"):
 		_on_found_city_pressed()
+		return
+	if event.is_action_pressed("skip_unit") and not event.is_echo():
+		_on_skip_pressed()
+		return
+	if event.is_action_pressed("fortify_unit") and not event.is_echo():
+		_on_fortify_pressed()
 		return
 	if event.is_action_pressed("end_turn"):
 		if not event.is_echo() and not _menu.visible:
@@ -181,8 +198,33 @@ func _process(delta: float) -> void:
 func _on_end_turn_pressed() -> void:
 	if setup == null:
 		return
+	if _config.end_turn_warns_if_unordered and setup.has_unordered_moves(setup.human_index) and not _end_confirm:
+		_end_confirm = true
+		_refresh_end_warning()
+		return
+	_end_confirm = false
 	setup.end_turn()
 	_refresh_board()
+
+
+func _on_skip_pressed() -> void:
+	if setup == null or _menu.visible:
+		return
+	var unit := _selected_unit()
+	if unit == null or not setup.skip_unit(unit):
+		return
+	_cancel_end_confirm()
+	_refresh_selection()
+
+
+func _on_fortify_pressed() -> void:
+	if setup == null or _menu.visible:
+		return
+	var unit := _selected_unit()
+	if unit == null or not setup.fortify_unit(unit):
+		return
+	_cancel_end_confirm()
+	_refresh_selection()
 
 
 func _on_found_city_pressed() -> void:
@@ -196,6 +238,7 @@ func _on_found_city_pressed() -> void:
 	_selected_id = -1
 	_selected_city_id = -1
 	_placing = ""
+	_cancel_end_confirm()
 	_refresh_board()
 
 
@@ -220,37 +263,26 @@ func _select_at_screen(screen: Vector2) -> void:
 	var axial := Hex.offset_to_axial(cell)
 	if not Hex.in_map(axial, _config.map_width, _config.map_height):
 		if not _placing.is_empty():
+			_cancel_end_confirm()
 			_refresh_city_panel(GameSetup.REASON_BUILD_OFF_MAP)
 			return
 		_selected_id = -1
 		_selected_city_id = -1
 		_placing = ""
+		_cancel_end_confirm()
 		_refresh_selection()
 		_refresh_city_panel()
 		return
 	if not _placing.is_empty():
+		_cancel_end_confirm()
 		_try_place(cell)
 		return
-	var own := _own_unit_at(cell)
+	var units := _own_units_at(cell)
 	var city := setup.city_at_cell(cell)
 	var own_city := city != null and city.player == setup.human_index
-	if own != null and own_city:
-		if _selected_id == own.id and _selected_city_id < 0:
-			_selected_id = -1
-			_selected_city_id = city.id
-		else:
-			_selected_id = own.id
-			_selected_city_id = -1
-	elif own != null:
-		_selected_id = own.id
-		_selected_city_id = -1
-	elif own_city:
-		_selected_id = -1
-		_selected_city_id = city.id
-	else:
-		_selected_id = -1
-		_selected_city_id = -1
+	_choose_on_tile(units, city if own_city else null)
 	_placing = ""
+	_cancel_end_confirm()
 	_refresh_selection()
 	_refresh_city_panel()
 
@@ -264,9 +296,20 @@ func _move_at_screen(screen: Vector2) -> void:
 	var cell := _cell_at_screen(screen)
 	if not Hex.in_map(Hex.offset_to_axial(cell), _config.map_width, _config.map_height):
 		return
+	if setup.fog.unit_visible(unit.owner, cell):
+		var enemy := setup.enemy_at(unit, cell)
+		if enemy != null:
+			var reason := setup.attack_unit(unit, enemy)
+			_cancel_end_confirm()
+			if reason.is_empty():
+				_refresh_board()
+			else:
+				_refresh_selection()
+			return
 	if not setup.reachable_tiles(unit).has(cell):
 		return
 	setup.move_unit(unit, cell)
+	_cancel_end_confirm()
 	_refresh_board()
 
 
@@ -291,14 +334,23 @@ func _refresh_selection() -> void:
 		_selection_detail.text = ""
 		_found_button.disabled = true
 		_found_reason.text = GameSetup.REASON_SETTLER
+		_skip_button.disabled = true
+		_fortify_button.disabled = true
 	else:
 		var stats := _config.unit(unit.unit_type)
 		_selection_title.text = unit.unit_type.capitalize()
-		_selection_detail.text = "Moves %d / %d" % [unit.mp, stats.move]
+		_selection_detail.text = _unit_summary(unit, stats)
 		var reason := setup.can_found(unit)
 		_found_button.disabled = not reason.is_empty()
 		_found_reason.text = reason
+		_skip_button.disabled = not _config.skip_enabled
+		_fortify_button.disabled = not _config.fortify_enabled
+	_apply_combat_preview()
+	_refresh_end_warning()
 	_rebuild_move_highlights()
+	if Hex.in_map(Hex.offset_to_axial(_hovered), _config.map_width, _config.map_height):
+		var axial := Hex.offset_to_axial(_hovered)
+		_tooltip.text = _tip_for(_hovered, axial)
 
 
 func _selected_unit() -> PlayerState.UnitState:
@@ -309,15 +361,85 @@ func _selected_unit() -> PlayerState.UnitState:
 	return null
 
 
-func _own_unit_at(cell: Vector2i) -> PlayerState.UnitState:
-	var fallback: PlayerState.UnitState = null
+func _own_units_at(cell: Vector2i) -> Array[PlayerState.UnitState]:
+	var civilians: Array[PlayerState.UnitState] = []
+	var fighters: Array[PlayerState.UnitState] = []
 	for unit in setup.players[_config.human_index].units:
 		if unit.cell != cell:
 			continue
-		if not _config.unit(unit.unit_type).combatant:
-			return unit
-		fallback = unit
-	return fallback
+		if _config.unit(unit.unit_type).combatant:
+			fighters.append(unit)
+		else:
+			civilians.append(unit)
+	civilians.append_array(fighters)
+	return civilians
+
+
+## Civilian first, then other units on the tile, then the human city.
+func _choose_on_tile(units: Array[PlayerState.UnitState], city: MapCity) -> void:
+	var index := -1
+	if _selected_city_id < 0:
+		for i in units.size():
+			if units[i].id == _selected_id:
+				index = i
+				break
+	if index >= 0 and index + 1 < units.size():
+		_selected_id = units[index + 1].id
+		_selected_city_id = -1
+		return
+	if index >= 0 and city != null:
+		_selected_id = -1
+		_selected_city_id = city.id
+		return
+	if index >= 0:
+		_selected_id = units[(index + 1) % units.size()].id
+		_selected_city_id = -1
+		return
+	if not units.is_empty():
+		_selected_id = units[0].id
+		_selected_city_id = -1
+		return
+	_selected_id = -1
+	_selected_city_id = city.id if city != null else -1
+
+
+func _unit_summary(unit: PlayerState.UnitState, stats: GameConfig.UnitStats) -> String:
+	var hp_line := "HP —"
+	if unit.max_hp > 0:
+		hp_line = "HP %d / %d" % [unit.hp, unit.max_hp]
+	var strength := "Non-combat"
+	if stats.combatant:
+		if stats.attack == stats.defense:
+			strength = "Strength %d" % stats.attack
+		else:
+			strength = "Ranged %d    Defense %d" % [stats.attack, stats.defense]
+	return "%s\n%s\nMoves %d / %d\nOrder %s" % [hp_line, strength, unit.mp, stats.move, _order_label(unit)]
+
+
+func _order_label(unit: PlayerState.UnitState) -> String:
+	if unit.order == GameSetup.ORDER_SKIP and unit.fortified:
+		return "Skip, fortified"
+	if unit.order == GameSetup.ORDER_FORTIFY or unit.fortified:
+		return "Fortify"
+	if unit.order == GameSetup.ORDER_SKIP:
+		return "Skip"
+	return "None"
+
+
+func _refresh_end_warning() -> void:
+	if _end_confirm:
+		_end_button.text = "End anyway (Enter)"
+		_end_warning.text = "Units still have moves. End Turn again to continue."
+	else:
+		_end_button.text = "End Turn (Enter)"
+		_end_warning.text = ""
+
+
+func _cancel_end_confirm() -> void:
+	if not _end_confirm:
+		return
+	_end_confirm = false
+	_refresh_end_warning()
 
 
 func _paint_map() -> void:
@@ -364,11 +486,20 @@ func _refresh_actors() -> void:
 			poly.color = tint
 			(mark.get_node("Name") as Label).text = placed.kind.capitalize()
 			_actors.add_child(mark)
+	var stacked := {}
 	for player in setup.players:
-		var stacks := {}
 		for unit in player.units:
 			if not setup.fog.unit_visible(viewer, unit.cell):
 				continue
+			if not stacked.has(unit.cell):
+				stacked[unit.cell] = []
+			(stacked[unit.cell] as Array).append({"player": player, "unit": unit})
+	for cell in stacked.keys():
+		var group: Array = stacked[cell]
+		for i in group.size():
+			var entry: Dictionary = group[i]
+			var unit := entry["unit"] as PlayerState.UnitState
+			var player := entry["player"] as PlayerState
 			var art: Array = _UNIT_ART[unit.unit_type]
 			var sprite := _UNIT_SCENE.instantiate() as Sprite2D
 			sprite.name = "Unit_%d" % unit.id
@@ -377,10 +508,13 @@ func _refresh_actors() -> void:
 			mat.set_shader_parameter("team_mask", load(str(art[1])))
 			mat.set_shader_parameter("team_color", Color.html(player.color))
 			sprite.material = mat
-			var stack := int(stacks.get(unit.cell, 0))
-			sprite.position = _map.map_to_local(unit.cell) + Vector2(16, 10) * float(stack)
+			var shift := Vector2.ZERO
+			if group.size() > 1:
+				var along := float(i) / float(group.size() - 1)
+				shift = Vector2(lerpf(-36.0, 36.0, along), 0.0)
+			sprite.position = _map.map_to_local(cell) + shift
+			_paint_hp(sprite, unit)
 			_actors.add_child(sprite)
-			stacks[unit.cell] = stack + 1
 
 
 func _rebuild_move_highlights() -> void:
@@ -390,6 +524,8 @@ func _rebuild_move_highlights() -> void:
 		_add_highlight(unit.cell, _SELECTED)
 		for cell in setup.reachable_tiles(unit).keys():
 			_add_highlight(cell as Vector2i, _REACHABLE)
+		for cell in setup.attackable_cells(unit):
+			_add_highlight(cell, _ATTACK)
 		return
 	var city := _selected_city()
 	if city == null:
@@ -518,16 +654,68 @@ func hover_at_local(local: Vector2, screen: Vector2 = Vector2.INF) -> void:
 		_hovered = cell
 		_highlight.clear()
 		_highlight.set_cell(cell, _HIGHLIGHT_SOURCE, Vector2i.ZERO)
-		_tooltip.text = _tip_for(cell, axial)
-		_tooltip_panel.visible = true
+	_tooltip.text = _tip_for(cell, axial)
+	_tooltip_panel.visible = true
+	_apply_combat_preview()
 	if screen != Vector2.INF:
 		_tooltip_panel.position = screen + Vector2(16, 16)
 
 
 func _tip_for(cell: Vector2i, axial: Vector2i) -> String:
-	if setup.fog.sight(_config.human_index, cell) == FogState.Sight.UNREVEALED:
-		return "%d, %d Unexplored" % [axial.x, axial.y]
-	return "%d, %d %s" % [axial.x, axial.y, setup.map.land_at(cell)]
+	var base := "%d, %d Unexplored" % [axial.x, axial.y]
+	if setup.fog.sight(_config.human_index, cell) != FogState.Sight.UNREVEALED:
+		base = "%d, %d %s" % [axial.x, axial.y, setup.map.land_at(cell)]
+	var extra := _combat_hover_text()
+	if extra.is_empty():
+		return base
+	return "%s\n%s" % [base, extra]
+
+
+func _combat_hover_text() -> String:
+	var unit := _selected_unit()
+	if unit == null or setup == null or setup.map == null or not setup.map.in_bounds(_hovered):
+		return ""
+	if not setup.fog.unit_visible(unit.owner, _hovered):
+		return ""
+	var enemy := setup.enemy_at(unit, _hovered)
+	if enemy == null:
+		return ""
+	var preview := setup.preview_attack(unit, enemy)
+	if bool(preview["ok"]):
+		return "Damage %d   Counter %d" % [int(preview["damage"]), int(preview["counter"])]
+	return str(preview["reason"])
+
+
+func _apply_combat_preview() -> void:
+	var text := _combat_hover_text()
+	_combat_preview.text = text
+	var color := Color(0.96, 0.95, 0.9, 1)
+	if not text.is_empty() and not text.begins_with("Damage"):
+		color = Color(0.95, 0.62, 0.48, 1)
+	_combat_preview.add_theme_color_override("font_color", color)
+
+
+func _paint_hp(sprite: Sprite2D, unit: PlayerState.UnitState) -> void:
+	var bar := sprite.get_node("HpBar") as Node2D
+	if unit.max_hp <= 0:
+		bar.visible = false
+		return
+	bar.visible = true
+	var ratio := clampf(float(unit.hp) / float(unit.max_hp), 0.0, 1.0)
+	var fill := bar.get_node("Fill") as Polygon2D
+	var right := _HP_LEFT + _HP_FULL * ratio
+	fill.polygon = PackedVector2Array([
+		Vector2(_HP_LEFT, _HP_TOP),
+		Vector2(right, _HP_TOP),
+		Vector2(right, _HP_BOTTOM),
+		Vector2(_HP_LEFT, _HP_BOTTOM),
+	])
+	if ratio > 0.55:
+		fill.color = Color(0.45, 0.82, 0.38, 1)
+	elif ratio > 0.3:
+		fill.color = Color(0.92, 0.76, 0.28, 1)
+	else:
+		fill.color = Color(0.9, 0.32, 0.28, 1)
 
 
 func _clear_hover() -> void:
@@ -535,6 +723,8 @@ func _clear_hover() -> void:
 	_highlight.clear()
 	_tooltip.text = ""
 	_tooltip_panel.visible = false
+	if _combat_preview != null:
+		_combat_preview.text = ""
 
 
 func _cell_at_screen(screen: Vector2) -> Vector2i:

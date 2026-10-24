@@ -1,8 +1,9 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene load_steps=6 format=3]
 
 [ext_resource type="Shader" path="res://assets/art/team_tint.gdshader" id="1_tint"]
 [ext_resource type="Texture2D" path="res://assets/art/unit_settler.png" id="2_tex"]
 [ext_resource type="Texture2D" path="res://assets/art/unit_settler_mask.png" id="3_mask"]
+[ext_resource type="PackedScene" path="res://scenes/actors/hp_bar.tscn" id="4_hp"]
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_unit"]
 shader = ExtResource("1_tint")
@@ -14,3 +15,5 @@ centered = true
 offset = Vector2(0, -20)
 texture = ExtResource("2_tex")
 material = SubResource("ShaderMaterial_unit")
+
+[node name="HpBar" parent="." instance=ExtResource("4_hp")]
