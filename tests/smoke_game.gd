@@ -5,6 +5,8 @@ extends SceneTree
 var _pool_before_well := -1
 var _income_before_well := -1
 
+const _RivalFixture = preload("res://tests/rival_fixture.gd")
+
 const _LAND_COLUMN := {
 	"plains": 0,
 	"forest": 1,
@@ -98,6 +100,16 @@ func _run() -> void:
 		quit(1)
 		return
 	print("PASS defeat")
+	(defeat.get_node("%MainMenuButton") as Button).pressed.emit()
+	var again := await _wait_for("res://scripts/view/main_menu.gd")
+	if again == null:
+		return
+	(again.get_node("%NewGameButton") as Button).pressed.emit()
+	game = await _wait_for("res://scripts/view/game_view.gd")
+	if game == null:
+		return
+	if not _rival_land_cast(game):
+		return
 	print("SMOKE OK")
 	quit(0)
 
@@ -598,6 +610,145 @@ func _cast_spell(game: Node) -> bool:
 	return true
 
 
+func _rival_land_cast(game: Node) -> bool:
+	var setup := game.get("setup") as GameSetup
+	var placed: Dictionary = _RivalFixture.place(setup)
+	if not bool(placed["ok"]):
+		print("FAIL rival fixture ", placed["reason"])
+		quit(1)
+		return false
+	game._refresh_board()
+	var human_city := placed["human_city"] as MapCity
+	var rival_city := placed["rival_city"] as MapCity
+	var warrior := placed["warrior"] as PlayerState.UnitState
+	var defender := placed["defender"] as PlayerState.UnitState
+	var worked: Vector2i = placed["worked"]
+	var target: Vector2i = placed["target"]
+	var near: Vector2i = placed["near"]
+	var far: Vector2i = placed["far"]
+	var turn_before := setup.turn
+	var owner_target := setup.owner_at(target)
+	var owner_worked := setup.owner_at(worked)
+	var human_before: Dictionary = setup.city_yields(human_city)
+	var rival_before: Dictionary = setup.city_yields(rival_city)
+	var rate_before := setup.mana_per_turn(setup.human_index)
+	_click_cell(game, human_city.cell)
+	var panel := game.get_node("%CityPanel") as CanvasItem
+	if not panel.visible or not _panel_matches(game, human_city):
+		print("FAIL city panel before the cast")
+		quit(1)
+		return false
+	_click_cell(game, warrior.cell)
+	if not panel.visible:
+		print("FAIL city panel closed when the warrior was selected")
+		quit(1)
+		return false
+	if (game.get_node("%SelectionTitle") as Label).text != "Warrior":
+		print("FAIL warrior was not selected")
+		quit(1)
+		return false
+	if not _highlight_has(game, far) or not _highlight_has(game, near):
+		print("FAIL move highlights before the cast")
+		quit(1)
+		return false
+	_hover_cell(game, target)
+	var plain_hit: Dictionary = setup.preview_attack(warrior, defender)
+	var preview := game.get_node("%CombatPreview") as Label
+	var plain_text := "Damage %d   Counter %d" % [int(plain_hit["damage"]), int(plain_hit["counter"])]
+	if not bool(plain_hit["ok"]) or preview.text != plain_text:
+		print("FAIL combat preview before '", preview.text, "' expected ", plain_text)
+		quit(1)
+		return false
+	var food_before := (game.get_node("%CityFood") as Label).text
+	var prod_before := (game.get_node("%CityProduction") as Label).text
+	(game.get_node("%SpellButtons").get_node("Spell_raise_hills") as Button).pressed.emit()
+	_click_cell(game, target)
+	if setup.turn != turn_before:
+		print("FAIL cast advanced the turn")
+		quit(1)
+		return false
+	if setup.map.land_at(target) != "hills" or setup.map.land_at(worked) != "hills" or setup.map.land_at(near) != "hills" or setup.map.land_at(far) != "plains":
+		print("FAIL lands target ", setup.map.land_at(target), " worked ", setup.map.land_at(worked), " near ", setup.map.land_at(near), " far ", setup.map.land_at(far))
+		quit(1)
+		return false
+	if setup.owner_at(target) != owner_target or setup.owner_at(worked) != owner_worked:
+		print("FAIL ownership changed")
+		quit(1)
+		return false
+	var map := game.get_node("%Map") as TileMapLayer
+	if map.get_cell_atlas_coords(target) != Vector2i(_LAND_COLUMN["hills"], 0) or map.get_cell_atlas_coords(worked) != Vector2i(_LAND_COLUMN["hills"], 0):
+		print("FAIL atlas did not follow the land")
+		quit(1)
+		return false
+	var human_after: Dictionary = setup.city_yields(human_city)
+	var rival_after: Dictionary = setup.city_yields(rival_city)
+	if int(human_after["food"]) >= int(human_before["food"]) or int(human_after["production"]) <= int(human_before["production"]):
+		print("FAIL human yields ", human_before, " -> ", human_after)
+		quit(1)
+		return false
+	if int(rival_after["food"]) >= int(rival_before["food"]) or int(rival_after["production"]) <= int(rival_before["production"]):
+		print("FAIL rival yields ", rival_before, " -> ", rival_after)
+		quit(1)
+		return false
+	if int(human_after["mana"]) != int(human_before["mana"]) or setup.mana_per_turn(setup.human_index) != rate_before:
+		print("FAIL mana rate changed ", setup.mana_per_turn(setup.human_index))
+		quit(1)
+		return false
+	if not panel.visible or not _panel_matches(game, human_city):
+		print("FAIL city panel after the cast food '", (game.get_node("%CityFood") as Label).text, "' prod '", (game.get_node("%CityProduction") as Label).text, "'")
+		quit(1)
+		return false
+	if (game.get_node("%CityFood") as Label).text == food_before or (game.get_node("%CityProduction") as Label).text == prod_before:
+		print("FAIL panel text did not change")
+		quit(1)
+		return false
+	var hill_hit: Dictionary = setup.preview_attack(warrior, defender)
+	var hill_text := "Damage %d   Counter %d" % [int(hill_hit["damage"]), int(hill_hit["counter"])]
+	if int(hill_hit["damage"]) >= int(plain_hit["damage"]) or preview.text != hill_text:
+		print("FAIL combat preview after '", preview.text, "' expected ", hill_text)
+		quit(1)
+		return false
+	if _highlight_has(game, far) or not _highlight_has(game, near):
+		print("FAIL move highlights after the cast")
+		quit(1)
+		return false
+	var tip := (game.get_node("%Tooltip") as Label).text
+	if not tip.contains("hills"):
+		print("FAIL tooltip '", tip, "'")
+		quit(1)
+		return false
+	var mana := (game.get_node("%ManaLabel") as Label).text
+	var expected_mana := "Mana: %d (+%d/turn)" % [setup.players[setup.human_index].mana, rate_before]
+	if mana != expected_mana:
+		print("FAIL mana label '", mana, "' expected ", expected_mana)
+		quit(1)
+		return false
+	print("PASS rival land ", (game.get_node("%CityFood") as Label).text, " ", (game.get_node("%CityProduction") as Label).text, " ", preview.text, " ", mana)
+	return true
+
+
+func _panel_matches(game: Node, city: MapCity) -> bool:
+	var setup := game.get("setup") as GameSetup
+	var yields: Dictionary = setup.city_yields(city)
+	var food := (game.get_node("%CityFood") as Label).text
+	var prod := (game.get_node("%CityProduction") as Label).text
+	var mana := (game.get_node("%CityMana") as Label).text
+	var growth := (game.get_node("%GrowthLabel") as Label).text
+	var surplus := int(yields["surplus"])
+	var sign := "+" if surplus >= 0 else ""
+	var expected_growth := "Growth %d / %d (%s%d)" % [city.food_stored, int(yields["threshold"]), sign, surplus]
+	return food == "Food %d" % int(yields["food"]) and prod == "Production %d" % int(yields["production"]) and mana == "Mana %d" % int(yields["mana"]) and growth == expected_growth
+
+
+func _highlight_has(game: Node, cell: Vector2i) -> bool:
+	var map := game.get_node("%Map") as TileMapLayer
+	var want := map.map_to_local(cell)
+	for child in game.get_node("%MoveHighlights").get_children():
+		if (child as Node2D).position.is_equal_approx(want):
+			return true
+	return false
+
+
 func _spell_target(setup: GameSetup, origin: Vector2i) -> Vector2i:
 	var axial := Hex.offset_to_axial(origin)
 	var fallback := Vector2i(-1, -1)
@@ -816,11 +967,14 @@ func _confirm_end_turn(game: Node) -> bool:
 
 
 func _select_city(game: Node, city: MapCity) -> bool:
+	# The panel stays up while a unit is selected, so visibility is not enough.
+	# A unit on the city tile takes the first click; the next click selects the city.
 	var panel := game.get_node("%CityPanel") as CanvasItem
+	var title := game.get_node("%SelectionTitle") as Label
 	_click_cell(game, city.cell)
-	if not panel.visible:
+	if not panel.visible or title.text != "No unit selected":
 		_click_cell(game, city.cell)
-	if not panel.visible:
+	if not panel.visible or title.text != "No unit selected":
 		print("FAIL city panel hidden")
 		quit(1)
 		return false

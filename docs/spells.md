@@ -37,7 +37,9 @@ Every affected tile whose land is different becomes the spell's land. Tiles alre
 
 The cast still spends mana, starts the cooldown, and counts as the player's cast for the turn when every tile is skipped or already the right land. Ownership does not change (`spells.spells_change_tile_ownership` is false). Buildings stay where they are. Water does not remove a building yet, and volcanic ground does not deal damage yet.
 
-Food, production, movement cost, and hills defense read `MapState.land_at` when they are asked. Nothing caches a tile's yield, so a city's food, production, and a Lumber Mill's forest count change on the next read. The open city panel is refreshed from that read.
+Food, production, movement cost, and hills defense read `MapState.land_at` when they are asked. Nothing caches a tile's yield, so a city's food, production, worked-tile choice, and a Lumber Mill's forest count change on the next read. That is true for a rival city as well as the caster's. Ownership is not written.
+
+The view has one refresh after a successful cast, `_refresh_board`. It repaints the land, rebuilds the selected unit's move and attack highlights from `reachable_tiles`, and refills `%CombatPreview` from `preview_attack` using the tile that was just clicked. The city panel stays on the last human city the player opened, including while a unit is selected, and that same refresh rewrites its food, production, mana, growth surplus, and queue. Build buttons stay disabled until the city itself is selected again, because placement highlights give way to move highlights. There is no rival city panel. A cast does not change `CityRules.city_mana`, so the top bar's per-turn rate is unchanged unless a Mana Well is added or removed.
 
 ## Who can cast
 

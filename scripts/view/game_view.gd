@@ -64,6 +64,9 @@ var _press_pos: Vector2 = Vector2.ZERO
 var _right_press: Vector2 = Vector2.ZERO
 var _selected_id: int = -1
 var _selected_city_id: int = -1
+## The city panel stays on the last human city while a unit is selected, so a
+## cast can refresh its yields in the same frame as the move highlights.
+var _panel_city_id: int = -1
 var _placing: String = ""
 var _end_confirm: bool = false
 var _spell_id: String = ""
@@ -264,6 +267,7 @@ func _on_found_city_pressed() -> void:
 	setup.found_city(unit)
 	_selected_id = -1
 	_selected_city_id = -1
+	_panel_city_id = -1
 	_placing = ""
 	_spell_id = ""
 	_cancel_end_confirm()
@@ -298,6 +302,7 @@ func _select_at_screen(screen: Vector2) -> void:
 			return
 		_selected_id = -1
 		_selected_city_id = -1
+		_panel_city_id = -1
 		_placing = ""
 		_cancel_end_confirm()
 		_refresh_selection()
@@ -311,6 +316,10 @@ func _select_at_screen(screen: Vector2) -> void:
 	var city := setup.city_at_cell(cell)
 	var own_city := city != null and city.player == setup.human_index
 	_choose_on_tile(units, city if own_city else null)
+	if _selected_city() != null:
+		_panel_city_id = _selected_city_id
+	elif units.is_empty():
+		_panel_city_id = -1
 	_placing = ""
 	_cancel_end_confirm()
 	_refresh_selection()
@@ -791,6 +800,17 @@ func _selected_city() -> MapCity:
 	return city
 
 
+## Yields stay on screen after the player selects a unit. Build actions still
+## follow `_selected_city`, because placement highlights yield to move highlights.
+func _panel_city() -> MapCity:
+	if setup == null or _panel_city_id < 0:
+		return null
+	var city := setup.city_by_id(_panel_city_id)
+	if city == null or city.player != setup.human_index:
+		return null
+	return city
+
+
 func _on_build_settler_pressed() -> void:
 	_choose_build("settler")
 
@@ -864,14 +884,14 @@ func _try_place(cell: Vector2i) -> void:
 func _on_queue_move(index: int, delta: int) -> void:
 	if setup == null or _menu.visible:
 		return
-	setup.move_queue(_selected_city(), index, delta)
+	setup.move_queue(_panel_city(), index, delta)
 	call_deferred("_refresh_after_queue")
 
 
 func _on_queue_cancel(index: int) -> void:
 	if setup == null or _menu.visible:
 		return
-	setup.cancel_queue(_selected_city(), index)
+	setup.cancel_queue(_panel_city(), index)
 	call_deferred("_refresh_after_queue")
 
 
@@ -881,14 +901,21 @@ func _refresh_after_queue() -> void:
 
 
 func _refresh_city_panel(notice: String = "") -> void:
-	var city := _selected_city()
+	var city := _panel_city()
 	if city == null:
 		_city_panel.visible = false
 		_cancel_place.visible = false
 		_clear_queue_rows()
 		return
 	_city_panel.visible = true
-	_cancel_place.visible = not _placing.is_empty()
+	var city_selected := _selected_city() != null
+	_cancel_place.visible = city_selected and not _placing.is_empty()
+	var builds: Array[Button] = [
+		_build_settler, _build_scout, _build_warrior, _build_archer,
+		_build_granary, _build_mana_well, _build_lumber_mill,
+	]
+	for button in builds:
+		button.disabled = not city_selected
 	var snapshot: Dictionary = setup.city_yields(city)
 	_city_name.text = city.city_name
 	_city_food.text = "Food %d" % int(snapshot["food"])
@@ -1046,9 +1073,13 @@ func _cast_at_screen(screen: Vector2) -> void:
 	if reason.is_empty():
 		_spell_id = ""
 		_cancel_end_confirm()
-		_refresh_board()
+		# The click is the tile that just changed. Refresh reads it for the
+		# tooltip, combat preview, move highlights, and the open city panel.
 		if setup.map.in_bounds(cell):
 			_hovered = cell
+			_hover_local = local
+		_refresh_board()
+		if setup.map.in_bounds(cell):
 			_highlight.clear()
 			_highlight.set_cell(cell, _HIGHLIGHT_SOURCE, Vector2i.ZERO)
 		return
