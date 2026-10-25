@@ -71,7 +71,7 @@ The panel button starts placement. The next left click on a legal tile enqueues 
 
 ## Panel
 
-`%CityPanel` in `scenes/game.tscn` opens when the human left-clicks their city. Food, production, mana, the growth bar, the border line, and the queue are filled from core. The build buttons are instances of `scenes/ui/menu_button.tscn`. Each queue row is an instance of `scenes/ui/queue_row.tscn`. A finished building is an instance of `scenes/view/building_marker.tscn` on `Actors`, drawn once its tile has been explored.
+`%CityPanel` in `scenes/game.tscn` opens when the human left-clicks their city. It stays open while a unit is selected, and a cast refreshes its food, production, mana, growth surplus, and queue from `city_yields` in that same refresh. Build buttons enable only while the city is the selection. Clicking empty ground closes the panel. Food, production, mana, the growth bar, the border line, and the queue are filled from core. The build buttons are instances of `scenes/ui/menu_button.tscn`. Each queue row is an instance of `scenes/ui/queue_row.tscn`. A finished building is an instance of `scenes/view/building_marker.tscn` on `Actors`, drawn once its tile has been explored.
 
 A left click still selects a human unit, and a right click still moves it or attacks a visible enemy. If the tile has the human's unit and the human's city, the first click selects the unit and the next click selects the city. Enter still ends the turn, and it does nothing while the in-game menu is open. City actions also do nothing while that menu is open.
 

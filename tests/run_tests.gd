@@ -23,6 +23,7 @@ func _init() -> void:
 	_test_mana_pool()
 	_test_combat()
 	_test_spells()
+	_test_rival_land_updates()
 	_test_end_turn_key()
 	print("\nPassed: %d  Failed: %d" % [_passed, _failed])
 	quit(1 if _failed > 0 else 0)
@@ -1260,6 +1261,154 @@ func _test_spells() -> void:
 	_ok(hills.cast_spell(0, "raise_hills", defender_cell, Hex.EAST).is_empty(), "raise hills casts under the defender")
 	_ok(hills.map.land_at(defender_cell) == "hills", "the defender stands on hills")
 	_ok(int(hills.preview_attack(attacker, defender)["damage"]) < plain_damage, "hills defense uses the live land")
+
+
+func _test_rival_land_updates() -> void:
+	print("[rival land]")
+	var cfg: GameConfig = GameConfig.load_file()
+	_ok(not cfg.spells_change_tile_ownership, "spells do not change ownership")
+	_ok(cfg.land("plains").move_cost == 1 and cfg.land("forest").move_cost == 2 and cfg.land("hills").move_cost == 2, "plains 1, forest and hills 2")
+	var game := _spell_game()
+	# These cases are about the land write, not fog. The smoke covers a revealed target.
+	game.config.spells_require_revealed_target = false
+	var home: MapCity = game.cities[0]
+	var rival_at := _step(home.cell, Hex.EAST, 3)
+	var rival := game.found_city(game.spawn_unit(1, "settler", rival_at))
+	_ok(rival != null and Hex.distance(Hex.offset_to_axial(home.cell), Hex.offset_to_axial(rival.cell)) == 3, "rival city is three tiles out")
+	var owners_before := _owner_snapshot(game)
+	var worked: Vector2i = (game.city_yields(rival)["worked"] as Array)[0]
+	_ok(game.owner_at(worked) == 1 and game.map.land_at(worked) == "plains", "the rival works an owned plains tile")
+	var before: Dictionary = game.city_yields(rival)
+	var turn_before := game.turn
+	var rate_before := game.mana_per_turn(1)
+	var human_rate := game.mana_per_turn(0)
+	game.players[0].mana = 100
+	game.config.spell("grow_forest").radius = 0
+	_ok(game.cast_spell(0, "grow_forest", worked, Hex.EAST).is_empty(), "grow forest on the rival worked tile")
+	_ok(game.turn == turn_before, "the yield change does not wait for End Turn")
+	_ok(game.map.land_at(worked) == "forest" and game.owner_at(worked) == 1, "rival land changes and the owner stays")
+	_ok(_owners_match(game, owners_before), "no tile changes owner")
+	var forested: Dictionary = game.city_yields(rival)
+	var forest_gain := cfg.land("forest").production - cfg.land("plains").production
+	var forest_food := cfg.land("forest").food - cfg.land("plains").food
+	_ok(int(forested["production"]) == int(before["production"]) + forest_gain, "plains to forest raises rival production immediately")
+	_ok(int(forested["food"]) == int(before["food"]) + forest_food, "plains to forest lowers rival food immediately")
+	_ok((forested["worked"] as Array).has(worked), "the better forest stays worked")
+	_ok(int(forested["mana"]) == int(before["mana"]) and game.mana_per_turn(1) == rate_before and game.mana_per_turn(0) == human_rate, "land does not change mana per turn")
+	_allow_another_cast(game, 0)
+	game.config.spell("restore_plains").radius = 0
+	_ok(game.cast_spell(0, "restore_plains", worked, Hex.EAST).is_empty(), "restore plains on the same tile")
+	_ok(game.turn == turn_before and game.map.land_at(worked) == "plains" and game.owner_at(worked) == 1, "forest to plains keeps the owner")
+	var restored: Dictionary = game.city_yields(rival)
+	_ok(int(restored["production"]) == int(before["production"]) and int(restored["food"]) == int(before["food"]), "forest to plains lowers production again")
+	var other := _other_owned(game, rival, worked)
+	_ok(other.x >= 0 and not (game.city_yields(rival)["worked"] as Array).has(other), "a second owned tile is not worked yet")
+	_allow_another_cast(game, 0)
+	_ok(game.cast_spell(0, "grow_forest", other, Hex.EAST).is_empty(), "forest grows on the tile the city was not working")
+	var switched: Dictionary = game.city_yields(rival)
+	_ok((switched["worked"] as Array).has(other) and not (switched["worked"] as Array).has(worked), "the rival city reworks the new forest immediately")
+	_ok(game.turn == turn_before, "reassignment does not wait for End Turn")
+	var mill_tile := _step(home.cell, Hex.EAST, 1)
+	var outer := _step(mill_tile, Hex.NORTHEAST, 1)
+	_ok(game.owner_at(outer) == -1 and game.map.land_at(outer) == "plains", "the mill's outer neighbor is unowned plains")
+	var mill := MapCity.Building.new()
+	mill.kind = "lumber_mill"
+	mill.cell = mill_tile
+	home.buildings.append(mill)
+	var mill_before := int(game.city_yields(home)["production"])
+	var forests_before := CityRules.adjacent_forests(game.map, mill_tile)
+	var worked_home: Array = game.city_yields(home)["worked"]
+	_allow_another_cast(game, 0)
+	_ok(game.cast_spell(0, "grow_forest", outer, Hex.EAST).is_empty(), "forest grows beside the mill")
+	_ok(CityRules.adjacent_forests(game.map, mill_tile) == forests_before + 1, "the mill sees the new forest")
+	_ok(int(game.city_yields(home)["production"]) == mill_before + cfg.lumber_mill_production_per_adjacent_forest, "mill production rises immediately")
+	_ok(_same_cells(game.city_yields(home)["worked"], worked_home), "an unowned forest does not change which tiles are worked")
+	_allow_another_cast(game, 0)
+	_ok(game.cast_spell(0, "restore_plains", outer, Hex.EAST).is_empty(), "restore plains removes the mill's forest")
+	_ok(CityRules.adjacent_forests(game.map, mill_tile) == forests_before, "the mill loses that forest")
+	_ok(int(game.city_yields(home)["production"]) == mill_before, "mill production falls immediately")
+	var well := MapCity.Building.new()
+	well.kind = "mana_well"
+	well.cell = _step(rival.cell, Hex.WEST, 1)
+	rival.buildings.append(well)
+	var with_well := rate_before + cfg.mana_well_mana
+	_ok(game.mana_per_turn(1) == with_well, "a mana well changes the rate")
+	_allow_another_cast(game, 0)
+	_ok(game.cast_spell(0, "grow_forest", worked, Hex.EAST).is_empty(), "another land change beside the well")
+	_ok(game.mana_per_turn(1) == with_well and int(game.city_yields(rival)["mana"]) == with_well, "land still does not change the mana rate")
+	var mover := _blank_setup("plains")
+	var mover_city := mover.found_city(mover.spawn_unit(0, "settler", Vector2i(10, 8)))
+	var walker := mover.spawn_unit(0, "warrior", mover_city.cell)
+	var step_tile := _step(walker.cell, Hex.EAST, 1)
+	var past := _step(walker.cell, Hex.EAST, 2)
+	mover.players[0].mana = 50
+	mover.config.spell("raise_hills").radius = 0
+	var reach_before: Dictionary = mover.reachable_tiles(walker)
+	_ok(reach_before.has(step_tile) and reach_before.has(past), "both plains steps are reachable")
+	_ok(mover.cast_spell(0, "raise_hills", step_tile, Hex.EAST).is_empty(), "raise hills on the first step")
+	_ok(mover.map.land_at(step_tile) == "hills" and mover.turn == 1, "the step is hills before End Turn")
+	var reach_after: Dictionary = mover.reachable_tiles(walker)
+	_ok(reach_after.has(step_tile) and int(reach_after[step_tile]) == 0, "the hill still costs the warrior's two moves")
+	_ok(not reach_after.has(past), "the tile beyond the hill drops out of the reachable set")
+	game.players[0].mana = 100
+	var attacker := game.spawn_unit(0, "warrior", home.cell)
+	var defender := game.spawn_unit(1, "warrior", _step(home.cell, Hex.WEST, 1))
+	_ok(attacker != null and defender != null, "combatants stand on plains")
+	var plain_hit: Dictionary = game.preview_attack(attacker, defender)
+	_ok(bool(plain_hit["ok"]) and game.map.land_at(defender.cell) == "plains", "the preview is legal on plains")
+	_allow_another_cast(game, 0)
+	game.config.spell("raise_hills").radius = 0
+	var defender_owner := game.owner_at(defender.cell)
+	_ok(game.cast_spell(0, "raise_hills", defender.cell, Hex.EAST).is_empty(), "raise hills under the defender")
+	_ok(game.map.land_at(defender.cell) == "hills" and game.owner_at(defender.cell) == defender_owner and game.turn == turn_before, "hills land is live and ownership stays")
+	var hill_hit: Dictionary = game.preview_attack(attacker, defender)
+	_ok(int(hill_hit["damage"]) < int(plain_hit["damage"]), "hills defense lowers damage immediately")
+	_ok(int(hill_hit["counter"]) > int(plain_hit["counter"]), "hills defense raises the counter immediately")
+	_allow_another_cast(game, 0)
+	_ok(game.cast_spell(0, "restore_plains", defender.cell, Hex.EAST).is_empty(), "restore plains under the defender")
+	var back: Dictionary = game.preview_attack(attacker, defender)
+	_ok(game.map.land_at(defender.cell) == "plains", "the hill is gone")
+	_ok(int(back["damage"]) == int(plain_hit["damage"]) and int(back["counter"]) == int(plain_hit["counter"]), "removing the hill restores both damage numbers")
+
+
+func _allow_another_cast(game: GameSetup, player: int) -> void:
+	# The one-cast limit is not an End Turn. Clearing it keeps growth, healing, and mana unpaid.
+	game.players[player].casts_this_turn = 0
+	game.players[player].spell_cooldowns.clear()
+
+
+func _other_owned(game: GameSetup, city: MapCity, skip: Vector2i) -> Vector2i:
+	for cell in game.territory_cells(city):
+		if cell != city.cell and cell != skip and game.map.land_at(cell) == "plains":
+			return cell
+	return Vector2i(-1, -1)
+
+
+func _owner_snapshot(game: GameSetup) -> Dictionary:
+	var owners := {}
+	for row in game.map.height:
+		for col in game.map.width:
+			var cell := Vector2i(col, row)
+			owners[cell] = game.owner_at(cell)
+	return owners
+
+
+func _owners_match(game: GameSetup, owners: Dictionary) -> bool:
+	for cell in owners.keys():
+		if game.owner_at(cell) != int(owners[cell]):
+			return false
+	return true
+
+
+func _same_cells(left: Variant, right: Variant) -> bool:
+	var a: Array = left
+	var b: Array = right
+	if a.size() != b.size():
+		return false
+	for cell in a:
+		if not b.has(cell):
+			return false
+	return true
 
 
 func _spell_game() -> GameSetup:
