@@ -62,8 +62,10 @@ func _run() -> void:
 		quit(1)
 		return
 	var mana := (game.get_node("%ManaLabel") as Label).text
-	if mana != "Mana 30 (+2)":
-		print("FAIL mana before cast '", mana, "'")
+	var turn := (game.get_node("%TurnLabel") as Label).text
+	var caption := (game.get_node("UI/TopBar/Row/TurnCaption") as Label).text
+	if mana != "Mana: 30 (+2/turn)" or caption != "Turn" or turn != "1 / 50":
+		print("FAIL top bar mana='", mana, "' caption='", caption, "' turn='", turn, "'")
 		quit(1)
 		return
 	if not await _save("/opt/cursor/artifacts/ticket11_spell_bar.png"):
@@ -172,7 +174,7 @@ func _run() -> void:
 	mana = (game.get_node("%ManaLabel") as Label).text
 	var forest_button := game.get_node("%SpellButtons").get_node("Spell_grow_forest") as Button
 	var state := (forest_button.get_node("Column/StateLabel") as Label).text
-	if mana != "Mana 15 (+2)" or not forest_button.disabled or not state.begins_with("Cooldown"):
+	if mana != "Mana: 15 (+2/turn)" or not forest_button.disabled or not state.begins_with("Cooldown"):
 		print("FAIL after mana='", mana, "' state='", state, "' disabled=", forest_button.disabled)
 		quit(1)
 		return

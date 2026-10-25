@@ -2,6 +2,9 @@ extends SceneTree
 
 ## Drives the real button signals and the game scene's input handler.
 
+var _pool_before_well := -1
+var _income_before_well := -1
+
 const _LAND_COLUMN := {
 	"plains": 0,
 	"forest": 1,
@@ -34,11 +37,17 @@ func _run() -> void:
 		return
 	if not _found_city(game):
 		return
+	if not _assert_mana_before_turns(game):
+		return
 	if not _cast_spell(game):
 		return
 	if not _end_turn_with_enter(game):
 		return
+	if not _assert_mana_paid(game):
+		return
 	if not _train_scout(game):
+		return
+	if not _finish_mana_well(game):
 		return
 	(game.get_node("%MenuButton") as Button).pressed.emit()
 	(game.get_node("%RestartButton") as Button).pressed.emit()
@@ -160,7 +169,14 @@ func _assert_new_game(game: Node) -> bool:
 		return false
 	if not _hover(game, human_cell, true):
 		return false
-	print("PASS new game seed ", setup.seed_used, " sprites ", shown)
+	if not _mana_matches(game):
+		return false
+	for player in setup.players:
+		if player.mana != setup.config.starting_mana or setup.mana_per_turn(player.index) != 0:
+			print("FAIL start mana player ", player.index, " pool ", player.mana, " gain ", setup.mana_per_turn(player.index))
+			quit(1)
+			return false
+	print("PASS new game seed ", setup.seed_used, " sprites ", shown, " ", (game.get_node("%ManaLabel") as Label).text)
 	return true
 
 
@@ -556,7 +572,7 @@ func _cast_spell(game: Node) -> bool:
 		quit(1)
 		return false
 	var mana_label := (game.get_node("%ManaLabel") as Label).text
-	if not mana_label.begins_with("Mana %d" % mana_now):
+	if not mana_label.begins_with("Mana: %d" % mana_now):
 		print("FAIL mana label '", mana_label, "'")
 		quit(1)
 		return false
@@ -576,6 +592,9 @@ func _cast_spell(game: Node) -> bool:
 		quit(1)
 		return false
 	print("PASS cooldown after end turn ", (button.get_node("Column/StateLabel") as Label).text)
+	# This cast's End Turn already paid one city snapshot. The next check expects one more.
+	_pool_before_well = setup.players[setup.human_index].mana
+	_income_before_well = setup.mana_per_turn(setup.human_index)
 	return true
 
 
@@ -660,6 +679,164 @@ func _found_city(game: Node) -> bool:
 		quit(1)
 		return false
 	print("PASS founded ", city_name)
+	return true
+
+
+func _assert_mana_before_turns(game: Node) -> bool:
+	var setup := game.get("setup") as GameSetup
+	var city: MapCity = setup.cities[0]
+	if not _select_city(game, city):
+		return false
+	var city_mana := int(setup.city_yields(city)["mana"])
+	if setup.mana_per_turn(setup.human_index) != city_mana:
+		print("FAIL income ", setup.mana_per_turn(setup.human_index), " city ", city_mana)
+		quit(1)
+		return false
+	if setup.players[setup.human_index].mana != setup.config.starting_mana:
+		print("FAIL pool changed before a city end turn ", setup.players[setup.human_index].mana)
+		quit(1)
+		return false
+	if not _mana_matches(game):
+		return false
+	var panel_mana := (game.get_node("%CityMana") as Label).text
+	if panel_mana != "Mana %d" % city_mana:
+		print("FAIL panel mana '", panel_mana, "'")
+		quit(1)
+		return false
+	_pool_before_well = setup.players[setup.human_index].mana
+	_income_before_well = city_mana
+	print("PASS mana before turns ", (game.get_node("%ManaLabel") as Label).text, " panel ", panel_mana)
+	return true
+
+
+func _assert_mana_paid(game: Node) -> bool:
+	var setup := game.get("setup") as GameSetup
+	var human := setup.players[setup.human_index]
+	if human.mana != _pool_before_well + _income_before_well:
+		print("FAIL pool ", human.mana, " expected ", _pool_before_well + _income_before_well)
+		quit(1)
+		return false
+	if not _mana_matches(game):
+		return false
+	for player in setup.players:
+		if player.index == setup.human_index:
+			continue
+		if player.mana != setup.config.starting_mana:
+			print("FAIL rival mana ", player.index, " ", player.mana)
+			quit(1)
+			return false
+	print("PASS mana paid ", (game.get_node("%ManaLabel") as Label).text)
+	return true
+
+
+func _finish_mana_well(game: Node) -> bool:
+	var setup := game.get("setup") as GameSetup
+	if setup.cities.is_empty():
+		print("FAIL no city for the mana well")
+		quit(1)
+		return false
+	var city: MapCity = setup.cities[0]
+	if not _mana_matches(game):
+		return false
+	if not _select_city(game, city):
+		return false
+	var divisor := setup.config.city_mana_per_population_divisor
+	var pop_before := city.population
+	var rate_before := setup.mana_per_turn(setup.human_index)
+	var pool_before := setup.players[setup.human_index].mana
+	setup.config.mana_well_cost = 2
+	var plots: Array[Vector2i] = setup.placement_tiles(city, "mana_well")
+	if plots.is_empty():
+		print("FAIL no mana well tile")
+		quit(1)
+		return false
+	(game.get_node("%BuildManaWell") as Button).pressed.emit()
+	_click_cell(game, plots[0])
+	var queued := false
+	for item in city.queue:
+		if item.item_id == "mana_well" and item.cell == plots[0]:
+			queued = true
+	if not queued:
+		print("FAIL mana well not queued ", (game.get_node("%CityReason") as Label).text)
+		quit(1)
+		return false
+	var turn_before := setup.turn
+	if not _confirm_end_turn(game):
+		return false
+	if setup.turn != turn_before + 1:
+		print("FAIL well turn ", setup.turn, " before ", turn_before)
+		quit(1)
+		return false
+	var built := false
+	for building in city.buildings:
+		if building.kind == "mana_well" and building.cell == plots[0]:
+			built = true
+	if not built:
+		print("FAIL mana well did not finish")
+		quit(1)
+		return false
+	var human := setup.players[setup.human_index]
+	if human.mana != pool_before + rate_before:
+		print("FAIL well turn paid ", human.mana, " expected ", pool_before + rate_before)
+		quit(1)
+		return false
+	var pop_delta := 0
+	if divisor > 0:
+		pop_delta = int(city.population / divisor) - int(pop_before / divisor)
+	var gain := setup.mana_per_turn(setup.human_index)
+	var expected := rate_before + setup.config.mana_well_mana + pop_delta
+	if gain != expected:
+		print("FAIL gain ", gain, " expected ", expected, " pop ", pop_before, " -> ", city.population)
+		quit(1)
+		return false
+	if not _mana_matches(game):
+		return false
+	var panel_mana := (game.get_node("%CityMana") as Label).text
+	var city_mana := int(setup.city_yields(city)["mana"])
+	if panel_mana != "Mana %d" % city_mana or city_mana != gain:
+		print("FAIL panel '", panel_mana, "' city ", city_mana, " gain ", gain)
+		quit(1)
+		return false
+	print("PASS mana well +", setup.config.mana_well_mana, " ", (game.get_node("%ManaLabel") as Label).text, " panel ", panel_mana)
+	return true
+
+
+func _confirm_end_turn(game: Node) -> bool:
+	var setup := game.get("setup") as GameSetup
+	var before := setup.turn
+	var button := game.get_node("%EndTurnButton") as Button
+	button.pressed.emit()
+	if setup.turn == before:
+		button.pressed.emit()
+	if setup.turn != before + 1:
+		print("FAIL end turn stayed on ", setup.turn)
+		quit(1)
+		return false
+	return true
+
+
+func _select_city(game: Node, city: MapCity) -> bool:
+	var panel := game.get_node("%CityPanel") as CanvasItem
+	_click_cell(game, city.cell)
+	if not panel.visible:
+		_click_cell(game, city.cell)
+	if not panel.visible:
+		print("FAIL city panel hidden")
+		quit(1)
+		return false
+	return true
+
+
+func _mana_matches(game: Node) -> bool:
+	var setup := game.get("setup") as GameSetup
+	var human := setup.players[setup.human_index]
+	var expected := "Mana: %d (+%d/turn)" % [human.mana, setup.mana_per_turn(human.index)]
+	var label := (game.get_node("%ManaLabel") as Label).text
+	var turn := (game.get_node("%TurnLabel") as Label).text
+	if label != expected or turn != "%d / %d" % [setup.turn, setup.config.turn_limit]:
+		print("FAIL top bar mana='", label, "' turn='", turn, "' expected ", expected, " turn ", setup.turn)
+		quit(1)
+		return false
 	return true
 
 

@@ -355,8 +355,8 @@ func _refresh_board() -> void:
 
 func _refresh_turn() -> void:
 	_turn_label.text = "%d / %d" % [setup.turn, _config.turn_limit]
-	var player := setup.players[setup.human_index]
-	_mana_label.text = "Mana %d (+%d)" % [player.mana, setup.mana_income(setup.human_index)]
+	var human := setup.players[setup.human_index]
+	_mana_label.text = "Mana: %d (+%d/turn)" % [human.mana, setup.mana_per_turn(human.index)]
 	_refresh_spells()
 
 

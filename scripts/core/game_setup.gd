@@ -333,12 +333,20 @@ func has_unordered_moves(player: int) -> bool:
 func end_turn() -> void:
 	# One global clock: every city resolves here. Rivals have no turn of their own yet.
 	# Growth uses this turn's yields, then production (a settler sees the post-growth pop),
-	# then the border clock. The mana yield in that same snapshot is added to the owner's
-	# pool. Idle units heal. Spell cooldowns then tick once for every player — this End
+	# then the border clock. Mana paid is that same snapshot, summed per player after
+	# every city has resolved, so a building finished this turn is paid next End Turn.
+	# Idle units then heal. Spell cooldowns then tick once for every player — this End
 	# Turn is each player's turn until turns are sequential — and the turn counter advances.
 	# A spell with cooldown C cast on turn N is castable again on turn N+C.
+	var income: Array[int] = []
+	income.resize(players.size())
+	income.fill(0)
 	for city in cities.duplicate():
-		_resolve_city(city)
+		var gained := _resolve_city(city)
+		if city.player >= 0 and city.player < income.size():
+			income[city.player] += gained
+	for index in players.size():
+		players[index].mana += income[index]
 	_heal_idle_units()
 	_tick_spells()
 	turn += 1
@@ -425,14 +433,6 @@ func city_by_id(city_id: int) -> MapCity:
 
 func city_yields(city: MapCity) -> Dictionary:
 	return CityRules.yields(config, map, city, territory_cells(city))
-
-
-func mana_income(player_index: int) -> int:
-	var total := 0
-	for city in cities:
-		if city.player == player_index:
-			total += int(city_yields(city)["mana"])
-	return total
 
 
 func cooldown_left(player_index: int, spell_id: String) -> int:
@@ -530,6 +530,16 @@ func spell_skip(land_id: String, cell: Vector2i) -> String:
 	if land_id == "water" and config != null and config.skip_water_if_land_unit_present and _unit_at(cell) != null:
 		return SpellRules.SKIP_UNIT
 	return ""
+
+
+## Live mana per turn for one player: the sum of CityRules.city_mana.
+## A player with no cities gains 0. This is the rate the top bar shows.
+func mana_per_turn(player: int) -> int:
+	var total := 0
+	for city in cities:
+		if city.player == player:
+			total += CityRules.city_mana(config, city)
+	return total
 
 
 func turns_until_border(city: MapCity) -> int:
@@ -770,13 +780,12 @@ func _claim_cell(city: MapCity, cell: Vector2i) -> void:
 	_city_tiles[cell] = city.id
 
 
-func _resolve_city(city: MapCity) -> void:
+func _resolve_city(city: MapCity) -> int:
 	var snapshot: Dictionary = city_yields(city)
-	if city.player >= 0 and city.player < players.size():
-		players[city.player].mana += int(snapshot["mana"])
 	CityRules.apply_growth(config, city, int(snapshot["food"]))
 	_apply_production(city, int(snapshot["production"]))
 	_expand_borders(city)
+	return int(snapshot["mana"])
 
 
 func _apply_production(city: MapCity, production: int) -> void:

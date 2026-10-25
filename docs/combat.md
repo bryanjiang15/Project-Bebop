@@ -45,7 +45,7 @@ An unseen unit is not named. The view does not offer it as a target.
 
 ## Healing
 
-Healing runs inside `end_turn`, after every city resolves and before movement is refilled. There is one global turn, so every player's idle units heal on that clock. A unit heals `units.heal` (10) when `units.heal_only_if_idle` is true and the unit did not move or attack this turn. Skip and Fortify do not count as acting, so those units heal. The result is capped at max HP. Volcanic damage and city healing are not applied.
+Healing runs inside `end_turn`, after every city resolves and after each player's mana pool is paid, and before movement is refilled. There is one global turn, so every player's idle units heal on that clock. A unit heals `units.heal` (10) when `units.heal_only_if_idle` is true and the unit did not move or attack this turn. Skip and Fortify do not count as acting, so those units heal. The result is capped at max HP. Volcanic damage and city healing are not applied.
 
 ## Orders
 

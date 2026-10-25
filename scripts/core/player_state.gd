@@ -19,9 +19,10 @@ class UnitState extends RefCounted:
 var index: int = 0
 var human: bool = false
 var color: String = ""
-var units: Array[UnitState] = []
-## Pooled mana. Cities add their mana yield at End Turn. Spells spend it.
+## Pooled mana for this player. GameSetup sets it from players.starting_mana.
+## Spells spend it. End Turn adds the snapshotted city rates.
 var mana: int = 0
+var units: Array[UnitState] = []
 ## Successful casts since this player's last turn tick.
 var casts_this_turn: int = 0
 ## Spell id to turns remaining. Missing or 0 means the spell is ready.

@@ -11,7 +11,9 @@ End Turn and the Enter key are still one global clock. Rivals do not take a turn
 3. Production uses that production. A settler sees the population after growth.
 4. The border clock ticks once.
 
-A newly finished building changes yields on the next turn. The same turn's snapshot was taken before it existed.
+After every city has resolved, each player's mana pool gains the sum of its cities' snapshotted mana. A player with no cities gains 0. Idle units then heal, spell cooldowns tick once, the turn counter increments, and movement refills.
+
+A newly finished building changes yields on the next turn. The same turn's snapshot was taken before it existed, so a Mana Well completed this turn is paid on the next End Turn. The top bar's per-turn figure reads the live building list, so it shows the new rate as soon as the building exists.
 
 ## Yields
 
@@ -26,7 +28,9 @@ Each population point works one other owned tile. The choice is the best land yi
 
 Water can be worked. It still cannot hold a unit.
 
-Mana from this city is `city.mana_base + floor(population / city.mana_per_population_divisor)`. A Mana Well adds `buildings.mana_well_mana`. The panel shows that per-turn yield. The player's pool, which spells spend, is separate and is described in `docs/spells.md`.
+Mana from this city is `CityRules.city_mana`: `city.mana_base + floor(population / city.mana_per_population_divisor)`, plus `buildings.mana_well_mana` for each Mana Well. `city_yields` uses that same function, so the city panel and the pool share one number. The player's per-turn gain is the sum of `city_mana` across that player's cities (`GameSetup.mana_per_turn`). Removing a well from the building list drops the rate; terraforming does not remove buildings yet.
+
+Each player starts with `players.starting_mana` (10), stored on `PlayerState.mana`. Mana is pooled per player. The human's pool is the only one shown. `%ManaLabel` in the top bar of `scenes/game.tscn` reads `Mana: N (+M/turn)`. The turn readout stays the Turn caption plus `%TurnLabel` (`N / turn_limit`, for example Turn 12 / 50). No new config keys were added. The keys are `players.starting_mana`, `city.mana_base`, `city.mana_per_population_divisor`, `buildings.mana_well_mana`, and `turn_limit`. Spells spend this same pool. The cast rules are in `docs/spells.md`.
 
 A Granary adds `buildings.granary_food` to the city. A Lumber Mill adds `buildings.lumber_mill_production_per_adjacent_forest` for each of the six neighbors of **its** tile that is forest. The mill's own tile does not count. Two copies of a building on different tiles both apply.
 

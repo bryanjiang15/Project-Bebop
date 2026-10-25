@@ -4,9 +4,9 @@ Engineering record for ticket 11. Design still lives in `design_doc.md` and `pro
 
 ## Mana pool
 
-Each player has `PlayerState.mana`. A new game sets it to `players.starting_mana` (10). The city panel still shows that city's own mana yield. The top bar shows the player's pool and the sum of their cities' current mana yields, as `Mana 10 (+2)`.
+The pool is the one from ticket 10: `PlayerState.mana`, set at New Game from `players.starting_mana` (10). `CityRules.city_mana` is the only per-city rate. `GameSetup.mana_per_turn` sums it. The city panel shows one city's number. The top bar shows the human pool as `Mana: N (+M/turn)`, beside the Turn caption and `%TurnLabel` (`N / 50`).
 
-End Turn adds each city's mana yield to its owner's pool. The amount is the snapshot taken at the start of that city's resolution, before growth, so a population gained on this turn does not raise mana until the next End Turn. The same snapshot is what growth and production already use.
+End Turn snapshots every city's mana with `city_yields` before growth, production, and the border claim. After every city has resolved, each player's pool gains the sum of those snapshots. A population gain or a Mana Well finished this turn is paid on the next End Turn. Spells spend that same pool. The spell bar's mana check reads `player.mana` through `GameSetup.spell_block_reason`. There is no second income function.
 
 ## The five spells
 
@@ -59,7 +59,7 @@ An illegal click shows the reason and does not spend mana or leave targeting.
 
 ## Cooldowns
 
-Cooldowns count the caster's own turns. Until players take turns one at a time, the global End Turn is that tick for every player. It runs after city resolution and idle healing, and before the turn counter increments.
+Cooldowns count the caster's own turns. Until players take turns one at a time, the global End Turn is that tick for every player. It runs after the mana sum and idle healing, and before the turn counter increments.
 
 A successful cast stores the spell's `cooldown` as the number of End Turns still to wait. Each End Turn subtracts 1, and 0 means ready. A spell with cooldown 2 cast on turn N is therefore blocked on turn N+1 and castable on turn N+2. The one-cast limit clears at the same tick. `spells.cooldown_uses_caster_turns` records this rule.
 
