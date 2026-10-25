@@ -1,0 +1,50 @@
+[gd_scene format=3]
+
+[node name="SpellButton" type="Button"]
+custom_minimum_size = Vector2(340, 148)
+focus_mode = 0
+theme_override_font_sizes/font_size = 28
+text = ""
+
+[node name="Column" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 10.0
+offset_top = 6.0
+offset_right = -10.0
+offset_bottom = -6.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_constants/separation = 0
+
+[node name="NameLabel" type="Label" parent="Column"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.96, 0.95, 0.9, 1)
+theme_override_font_sizes/font_size = 30
+text = "Spell"
+vertical_alignment = 1
+
+[node name="CostLabel" type="Label" parent="Column"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.55, 0.75, 0.98, 1)
+theme_override_font_sizes/font_size = 26
+text = "0 mana"
+vertical_alignment = 1
+
+[node name="ShapeLabel" type="Label" parent="Column"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.78, 0.78, 0.74, 1)
+theme_override_font_sizes/font_size = 26
+text = "Radius 1"
+vertical_alignment = 1
+
+[node name="StateLabel" type="Label" parent="Column"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.78, 0.78, 0.74, 1)
+theme_override_font_sizes/font_size = 24
+text = "Ready"
+vertical_alignment = 1
+autowrap_mode = 3

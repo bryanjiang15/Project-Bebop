@@ -78,6 +78,7 @@ static func _assemble(cfg: GameConfig, map: MapState, starts: Array[Vector2i], s
 		player.index = index
 		player.human = index == cfg.human_index
 		player.color = cfg.player_colors[index]
+		player.mana = cfg.starting_mana
 		setup.players.append(player)
 	setup.fog = FogState.new()
 	setup.fog.resize(map.width, map.height, cfg.player_count)
@@ -332,10 +333,14 @@ func has_unordered_moves(player: int) -> bool:
 func end_turn() -> void:
 	# One global clock: every city resolves here. Rivals have no turn of their own yet.
 	# Growth uses this turn's yields, then production (a settler sees the post-growth pop),
-	# then the border clock. Idle units heal, then the turn counter advances and movement refills.
+	# then the border clock. The mana yield in that same snapshot is added to the owner's
+	# pool. Idle units heal. Spell cooldowns then tick once for every player — this End
+	# Turn is each player's turn until turns are sequential — and the turn counter advances.
+	# A spell with cooldown C cast on turn N is castable again on turn N+C.
 	for city in cities.duplicate():
 		_resolve_city(city)
 	_heal_idle_units()
+	_tick_spells()
 	turn += 1
 	for player in players:
 		for unit in player.units:
@@ -420,6 +425,111 @@ func city_by_id(city_id: int) -> MapCity:
 
 func city_yields(city: MapCity) -> Dictionary:
 	return CityRules.yields(config, map, city, territory_cells(city))
+
+
+func mana_income(player_index: int) -> int:
+	var total := 0
+	for city in cities:
+		if city.player == player_index:
+			total += int(city_yields(city)["mana"])
+	return total
+
+
+func cooldown_left(player_index: int, spell_id: String) -> int:
+	if player_index < 0 or player_index >= players.size():
+		return 0
+	return int(players[player_index].spell_cooldowns.get(spell_id, 0))
+
+
+## Why the spell button is grey, before a target is chosen.
+func spell_block_reason(player_index: int, spell_id: String) -> String:
+	if config == null or not config.spells.has(spell_id):
+		return SpellRules.REASON_UNKNOWN
+	if player_index < 0 or player_index >= players.size():
+		return SpellRules.REASON_UNKNOWN
+	var player := players[player_index]
+	return SpellRules.block_reason(config, player.mana, player.casts_this_turn, cooldown_left(player_index, spell_id), config.spell(spell_id))
+
+
+## Empty when a click on `target` would cast. `direction` is a Hex direction.
+func cast_reason(player_index: int, spell_id: String, target: Vector2i, direction: int) -> String:
+	var blocked := spell_block_reason(player_index, spell_id)
+	if not blocked.is_empty():
+		return blocked
+	var on_map := map != null and map.in_bounds(target)
+	var owned := _owned_by(player_index)
+	var in_range := on_map and _tiles_in_range(spell_id, target, direction, owned)
+	var revealed := on_map and _spell_revealed(player_index, target)
+	return SpellRules.target_reason(config, on_map, in_range, revealed)
+
+
+func affected_tiles(spell_id: String, target: Vector2i, direction: int) -> Array[Vector2i]:
+	if config == null or map == null:
+		return []
+	return SpellRules.affected_tiles(config, map.width, map.height, spell_id, target, direction)
+
+
+## `reason` empty means the click casts. `changed` counts tiles whose land would differ.
+## City centers and units that would be drowned are listed in `skipped` either way.
+func spell_preview(player_index: int, spell_id: String, target: Vector2i, direction: int) -> Dictionary:
+	var tiles: Array[Vector2i] = []
+	var changed: Array[Vector2i] = []
+	var skipped: Array[Vector2i] = []
+	var cost := 0
+	var land_id := ""
+	var spell_name := ""
+	var shape := ""
+	if config != null and config.spells.has(spell_id):
+		var stats := config.spell(spell_id)
+		cost = stats.mana
+		land_id = stats.land
+		spell_name = stats.spell_name
+		shape = stats.shape
+		tiles = affected_tiles(spell_id, target, direction)
+		for cell in tiles:
+			var skip := spell_skip(land_id, cell)
+			if not skip.is_empty():
+				skipped.append(cell)
+			elif map.land_at(cell) != land_id:
+				changed.append(cell)
+	return {
+		"reason": cast_reason(player_index, spell_id, target, direction),
+		"tiles": tiles,
+		"changed": changed,
+		"skipped": skipped,
+		"cost": cost,
+		"land": land_id,
+		"name": spell_name,
+		"shape": shape,
+	}
+
+
+## Empty string on success. Ownership is left alone. Buildings stay.
+func cast_spell(player_index: int, spell_id: String, target: Vector2i, direction: int) -> String:
+	var reason := cast_reason(player_index, spell_id, target, direction)
+	if not reason.is_empty():
+		return reason
+	var stats := config.spell(spell_id)
+	for cell in affected_tiles(spell_id, target, direction):
+		if not spell_skip(stats.land, cell).is_empty():
+			continue
+		if map.land_at(cell) == stats.land:
+			continue
+		map.set_land(cell, stats.land)
+	var player := players[player_index]
+	player.mana -= stats.mana
+	player.casts_this_turn += 1
+	if stats.cooldown > 0:
+		player.spell_cooldowns[spell_id] = stats.cooldown
+	return ""
+
+
+func spell_skip(land_id: String, cell: Vector2i) -> String:
+	if config != null and config.city_center_never_terraformed and city_at_cell(cell) != null:
+		return SpellRules.SKIP_CENTER
+	if land_id == "water" and config != null and config.skip_water_if_land_unit_present and _unit_at(cell) != null:
+		return SpellRules.SKIP_UNIT
+	return ""
 
 
 func turns_until_border(city: MapCity) -> int:
@@ -516,6 +626,53 @@ func _remove_if_dead(unit: PlayerState.UnitState) -> void:
 	if unit.owner < 0 or unit.owner >= players.size():
 		return
 	players[unit.owner].units.erase(unit)
+
+
+func _tick_spells() -> void:
+	for player in players:
+		player.casts_this_turn = 0
+		var next := {}
+		for key in player.spell_cooldowns.keys():
+			var left := int(player.spell_cooldowns[key]) - 1
+			if left > 0:
+				next[key] = left
+		player.spell_cooldowns = next
+
+
+func _owned_by(player_index: int) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	for cell in owned_cells():
+		if owner_at(cell) == player_index:
+			out.append(cell)
+	return out
+
+
+func _tiles_in_range(spell_id: String, target: Vector2i, direction: int, owned: Array[Vector2i]) -> bool:
+	var stats := config.spell(spell_id)
+	var dist := SpellRules.nearest_owned_distance(target, owned)
+	if dist < 0 or dist > stats.range:
+		return false
+	if config.only_target_must_be_in_range:
+		return true
+	for cell in affected_tiles(spell_id, target, direction):
+		var cell_dist := SpellRules.nearest_owned_distance(cell, owned)
+		if cell_dist < 0 or cell_dist > stats.range:
+			return false
+	return true
+
+
+func _spell_revealed(player_index: int, cell: Vector2i) -> bool:
+	if fog == null:
+		return false
+	return fog.sight(player_index, cell) != FogState.Sight.UNREVEALED
+
+
+func _unit_at(cell: Vector2i) -> PlayerState.UnitState:
+	for player in players:
+		for unit in player.units:
+			if unit.cell == cell:
+				return unit
+	return null
 
 
 func _heal_idle_units() -> void:
@@ -615,6 +772,8 @@ func _claim_cell(city: MapCity, cell: Vector2i) -> void:
 
 func _resolve_city(city: MapCity) -> void:
 	var snapshot: Dictionary = city_yields(city)
+	if city.player >= 0 and city.player < players.size():
+		players[city.player].mana += int(snapshot["mana"])
 	CityRules.apply_growth(config, city, int(snapshot["food"]))
 	_apply_production(city, int(snapshot["production"]))
 	_expand_borders(city)

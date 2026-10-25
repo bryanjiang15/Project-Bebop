@@ -9,7 +9,7 @@ const PATH := "res://config/game_config.json"
 const LAND_IDS: PackedStringArray = ["plains", "forest", "hills", "water", "volcanic"]
 const LAND_FIELDS: PackedStringArray = ["food", "production", "move_cost", "defense", "passable", "hazard_damage"]
 const SPELL_IDS: PackedStringArray = ["grow_forest", "raise_hills", "carve_river", "ignite", "restore_plains"]
-const SPELL_FIELDS: PackedStringArray = ["shape", "radius", "length", "mana", "range", "cooldown", "land"]
+const SPELL_FIELDS: PackedStringArray = ["name", "shape", "radius", "length", "mana", "range", "cooldown", "land"]
 const UNIT_IDS: PackedStringArray = ["scout", "warrior", "archer", "settler"]
 const UNIT_FIELDS: PackedStringArray = ["hp", "attack", "defense", "move", "cost", "range", "combatant", "population_cost", "min_city_size"]
 
@@ -140,6 +140,7 @@ class LandStats extends RefCounted:
 
 
 class SpellStats extends RefCounted:
+	var spell_name: String
 	var shape: String
 	var radius: int
 	var length: int
@@ -150,6 +151,7 @@ class SpellStats extends RefCounted:
 
 	func to_dict() -> Dictionary:
 		return {
+			"name": spell_name,
 			"shape": shape,
 			"radius": radius,
 			"length": length,
@@ -356,6 +358,23 @@ func fog_hidden_color() -> Color:
 
 func fog_dim_color() -> Color:
 	return Color(fog_dim[0], fog_dim[1], fog_dim[2], fog_dim[3])
+
+
+func _check_spells() -> void:
+	for spell_id in SPELL_IDS:
+		var stats := spells[spell_id] as SpellStats
+		if stats.spell_name.is_empty():
+			_fail("game_config.json spells.%s.name is empty" % spell_id)
+			_abort()
+			return
+		if stats.shape != "radius" and stats.shape != "line":
+			_fail("game_config.json spells.%s.shape must be radius or line" % spell_id)
+			_abort()
+			return
+		if not lands.has(stats.land):
+			_fail("game_config.json spells.%s.land is unknown" % spell_id)
+			_abort()
+			return
 
 
 func _check_players() -> void:
@@ -630,6 +649,7 @@ func _read(data: Dictionary) -> void:
 	for spell_id in SPELL_IDS:
 		var spell_stats := SpellStats.new()
 		var prefix := "spells." + spell_id
+		spell_stats.spell_name = _string(data, prefix + ".name")
 		spell_stats.shape = _string(data, prefix + ".shape")
 		spell_stats.radius = _int(data, prefix + ".radius")
 		spell_stats.length = _int(data, prefix + ".length")
@@ -638,6 +658,7 @@ func _read(data: Dictionary) -> void:
 		spell_stats.cooldown = _int(data, prefix + ".cooldown")
 		spell_stats.land = _string(data, prefix + ".land")
 		spells[spell_id] = spell_stats
+	_check_spells()
 	one_unit_per_tile = _bool(data, "units.one_unit_per_tile")
 	capture_lone_settler = _bool(data, "units.capture_lone_settler")
 	spawn_on_city_center = _bool(data, "units.spawn_on_city_center")

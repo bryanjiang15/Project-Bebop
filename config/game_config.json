@@ -83,11 +83,11 @@
     "spells_change_tile_ownership": false,
     "skip_water_if_land_unit_present": true,
     "cooldown_uses_caster_turns": true,
-    "grow_forest": {"shape": "radius", "radius": 1, "length": 0, "mana": 15, "range": 3, "cooldown": 2, "land": "forest"},
-    "raise_hills": {"shape": "radius", "radius": 1, "length": 0, "mana": 20, "range": 3, "cooldown": 3, "land": "hills"},
-    "carve_river": {"shape": "line", "radius": 0, "length": 4, "mana": 25, "range": 3, "cooldown": 3, "land": "water"},
-    "ignite": {"shape": "radius", "radius": 1, "length": 0, "mana": 35, "range": 2, "cooldown": 5, "land": "volcanic"},
-    "restore_plains": {"shape": "radius", "radius": 1, "length": 0, "mana": 10, "range": 3, "cooldown": 2, "land": "plains"}
+    "grow_forest": {"name": "Grow Forest", "shape": "radius", "radius": 1, "length": 0, "mana": 15, "range": 3, "cooldown": 2, "land": "forest"},
+    "raise_hills": {"name": "Raise Hills", "shape": "radius", "radius": 1, "length": 0, "mana": 20, "range": 3, "cooldown": 3, "land": "hills"},
+    "carve_river": {"name": "Carve River", "shape": "line", "radius": 0, "length": 4, "mana": 25, "range": 3, "cooldown": 3, "land": "water"},
+    "ignite": {"name": "Ignite", "shape": "radius", "radius": 1, "length": 0, "mana": 35, "range": 2, "cooldown": 5, "land": "volcanic"},
+    "restore_plains": {"name": "Restore Plains", "shape": "radius", "radius": 1, "length": 0, "mana": 10, "range": 3, "cooldown": 2, "land": "plains"}
   },
   "units": {
     "one_unit_per_tile": true,

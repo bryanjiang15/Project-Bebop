@@ -26,7 +26,7 @@ Each population point works one other owned tile. The choice is the best land yi
 
 Water can be worked. It still cannot hold a unit.
 
-Mana from this city is `city.mana_base + floor(population / city.mana_per_population_divisor)`. A Mana Well adds `buildings.mana_well_mana`. This is a per-turn display. There is no player mana pool yet.
+Mana from this city is `city.mana_base + floor(population / city.mana_per_population_divisor)`. A Mana Well adds `buildings.mana_well_mana`. The panel shows that per-turn yield. The player's pool, which spells spend, is separate and is described in `docs/spells.md`.
 
 A Granary adds `buildings.granary_food` to the city. A Lumber Mill adds `buildings.lumber_mill_production_per_adjacent_forest` for each of the six neighbors of **its** tile that is forest. The mill's own tile does not count. Two copies of a building on different tiles both apply.
 

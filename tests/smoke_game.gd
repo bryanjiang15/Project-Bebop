@@ -34,6 +34,8 @@ func _run() -> void:
 		return
 	if not _found_city(game):
 		return
+	if not _cast_spell(game):
+		return
 	if not _end_turn_with_enter(game):
 		return
 	if not _train_scout(game):
@@ -452,6 +454,160 @@ func _train_scout(game: Node) -> bool:
 		return false
 	print("PASS trained scout pop ", city.population, " food ", city.food_stored, " tiles ", setup.territory_cells(city).size())
 	return true
+
+
+func _cast_spell(game: Node) -> bool:
+	var setup := game.get("setup") as GameSetup
+	if setup.cities.is_empty():
+		print("FAIL spell cast has no city")
+		quit(1)
+		return false
+	var city: MapCity = setup.cities[0]
+	if setup.players[setup.human_index].mana < setup.config.spell("restore_plains").mana:
+		print("FAIL starting mana ", setup.players[setup.human_index].mana)
+		quit(1)
+		return false
+	# Leave enough mana after the cast that cooldown, not the cost, greys the button.
+	setup.players[setup.human_index].mana = setup.config.spell("restore_plains").mana * 2
+	var mana_before := setup.players[setup.human_index].mana
+	var target := _spell_target(setup, city.cell)
+	if target.x < 0:
+		print("FAIL no spell target")
+		quit(1)
+		return false
+	var sample := Vector2i(-1, -1)
+	for cell in setup.affected_tiles("restore_plains", target, Hex.EAST):
+		if cell != city.cell:
+			sample = cell
+			break
+	if sample.x < 0:
+		print("FAIL spell area is empty")
+		quit(1)
+		return false
+	setup.map.set_land(sample, "forest")
+	game._refresh_board()
+	var warrior := _human_unit(setup, "warrior")
+	if warrior == null:
+		print("FAIL spell cast has no warrior")
+		quit(1)
+		return false
+	var warrior_cell := warrior.cell
+	_click_cell(game, warrior.cell)
+	var button := game.get_node("%SpellButtons").get_node("Spell_restore_plains") as Button
+	if button.disabled:
+		print("FAIL restore plains greyed before the cast: ", button.tooltip_text)
+		quit(1)
+		return false
+	button.pressed.emit()
+	_hover_cell(game, target)
+	var expected := setup.affected_tiles("restore_plains", target, Hex.EAST).size()
+	var marks := game.get_node("%MoveHighlights").get_child_count()
+	if marks != expected:
+		print("FAIL preview marks ", marks, " expected ", expected)
+		quit(1)
+		return false
+	var tip := (game.get_node("%Tooltip") as Label).text
+	if not tip.contains("Restore Plains") or not tip.contains("10 mana") or not tip.contains("change"):
+		print("FAIL spell tip '", tip, "'")
+		quit(1)
+		return false
+	print("PASS spell preview ", marks, " ", tip.replace("\n", " | "))
+	_click_cell(game, target, MOUSE_BUTTON_RIGHT)
+	if warrior.cell != warrior_cell:
+		print("FAIL right click moved the warrior during targeting")
+		quit(1)
+		return false
+	_hover_cell(game, target)
+	tip = (game.get_node("%Tooltip") as Label).text
+	if tip.contains("Restore Plains"):
+		print("FAIL right click left targeting '", tip, "'")
+		quit(1)
+		return false
+	print("PASS right click cancels targeting")
+	button.pressed.emit()
+	_hover_cell(game, target)
+	_press_action(game, "toggle_menu")
+	if (game.get_node("%InGameMenu") as CanvasItem).visible:
+		print("FAIL esc opened the menu during targeting")
+		quit(1)
+		return false
+	_hover_cell(game, target)
+	tip = (game.get_node("%Tooltip") as Label).text
+	if tip.contains("Restore Plains"):
+		print("FAIL esc left targeting '", tip, "'")
+		quit(1)
+		return false
+	print("PASS esc cancels targeting")
+	button.pressed.emit()
+	_hover_cell(game, target)
+	var preview: Dictionary = setup.spell_preview(setup.human_index, "restore_plains", target, Hex.EAST)
+	if not (preview["changed"] as Array).has(sample):
+		print("FAIL forest tile is not in the change set")
+		quit(1)
+		return false
+	_click_cell(game, target)
+	if setup.map.land_at(sample) != "plains":
+		print("FAIL tile stayed ", setup.map.land_at(sample))
+		quit(1)
+		return false
+	var mana_now := setup.players[setup.human_index].mana
+	if mana_now != mana_before - setup.config.spell("restore_plains").mana:
+		print("FAIL mana ", mana_now, " from ", mana_before)
+		quit(1)
+		return false
+	var mana_label := (game.get_node("%ManaLabel") as Label).text
+	if not mana_label.begins_with("Mana %d" % mana_now):
+		print("FAIL mana label '", mana_label, "'")
+		quit(1)
+		return false
+	var state := (button.get_node("Column/StateLabel") as Label).text
+	if not button.disabled or button.tooltip_text != SpellRules.REASON_COOLDOWN or not state.begins_with("Cooldown"):
+		print("FAIL greyed disabled=", button.disabled, " tip='", button.tooltip_text, "' state='", state, "'")
+		quit(1)
+		return false
+	print("PASS cast ", mana_label, " ", state)
+	var turn_before := setup.turn
+	var end := game.get_node("%EndTurnButton") as Button
+	end.pressed.emit()
+	if end.text == "End anyway (Enter)":
+		end.pressed.emit()
+	if setup.turn != turn_before + 1 or setup.cooldown_left(setup.human_index, "restore_plains") != 1 or not button.disabled:
+		print("FAIL after end turn ", setup.turn, " cooldown ", setup.cooldown_left(setup.human_index, "restore_plains"), " ", (button.get_node("Column/StateLabel") as Label).text)
+		quit(1)
+		return false
+	print("PASS cooldown after end turn ", (button.get_node("Column/StateLabel") as Label).text)
+	return true
+
+
+func _spell_target(setup: GameSetup, origin: Vector2i) -> Vector2i:
+	var axial := Hex.offset_to_axial(origin)
+	var fallback := Vector2i(-1, -1)
+	for dist in [2, 1, 3]:
+		for dir in 6:
+			var cursor := axial
+			for _step_i in dist:
+				cursor = Hex.neighbor(cursor, dir)
+			var cell := Hex.axial_to_offset(cursor)
+			if not setup.map.in_bounds(cell):
+				continue
+			if not setup.cast_reason(setup.human_index, "restore_plains", cell, Hex.EAST).is_empty():
+				continue
+			if setup.affected_tiles("restore_plains", cell, Hex.EAST).size() == 7:
+				return cell
+			if fallback.x < 0:
+				fallback = cell
+	return fallback
+
+
+func _hover_cell(game: Node, cell: Vector2i) -> void:
+	var map := game.get_node("%Map") as TileMapLayer
+	var local: Vector2 = map.map_to_local(cell)
+	var world: Vector2 = map.to_global(local)
+	var screen: Vector2 = game.get_viewport().get_canvas_transform() * world
+	var motion := InputEventMouseMotion.new()
+	motion.position = screen
+	motion.global_position = screen
+	game._unhandled_input(motion)
 
 
 func _press_action(game: Node, action: String) -> void:

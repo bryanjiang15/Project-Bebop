@@ -20,3 +20,10 @@ var index: int = 0
 var human: bool = false
 var color: String = ""
 var units: Array[UnitState] = []
+## Pooled mana. Cities add their mana yield at End Turn. Spells spend it.
+var mana: int = 0
+## Successful casts since this player's last turn tick.
+var casts_this_turn: int = 0
+## Spell id to turns remaining. Missing or 0 means the spell is ready.
+## End Turn subtracts 1. A value of 2 cast this turn is ready again after two ticks.
+var spell_cooldowns: Dictionary = {}
