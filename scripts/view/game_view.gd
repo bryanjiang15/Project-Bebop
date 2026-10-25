@@ -65,6 +65,7 @@ var _end_confirm: bool = false
 @onready var _borders: Node2D = %Borders
 @onready var _actors: Node2D = %Actors
 @onready var _turn_label: Label = %TurnLabel
+@onready var _mana_label: Label = %ManaLabel
 @onready var _tooltip: Label = %Tooltip
 @onready var _tooltip_panel: PanelContainer = %TooltipPanel
 @onready var _menu: PanelContainer = %InGameMenu
@@ -325,6 +326,8 @@ func _refresh_board() -> void:
 
 func _refresh_turn() -> void:
 	_turn_label.text = "%d / %d" % [setup.turn, _config.turn_limit]
+	var human := setup.players[setup.human_index]
+	_mana_label.text = "Mana: %d (+%d/turn)" % [human.mana, setup.mana_per_turn(human.index)]
 
 
 func _refresh_selection() -> void:

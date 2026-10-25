@@ -78,6 +78,7 @@ static func _assemble(cfg: GameConfig, map: MapState, starts: Array[Vector2i], s
 		player.index = index
 		player.human = index == cfg.human_index
 		player.color = cfg.player_colors[index]
+		player.mana = cfg.starting_mana
 		setup.players.append(player)
 	setup.fog = FogState.new()
 	setup.fog.resize(map.width, map.height, cfg.player_count)
@@ -332,9 +333,18 @@ func has_unordered_moves(player: int) -> bool:
 func end_turn() -> void:
 	# One global clock: every city resolves here. Rivals have no turn of their own yet.
 	# Growth uses this turn's yields, then production (a settler sees the post-growth pop),
-	# then the border clock. Idle units heal, then the turn counter advances and movement refills.
+	# then the border clock. Mana paid is that same snapshot, summed per player after
+	# every city has resolved, so a building finished this turn is paid next End Turn.
+	# Idle units then heal, the turn counter advances, and movement refills.
+	var income: Array[int] = []
+	income.resize(players.size())
+	income.fill(0)
 	for city in cities.duplicate():
-		_resolve_city(city)
+		var gained := _resolve_city(city)
+		if city.player >= 0 and city.player < income.size():
+			income[city.player] += gained
+	for index in players.size():
+		players[index].mana += income[index]
 	_heal_idle_units()
 	turn += 1
 	for player in players:
@@ -420,6 +430,16 @@ func city_by_id(city_id: int) -> MapCity:
 
 func city_yields(city: MapCity) -> Dictionary:
 	return CityRules.yields(config, map, city, territory_cells(city))
+
+
+## Live mana per turn for one player: the sum of CityRules.city_mana.
+## A player with no cities gains 0. This is the rate the top bar shows.
+func mana_per_turn(player: int) -> int:
+	var total := 0
+	for city in cities:
+		if city.player == player:
+			total += CityRules.city_mana(config, city)
+	return total
 
 
 func turns_until_border(city: MapCity) -> int:
@@ -613,11 +633,12 @@ func _claim_cell(city: MapCity, cell: Vector2i) -> void:
 	_city_tiles[cell] = city.id
 
 
-func _resolve_city(city: MapCity) -> void:
+func _resolve_city(city: MapCity) -> int:
 	var snapshot: Dictionary = city_yields(city)
 	CityRules.apply_growth(config, city, int(snapshot["food"]))
 	_apply_production(city, int(snapshot["production"]))
 	_expand_borders(city)
+	return int(snapshot["mana"])
 
 
 func _apply_production(city: MapCity, production: int) -> void:
