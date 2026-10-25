@@ -22,6 +22,7 @@ func _init() -> void:
 	_test_city_economy()
 	_test_mana_pool()
 	_test_combat()
+	_test_spells()
 	_test_end_turn_key()
 	print("\nPassed: %d  Failed: %d" % [_passed, _failed])
 	quit(1 if _failed > 0 else 0)
@@ -70,7 +71,7 @@ func _test_config() -> void:
 	_ok(cfg.unit("settler").cost == 40 and cfg.unit("scout").cost == 20 and cfg.unit("warrior").cost == 30 and cfg.unit("archer").cost == 45, "unit costs")
 	_ok(cfg.granary_cost == 50 and cfg.mana_well_cost == 60 and cfg.lumber_mill_cost == 50, "building costs")
 	_ok(cfg.granary_food == 2 and cfg.mana_well_mana == 2 and cfg.lumber_mill_production_per_adjacent_forest == 1, "building effects")
-	_ok(cfg.spell("grow_forest").radius == 1 and cfg.spell("grow_forest").mana == 15 and cfg.spell("grow_forest").range == 3 and cfg.spell("grow_forest").cooldown == 2, "grow forest")
+	_ok(cfg.spell("grow_forest").spell_name == "Grow Forest" and cfg.spell("grow_forest").radius == 1 and cfg.spell("grow_forest").mana == 15 and cfg.spell("grow_forest").range == 3 and cfg.spell("grow_forest").cooldown == 2, "grow forest")
 	_ok(cfg.spell("raise_hills").mana == 20 and cfg.spell("raise_hills").cooldown == 3, "raise hills")
 	_ok(cfg.spell("carve_river").length == 4 and cfg.spell("carve_river").mana == 25 and cfg.line_length == 4, "carve river line of 4")
 	_ok(cfg.spell("ignite").mana == 35 and cfg.spell("ignite").range == 2 and cfg.spell("ignite").cooldown == 5, "ignite")
@@ -119,6 +120,10 @@ func _test_config() -> void:
 	broken["spells"] = spells
 	var missing := GameConfig.missing_paths(broken)
 	_ok(missing.has("spells.casts_per_turn"), "missing key is reported")
+	var spell_broken: Dictionary = raw.duplicate(true)
+	var grow: Dictionary = (spell_broken["spells"] as Dictionary)["grow_forest"]
+	grow.erase("mana")
+	_ok(GameConfig.missing_paths(spell_broken).has("spells.grow_forest.mana"), "missing spell cost is reported")
 
 
 func _test_hex_neighbors() -> void:
@@ -1082,6 +1087,194 @@ func _test_combat() -> void:
 	_ok(partial.mp > 0 and game.has_unordered_moves(0), "moves left after a step still need an order")
 	partial.mp = 0
 	_ok(not game.has_unordered_moves(0), "a unit with no moves left does not warn")
+
+
+func _test_spells() -> void:
+	print("[spells]")
+	var cfg: GameConfig = GameConfig.load_file()
+	var columns := cfg.map_width
+	var rows := cfg.map_height
+	var open := Vector2i(10, 8)
+	var radius := SpellRules.affected_tiles(cfg, columns, rows, "grow_forest", open, Hex.EAST)
+	_ok(radius.size() == 7, "radius 1 is 7 tiles in the open")
+	_ok(radius.has(open), "radius includes the target")
+	for neighbor in Hex.neighbors(Hex.offset_to_axial(open)):
+		_ok(radius.has(Hex.axial_to_offset(neighbor)), "radius includes %s" % neighbor)
+	var corner := SpellRules.affected_tiles(cfg, columns, rows, "grow_forest", Vector2i.ZERO, Hex.EAST)
+	_ok(corner.size() == 3 and corner.has(Vector2i.ZERO), "radius drops off-map tiles at the corner")
+	for dir in 6:
+		var line := SpellRules.affected_tiles(cfg, columns, rows, "carve_river", open, dir)
+		_ok(line.size() == 4 and line[0] == open and line[3] == _step(open, dir, 3), "line of 4 %s" % Hex.DIRECTION_NAMES[dir])
+	var clipped := SpellRules.affected_tiles(cfg, columns, rows, "carve_river", Vector2i.ZERO, Hex.WEST)
+	_ok(clipped.size() == 1 and clipped[0] == Vector2i.ZERO, "a line drops tiles off the map")
+	var axes: Array[Vector2] = []
+	var face := Vector2((load("res://assets/art/bebop_tileset.tres") as TileSet).tile_size)
+	var origin_px := Hex.offset_to_pixel(open, face)
+	for dir in 6:
+		axes.append(Hex.offset_to_pixel(_step(open, dir, 1), face) - origin_px)
+	for dir in 6:
+		_ok(SpellRules.sector(axes[dir], axes) == dir, "cursor toward %s picks that direction" % Hex.DIRECTION_NAMES[dir])
+	_ok(SpellRules.sector(Vector2.ZERO, axes) == Hex.EAST, "the tile center casts east")
+	_ok(SpellRules.sector(axes[Hex.EAST].rotated(0.25), axes) == Hex.EAST, "the east sector has width")
+	var game := _blank_setup("plains")
+	var origin := Vector2i(10, 8)
+	_ok(game.players[0].mana == cfg.starting_mana, "a new player starts with the config mana")
+	var city := game.found_city(game.spawn_unit(0, "settler", origin))
+	var income := int(game.city_yields(city)["mana"])
+	game.end_turn()
+	_ok(game.players[0].mana == cfg.starting_mana + income, "end turn pools each city's mana yield")
+	game.players[0].mana = 100
+	var owned := _owned_of(game, 0)
+	var inside := _step(origin, Hex.EAST, 4)
+	var outside := _step(origin, Hex.EAST, 5)
+	_ok(SpellRules.nearest_owned_distance(inside, owned) == 3, "range is measured from the nearest owned tile")
+	_ok(SpellRules.nearest_owned_distance(outside, owned) == 4, "one step past the ring is distance 4")
+	game.config.spells_require_revealed_target = false
+	_ok(game.cast_reason(0, "grow_forest", inside, Hex.EAST).is_empty(), "distance 3 is inside range 3")
+	_ok(game.cast_reason(0, "grow_forest", outside, Hex.EAST) == SpellRules.REASON_RANGE, "distance 4 is outside range 3")
+	_ok(game.cast_reason(0, "ignite", _step(origin, Hex.EAST, 3), Hex.EAST).is_empty(), "ignite range 2 reaches distance 2 from the ring")
+	_ok(game.cast_reason(0, "ignite", inside, Hex.EAST) == SpellRules.REASON_RANGE, "ignite range 2 rejects distance 3")
+	var bare := _blank_setup("plains")
+	bare.players[0].mana = 100
+	bare.config.spells_require_revealed_target = false
+	_ok(bare.cast_reason(0, "restore_plains", Vector2i(4, 4), Hex.EAST) == SpellRules.REASON_RANGE, "no owned tile means out of range")
+	game.config.spells_require_revealed_target = true
+	_ok(game.fog.sight(0, inside) == FogState.Sight.UNREVEALED, "the in-range edge is still unrevealed")
+	_ok(game.cast_reason(0, "grow_forest", inside, Hex.EAST) == SpellRules.REASON_HIDDEN, "an unrevealed target is rejected")
+	game.config.spells_require_revealed_target = false
+	_ok(game.cast_reason(0, "grow_forest", inside, Hex.EAST).is_empty(), "the revealed flag can be turned off")
+	game.config.spells_require_revealed_target = true
+	var worked: Vector2i = (game.city_yields(city)["worked"] as Array)[0]
+	var before: Dictionary = game.city_yields(city)
+	var preview: Dictionary = game.spell_preview(0, "grow_forest", worked, Hex.EAST)
+	_ok((preview["tiles"] as Array).size() == 7, "preview lists the whole radius")
+	_ok((preview["skipped"] as Array).has(city.cell), "the city center is marked skipped")
+	_ok(not (preview["changed"] as Array).has(city.cell), "the city center is not counted as changed")
+	game.map.set_land(worked, "forest")
+	preview = game.spell_preview(0, "grow_forest", worked, Hex.EAST)
+	_ok(not (preview["changed"] as Array).has(worked), "a tile already of the spell's land is not a change")
+	game.map.set_land(worked, "plains")
+	var spent := game.players[0].mana
+	_ok(game.cast_spell(0, "grow_forest", worked, Hex.EAST).is_empty(), "grow forest casts")
+	_ok(game.map.land_at(worked) == "forest", "the worked tile becomes forest")
+	_ok(game.map.land_at(city.cell) == "plains", "the city center stays plains")
+	_ok(game.owner_at(worked) == 0 and game.owner_at(city.cell) == 0, "a cast does not change ownership")
+	_ok(game.players[0].mana == spent - cfg.spell("grow_forest").mana, "mana is spent")
+	_ok(game.cooldown_left(0, "grow_forest") == 2 and game.players[0].casts_this_turn == 1, "cooldown 2 starts on the cast turn")
+	var after: Dictionary = game.city_yields(city)
+	_ok(int(after["production"]) == int(before["production"]) + cfg.land("forest").production, "production updates from the live land")
+	_ok(int(after["food"]) == int(before["food"]) - 1, "food updates from the live land")
+	var walker := game.spawn_unit(0, "settler", city.cell)
+	walker.mp = 1
+	_ok(int(game.reachable_tiles(walker)[worked]) == 0, "the new forest move cost applies immediately")
+	_ok(game.cast_spell(0, "grow_forest", worked, Hex.EAST) == SpellRules.REASON_COOLDOWN, "cooldown blocks the next cast")
+	var turn_cast: int = game.turn
+	game.end_turn()
+	_ok(game.turn == turn_cast + 1 and game.cooldown_left(0, "grow_forest") == 1, "one owner turn leaves cooldown 1")
+	_ok(game.players[0].casts_this_turn == 0, "the one-cast limit resets next turn")
+	_ok(game.cast_reason(0, "grow_forest", worked, Hex.EAST) == SpellRules.REASON_COOLDOWN, "cooldown 2 is not ready on turn N+1")
+	game.end_turn()
+	_ok(game.turn == turn_cast + 2 and game.cooldown_left(0, "grow_forest") == 0, "cooldown 2 is ready on turn N+2")
+	_ok(game.cast_reason(0, "restore_plains", worked, Hex.EAST).is_empty(), "another spell is castable once the turn resets")
+	var limited := _spell_game()
+	limited.config.spell("restore_plains").cooldown = 0
+	limited.players[0].mana = 30
+	var spot: Vector2i = (limited.city_yields(limited.cities[0])["worked"] as Array)[0]
+	_ok(limited.cast_spell(0, "restore_plains", spot, Hex.EAST).is_empty(), "a zero cooldown spell casts")
+	_ok(limited.cast_spell(0, "grow_forest", spot, Hex.EAST) == SpellRules.REASON_TURN, "one cast per turn")
+	limited.end_turn()
+	_ok(limited.cast_reason(0, "grow_forest", spot, Hex.EAST).is_empty(), "the next turn allows another cast")
+	var priced := _spell_game()
+	priced.players[0].mana = 10
+	priced.config.spell("restore_plains").mana = 100
+	var priced_tile: Vector2i = priced.cities[0].cell
+	_ok(priced.cast_spell(0, "restore_plains", priced_tile, Hex.EAST) == SpellRules.REASON_MANA, "a raised cost rejects the cast")
+	_ok(priced.players[0].mana == 10 and priced.map.land_at(priced_tile) == "plains", "a rejected cast spends nothing and changes nothing")
+	priced.config.spell("restore_plains").mana = 4
+	_ok(priced.cast_spell(0, "restore_plains", _step(priced_tile, Hex.EAST, 1), Hex.EAST).is_empty(), "a lowered cost casts")
+	_ok(priced.players[0].mana == 6, "the tuned cost is what gets spent")
+	var river := _spell_game()
+	var mouth: Vector2i = _step(river.cities[0].cell, Hex.EAST, 1)
+	var soaked := _step(mouth, Hex.EAST, 1)
+	var standing := river.spawn_unit(0, "warrior", soaked)
+	river.players[0].mana = 100
+	_ok(standing != null and river.cast_spell(0, "carve_river", mouth, Hex.EAST).is_empty(), "carve river casts through a unit")
+	_ok(river.map.land_at(mouth) == "water", "the empty tile becomes water")
+	_ok(river.map.land_at(soaked) == "plains", "a unit skips a water result")
+	_ok(river.map.land_at(_step(mouth, Hex.EAST, 2)) == "water", "the rest of the line still changes")
+	river.players[0].casts_this_turn = 0
+	river.players[0].spell_cooldowns.clear()
+	river.config.skip_water_if_land_unit_present = false
+	_ok(river.cast_spell(0, "carve_river", soaked, Hex.EAST).is_empty(), "the water skip follows the flag")
+	_ok(river.map.land_at(soaked) == "water", "with the flag off the unit's tile becomes water")
+	var keep := _spell_game()
+	keep.config.city_center_never_terraformed = false
+	keep.players[0].mana = 50
+	_ok(keep.cast_spell(0, "grow_forest", keep.cities[0].cell, Hex.EAST).is_empty(), "the center flag can allow a cast")
+	_ok(keep.map.land_at(keep.cities[0].cell) == "forest", "the center changes when the flag is off")
+	var wide := _spell_game()
+	wide.config.spells_require_revealed_target = false
+	wide.players[0].mana = 80
+	var far := _step(wide.cities[0].cell, Hex.EAST, 4)
+	_ok(wide.cast_reason(0, "carve_river", far, Hex.EAST).is_empty(), "only the target has to be in range")
+	wide.config.only_target_must_be_in_range = false
+	_ok(wide.cast_reason(0, "carve_river", far, Hex.EAST) == SpellRules.REASON_RANGE, "the whole line is checked when the flag is off")
+	wide.config.spell("carve_river").length = 2
+	wide.config.only_target_must_be_in_range = true
+	_ok(SpellRules.affected_tiles(wide.config, columns, rows, "carve_river", far, Hex.EAST).size() == 2, "line length follows the spell entry")
+	var rival_game := _spell_game()
+	var rival_at := _step(rival_game.cities[0].cell, Hex.EAST, 3)
+	var rival_city := rival_game.found_city(rival_game.spawn_unit(1, "settler", rival_at))
+	var rival_tile := _step(rival_at, Hex.WEST, 1)
+	_ok(rival_city != null and rival_game.owner_at(rival_tile) == 1, "the neighbor belongs to the rival")
+	rival_game.players[0].mana = 40
+	_ok(rival_game.cast_spell(0, "grow_forest", rival_tile, Hex.EAST).is_empty(), "a spell can target rival land")
+	_ok(rival_game.map.land_at(rival_tile) == "forest", "rival land changes")
+	_ok(rival_game.owner_at(rival_tile) == 1 and rival_game.map.land_at(rival_city.cell) == "plains", "ownership stays and the rival center is skipped")
+	var explored := _spell_game()
+	var home := explored.cities[0].cell
+	var watcher := explored.spawn_unit(0, "warrior", _step(home, Hex.EAST, 2))
+	var seen := _step(home, Hex.EAST, 4)
+	_ok(explored.fog.sight(0, seen) == FogState.Sight.VISIBLE, "a unit reveals the in-range edge")
+	_ok(explored.move_unit(watcher, home), "the watcher steps back to the city")
+	_ok(explored.fog.sight(0, seen) == FogState.Sight.REVEALED, "leaving the tile keeps it explored")
+	_ok(explored.cast_reason(0, "restore_plains", seen, Hex.EAST).is_empty(), "an explored tile is a legal target")
+	var mill_game := _spell_game()
+	var mill_tile := _step(mill_game.cities[0].cell, Hex.EAST, 1)
+	var mill := MapCity.Building.new()
+	mill.kind = "lumber_mill"
+	mill.cell = mill_tile
+	mill_game.cities[0].buildings.append(mill)
+	var forests_before := CityRules.adjacent_forests(mill_game.map, mill_tile)
+	mill_game.players[0].mana = 40
+	var beside := _step(mill_tile, Hex.EAST, 1)
+	_ok(mill_game.cast_spell(0, "grow_forest", beside, Hex.EAST).is_empty(), "forest grows beside the mill")
+	_ok(CityRules.adjacent_forests(mill_game.map, mill_tile) > forests_before, "the mill counts the new forest immediately")
+	_ok(mill_game.cities[0].buildings.size() == 1 and mill_game.cities[0].buildings[0].cell == mill_tile, "the cast does not remove the building")
+	var hills := _spell_game()
+	var defender_cell := _step(hills.cities[0].cell, Hex.EAST, 1)
+	var attacker := hills.spawn_unit(0, "warrior", hills.cities[0].cell)
+	var defender := hills.spawn_unit(1, "warrior", defender_cell)
+	var plain_damage := int(hills.preview_attack(attacker, defender)["damage"])
+	hills.players[0].mana = 40
+	_ok(hills.cast_spell(0, "raise_hills", defender_cell, Hex.EAST).is_empty(), "raise hills casts under the defender")
+	_ok(hills.map.land_at(defender_cell) == "hills", "the defender stands on hills")
+	_ok(int(hills.preview_attack(attacker, defender)["damage"]) < plain_damage, "hills defense uses the live land")
+
+
+func _spell_game() -> GameSetup:
+	var game := _blank_setup("plains")
+	game.found_city(game.spawn_unit(0, "settler", Vector2i(10, 8)))
+	game.players[0].mana = 100
+	return game
+
+
+func _owned_of(game: GameSetup, player: int) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	for cell in game.owned_cells():
+		if game.owner_at(cell) == player:
+			out.append(cell)
+	return out
 
 
 func _test_end_turn_key() -> void:

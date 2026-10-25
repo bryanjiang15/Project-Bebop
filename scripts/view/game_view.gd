@@ -8,6 +8,15 @@ const _SELECTED := Color(1, 1, 1, 0.95)
 const _WORKED := Color(0.95, 0.82, 0.35, 0.92)
 const _PLACE := Color(0.4, 0.85, 0.95, 0.95)
 const _ATTACK := Color(0.95, 0.32, 0.28, 0.95)
+const _SKIPPED := Color(0.78, 0.78, 0.82, 0.75)
+const _INVALID := Color(0.95, 0.28, 0.24, 0.95)
+const _LAND_TINT := {
+	"plains": Color(0.93, 0.9, 0.55, 0.95),
+	"forest": Color(0.28, 0.62, 0.32, 0.95),
+	"hills": Color(0.78, 0.64, 0.4, 0.95),
+	"water": Color(0.38, 0.62, 0.86, 0.95),
+	"volcanic": Color(0.92, 0.42, 0.28, 0.95),
+}
 const _HP_FULL := 48.0
 const _HP_LEFT := -24.0
 const _HP_TOP := -52.0
@@ -34,6 +43,7 @@ const _CITY_SCENE: PackedScene = preload("res://scenes/view/city_marker.tscn")
 const _HIGHLIGHT_SCENE: PackedScene = preload("res://scenes/view/move_highlight.tscn")
 const _BORDER_SCENE: PackedScene = preload("res://scenes/view/border_segment.tscn")
 const _QUEUE_SCENE: PackedScene = preload("res://scenes/ui/queue_row.tscn")
+const _SPELL_SCENE: PackedScene = preload("res://scenes/ui/spell_button.tscn")
 const _BUILDING_SCENE: PackedScene = preload("res://scenes/view/building_marker.tscn")
 const _UNIT_ART := {
 	"settler": ["res://assets/art/unit_settler.png", "res://assets/art/unit_settler_mask.png"],
@@ -56,6 +66,10 @@ var _selected_id: int = -1
 var _selected_city_id: int = -1
 var _placing: String = ""
 var _end_confirm: bool = false
+var _spell_id: String = ""
+var _spell_direction: int = Hex.EAST
+var _hover_local: Vector2 = Vector2.ZERO
+var _spell_buttons: Dictionary = {}
 
 @onready var _camera: Camera2D = %Camera
 @onready var _map: TileMapLayer = %Map
@@ -66,6 +80,7 @@ var _end_confirm: bool = false
 @onready var _actors: Node2D = %Actors
 @onready var _turn_label: Label = %TurnLabel
 @onready var _mana_label: Label = %ManaLabel
+@onready var _spell_row: HBoxContainer = %SpellButtons
 @onready var _tooltip: Label = %Tooltip
 @onready var _tooltip_panel: PanelContainer = %TooltipPanel
 @onready var _menu: PanelContainer = %InGameMenu
@@ -113,6 +128,7 @@ func _ready() -> void:
 	_frame_on_human()
 	_tooltip_panel.visible = false
 	_menu.visible = false
+	_build_spell_bar()
 	_refresh_board()
 
 
@@ -126,6 +142,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_tree().change_scene_to_file("res://scenes/defeat.tscn")
 		return
 	if event.is_action_pressed("toggle_menu"):
+		if not _spell_id.is_empty():
+			_cancel_targeting()
+			return
 		_menu.visible = not _menu.visible
 		return
 	if event.is_action_pressed("found_city"):
@@ -157,7 +176,10 @@ func _unhandled_input(event: InputEvent) -> void:
 				_left_down = false
 				_dragging = false
 				if clicked:
-					_select_at_screen(button.position)
+					if _spell_id.is_empty():
+						_select_at_screen(button.position)
+					else:
+						_cast_at_screen(button.position)
 		elif button.button_index == MOUSE_BUTTON_RIGHT:
 			if button.pressed:
 				_right_down = true
@@ -166,7 +188,10 @@ func _unhandled_input(event: InputEvent) -> void:
 				var clicked := _right_down and _right_press.distance_to(button.position) <= _CLICK_SLOP
 				_right_down = false
 				if clicked:
-					_move_at_screen(button.position)
+					if _spell_id.is_empty():
+						_move_at_screen(button.position)
+					else:
+						_cancel_targeting()
 		elif button.button_index == MOUSE_BUTTON_MIDDLE:
 			_dragging = button.pressed
 	elif event is InputEventMouseMotion:
@@ -204,6 +229,7 @@ func _on_end_turn_pressed() -> void:
 		_refresh_end_warning()
 		return
 	_end_confirm = false
+	_spell_id = ""
 	setup.end_turn()
 	_refresh_board()
 
@@ -239,12 +265,15 @@ func _on_found_city_pressed() -> void:
 	_selected_id = -1
 	_selected_city_id = -1
 	_placing = ""
+	_spell_id = ""
 	_cancel_end_confirm()
 	_refresh_board()
 
 
 func _on_menu_pressed() -> void:
 	_menu.visible = not _menu.visible
+	if _menu.visible:
+		_cancel_targeting()
 
 
 func _on_restart_pressed() -> void:
@@ -328,6 +357,7 @@ func _refresh_turn() -> void:
 	_turn_label.text = "%d / %d" % [setup.turn, _config.turn_limit]
 	var human := setup.players[setup.human_index]
 	_mana_label.text = "Mana: %d (+%d/turn)" % [human.mana, setup.mana_per_turn(human.index)]
+	_refresh_spells()
 
 
 func _refresh_selection() -> void:
@@ -522,6 +552,9 @@ func _refresh_actors() -> void:
 
 func _rebuild_move_highlights() -> void:
 	_clear(_moves)
+	if not _spell_id.is_empty():
+		_rebuild_spell_highlights()
+		return
 	var unit := _selected_unit()
 	if unit != null:
 		_add_highlight(unit.cell, _SELECTED)
@@ -653,10 +686,19 @@ func hover_at_local(local: Vector2, screen: Vector2 = Vector2.INF) -> void:
 	if not Hex.in_map(axial, _config.map_width, _config.map_height):
 		_clear_hover()
 		return
-	if cell != _hovered:
-		_hovered = cell
+	_hover_local = local
+	var direction := _spell_direction
+	if not _spell_id.is_empty():
+		direction = _sector(cell, local)
+	var moved := cell != _hovered or direction != _spell_direction
+	_hovered = cell
+	_spell_direction = direction
+	if moved:
 		_highlight.clear()
-		_highlight.set_cell(cell, _HIGHLIGHT_SOURCE, Vector2i.ZERO)
+		if _spell_id.is_empty():
+			_highlight.set_cell(cell, _HIGHLIGHT_SOURCE, Vector2i.ZERO)
+		else:
+			_rebuild_spell_highlights()
 	_tooltip.text = _tip_for(cell, axial)
 	_tooltip_panel.visible = true
 	_apply_combat_preview()
@@ -668,6 +710,9 @@ func _tip_for(cell: Vector2i, axial: Vector2i) -> String:
 	var base := "%d, %d Unexplored" % [axial.x, axial.y]
 	if setup.fog.sight(_config.human_index, cell) != FogState.Sight.UNREVEALED:
 		base = "%d, %d %s" % [axial.x, axial.y, setup.map.land_at(cell)]
+	var spell := _spell_tip()
+	if not spell.is_empty():
+		return "%s\n%s" % [base, spell]
 	var extra := _combat_hover_text()
 	if extra.is_empty():
 		return base
@@ -728,6 +773,8 @@ func _clear_hover() -> void:
 	_tooltip_panel.visible = false
 	if _combat_preview != null:
 		_combat_preview.text = ""
+	if not _spell_id.is_empty():
+		_clear(_moves)
 
 
 func _cell_at_screen(screen: Vector2) -> Vector2i:
@@ -783,6 +830,7 @@ func _on_cancel_place_pressed() -> void:
 func _choose_build(item_id: String) -> void:
 	if setup == null or _menu.visible:
 		return
+	_cancel_targeting()
 	var city := _selected_city()
 	if city == null:
 		return
@@ -898,3 +946,170 @@ func _clear_queue_rows() -> void:
 	for child in _queue_list.get_children():
 		_queue_list.remove_child(child)
 		child.queue_free()
+
+
+func _build_spell_bar() -> void:
+	for spell_id in GameConfig.SPELL_IDS:
+		var button := _SPELL_SCENE.instantiate() as Button
+		button.name = "Spell_%s" % spell_id
+		button.focus_mode = Control.FOCUS_NONE
+		button.pressed.connect(_on_spell_pressed.bind(spell_id))
+		_spell_row.add_child(button)
+		_spell_buttons[spell_id] = button
+
+
+func _refresh_spells() -> void:
+	if setup == null:
+		return
+	for spell_id in _spell_buttons.keys():
+		_paint_spell_button(_spell_buttons[spell_id] as Button, str(spell_id))
+
+
+func _paint_spell_button(button: Button, spell_id: String) -> void:
+	var stats := _config.spell(spell_id)
+	var reason := setup.spell_block_reason(setup.human_index, spell_id)
+	var left := setup.cooldown_left(setup.human_index, spell_id)
+	(button.get_node("Column/NameLabel") as Label).text = stats.spell_name
+	(button.get_node("Column/CostLabel") as Label).text = "%d mana" % stats.mana
+	var shape := "Radius %d" % stats.radius
+	if stats.shape == "line":
+		shape = "Line %d" % stats.length
+	(button.get_node("Column/ShapeLabel") as Label).text = shape
+	var state := "Ready"
+	if _spell_id == spell_id and reason.is_empty():
+		state = "Targeting"
+	elif reason == SpellRules.REASON_COOLDOWN:
+		state = "Cooldown %d" % left
+	elif not reason.is_empty():
+		state = reason
+	var state_label := button.get_node("Column/StateLabel") as Label
+	state_label.text = state
+	button.disabled = not reason.is_empty()
+	button.tooltip_text = reason
+	var muted := button.disabled
+	var name_color := Color(0.78, 0.78, 0.8) if muted else Color(0.97, 0.96, 0.92)
+	var cost_color := Color(0.62, 0.8, 0.96) if muted else Color(0.72, 0.88, 1.0)
+	var shape_color := Color(0.74, 0.74, 0.7) if muted else Color(0.9, 0.9, 0.84)
+	(button.get_node("Column/NameLabel") as Label).add_theme_color_override("font_color", name_color)
+	(button.get_node("Column/CostLabel") as Label).add_theme_color_override("font_color", cost_color)
+	(button.get_node("Column/ShapeLabel") as Label).add_theme_color_override("font_color", shape_color)
+	var state_color := Color(0.95, 0.62, 0.48) if muted else Color(0.9, 0.9, 0.84)
+	state_label.add_theme_color_override("font_color", state_color)
+	if muted:
+		button.modulate = Color(0.92, 0.92, 0.94)
+	elif _spell_id == spell_id:
+		button.modulate = Color(0.88, 0.95, 1.0)
+	else:
+		button.modulate = Color.WHITE
+
+
+func _on_spell_pressed(spell_id: String) -> void:
+	if setup == null or _menu.visible:
+		return
+	if not setup.spell_block_reason(setup.human_index, spell_id).is_empty():
+		return
+	_placing = ""
+	if _spell_id == spell_id:
+		_spell_id = ""
+	else:
+		_spell_id = spell_id
+		if setup.map.in_bounds(_hovered):
+			_spell_direction = _sector(_hovered, _hover_local)
+	_refresh_spells()
+	_rebuild_move_highlights()
+	_refresh_city_panel()
+	if setup.map.in_bounds(_hovered):
+		_tooltip.text = _tip_for(_hovered, Hex.offset_to_axial(_hovered))
+		_tooltip_panel.visible = true
+
+
+func _cancel_targeting() -> void:
+	if _spell_id.is_empty():
+		return
+	_spell_id = ""
+	_refresh_spells()
+	_rebuild_move_highlights()
+	if setup != null and setup.map.in_bounds(_hovered):
+		_highlight.clear()
+		_highlight.set_cell(_hovered, _HIGHLIGHT_SOURCE, Vector2i.ZERO)
+		_tooltip.text = _tip_for(_hovered, Hex.offset_to_axial(_hovered))
+
+
+func _cast_at_screen(screen: Vector2) -> void:
+	if setup == null or _spell_id.is_empty():
+		return
+	var cell := _cell_at_screen(screen)
+	var world: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * screen
+	var local := _map.to_local(world)
+	var direction := _sector(cell, local)
+	var reason := setup.cast_spell(setup.human_index, _spell_id, cell, direction)
+	if reason.is_empty():
+		_spell_id = ""
+		_cancel_end_confirm()
+		_refresh_board()
+		if setup.map.in_bounds(cell):
+			_hovered = cell
+			_highlight.clear()
+			_highlight.set_cell(cell, _HIGHLIGHT_SOURCE, Vector2i.ZERO)
+		return
+	_hovered = cell
+	_hover_local = local
+	_spell_direction = direction
+	_highlight.clear()
+	_rebuild_spell_highlights()
+	if setup.map.in_bounds(cell):
+		_tooltip.text = _tip_for(cell, Hex.offset_to_axial(cell))
+	else:
+		var stats := _config.spell(_spell_id)
+		_tooltip.text = "%s · %d mana\n%s" % [stats.spell_name, stats.mana, reason]
+	_tooltip_panel.visible = true
+	_tooltip_panel.position = screen + Vector2(16, 16)
+
+
+func _rebuild_spell_highlights() -> void:
+	_clear(_moves)
+	if _spell_id.is_empty() or setup == null or not setup.map.in_bounds(_hovered):
+		return
+	var preview := setup.spell_preview(setup.human_index, _spell_id, _hovered, _spell_direction)
+	var land_id := str(preview["land"])
+	var tint: Color = _LAND_TINT.get(land_id, _REACHABLE)
+	var skipped := {}
+	for cell in preview["skipped"]:
+		skipped[cell] = true
+	var reason := str(preview["reason"])
+	for cell in preview["tiles"]:
+		var here := cell as Vector2i
+		var color := tint
+		if not reason.is_empty() and here == _hovered:
+			color = _INVALID
+		elif skipped.has(here):
+			color = _SKIPPED
+		_add_highlight(here, color)
+
+
+func _sector(cell: Vector2i, local: Vector2) -> int:
+	var center := _map.map_to_local(cell)
+	var axes: Array[Vector2] = []
+	var axial := Hex.offset_to_axial(cell)
+	for dir in 6:
+		var neighbor := Hex.axial_to_offset(Hex.neighbor(axial, dir))
+		axes.append(_map.map_to_local(neighbor) - center)
+	return SpellRules.sector(local - center, axes)
+
+
+func _spell_tip() -> String:
+	if _spell_id.is_empty() or setup == null or not setup.map.in_bounds(_hovered):
+		return ""
+	var preview := setup.spell_preview(setup.human_index, _spell_id, _hovered, _spell_direction)
+	var header := "%s · %d mana" % [str(preview["name"]), int(preview["cost"])]
+	var reason := str(preview["reason"])
+	if not reason.is_empty():
+		return "%s\n%s" % [header, reason]
+	var count := (preview["changed"] as Array).size()
+	var line := "1 tile changes" if count == 1 else "%d tiles change" % count
+	if str(preview["shape"]) == "line":
+		line = "%s %s" % [line, Hex.DIRECTION_NAMES[_spell_direction]]
+	var skipped := (preview["skipped"] as Array).size()
+	if skipped > 0:
+		line = "%s\n%d skipped" % [line, skipped]
+	return "%s\n%s" % [header, line]

@@ -1,6 +1,6 @@
 # Agent guide
 
-Project Bebop is a turn-based terraforming 4X on a hex map. This repository is the Godot 4.7 prototype. New Game builds a seeded hex map, three players, one starting settler and one warrior each, and per-player fog of war. The human can move those units, attack a visible enemy, found a city, and run that city's yields, growth, borders, and production queue. Spells and AI are later tickets.
+Project Bebop is a turn-based terraforming 4X on a hex map. This repository is the Godot 4.7 prototype. New Game builds a seeded hex map, three players, one starting settler and one warrior each, and per-player fog of war. The human can move those units, attack a visible enemy, found a city, run that city's yields, growth, borders, and production queue, and cast the five terraforming spells. AI is a later ticket.
 
 Notion is the source of truth for design. Copies live in `docs/`. If the brief and the design doc disagree, the design doc wins. `docs/agreed_defaults.md` is the approved engineering record and overrides the design doc's chance-based volcanic proposal with the brief's flat 10 damage.
 
@@ -8,10 +8,10 @@ Notion is the source of truth for design. Copies live in `docs/`. If the brief a
 
 ```
 scenes/           main_menu.tscn, game.tscn, victory.tscn, defeat.tscn
-scenes/ui/        menu_button.tscn (instanced buttons), queue_row.tscn
+scenes/ui/        menu_button.tscn (instanced buttons), queue_row.tscn, spell_button.tscn
 scenes/actors/    unit.tscn (instanced once per visible unit), hp_bar.tscn
 scenes/view/      move_highlight.tscn, city_marker.tscn, border_segment.tscn, building_marker.tscn
-scripts/core/     RefCounted rules: hex.gd, game_config.gd, map_state.gd, map_generator.gd, player_state.gd, fog_state.gd, game_setup.gd, pathfinder.gd, map_city.gd, city_rules.gd, combat.gd
+scripts/core/     RefCounted rules: hex.gd, game_config.gd, map_state.gd, map_generator.gd, player_state.gd, fog_state.gd, game_setup.gd, pathfinder.gd, map_city.gd, city_rules.gd, combat.gd, spells.gd
 scripts/view/     rendering and input, including fog_overlay.gd
 config/game_config.json
 assets/art/       greybox art v0.2, bebop_tileset.tres, team_tint.gdshader
@@ -68,7 +68,7 @@ The camera starts centered on the human settler, at `camera.default_zoom`.
 
 `Pathfinder.reachable` searches axial hexes and returns movement points left on arrival. The origin is omitted. `GameSetup.reachable_tiles` converts that result to offset cells. The cost is the land of the tile entered (`land.*.move_cost`). Water is impassable. When `movement.allow_enter_over_budget_if_mp_left` is true and any points remain, a costlier tile can still be entered; arrival leaves 0 points and the search does not continue. `units.one_unit_per_tile` rejects any tile that already holds a unit. Another player's unit blocks the tile either way.
 
-A left click selects the human unit on that tile. The human's city on that tile comes after the unit. An empty tile clears the selection. Reachable tiles and the selected tile are instances of `scenes/view/move_highlight.tscn`, using `tile_highlight.png`. The sprite offset is read from the TileSet at runtime. Attackable tiles use the same scene tinted red. A right click on a visible enemy attacks and does not move. A right click on an empty highlighted tile moves the selected unit. A left click never moves. A left drag farther than 8 px still pans. Middle drag, arrow keys, and the wheel are unchanged. `End Turn` and the Enter key (`end_turn`) resolve cities, add mana, heal idle units, increment one global turn, and refill every unit from its config move. When a human unit still has movement and no order, the first press warns (`End anyway (Enter)`) and the second press confirms. Enter does nothing while the in-game menu is open, and a focused control still receives Enter first. Rivals do not act. Fog recomputes after each move and attack.
+A left click selects the human unit on that tile. The human's city on that tile comes after the unit. An empty tile clears the selection. Reachable tiles and the selected tile are instances of `scenes/view/move_highlight.tscn`, using `tile_highlight.png`. The sprite offset is read from the TileSet at runtime. Attackable tiles use the same scene tinted red. A right click on a visible enemy attacks and does not move. A right click on an empty highlighted tile moves the selected unit. A left click never moves. A left drag farther than 8 px still pans. Middle drag, arrow keys, and the wheel are unchanged. `End Turn` and the Enter key (`end_turn`) resolve cities, add the snapshotted mana, heal idle units, tick spell cooldowns, increment one global turn, and refill every unit from its config move. When a human unit still has movement and no order, the first press warns (`End anyway (Enter)`) and the second press confirms. Enter does nothing while the in-game menu is open, and a focused control still receives Enter first. Rivals do not act. Fog recomputes after each move and attack.
 
 `%FoundCityButton` reads **Found City (B)**. The `found_city` input action is B. `%FoundCityReason` shows why the button is disabled:
 
@@ -90,9 +90,9 @@ Skip (`skip_unit`, S) and Fortify (`fortify_unit`, F) are orders. Fortify lasts 
 
 ## Cities
 
-`CityRules` is the yield, growth, and border math. `CityRules.city_mana` is the one per-city mana rate. `GameSetup` stores the queue and the buildings and applies a turn. Every city resolves on the global End Turn, before the turn counter increments: growth, then production, then one border claim. The mana paid to that city's owner is the snapshot taken before those three steps. After every city has resolved, each player's pool gains the sum of its snapshots. Rivals have no turn of their own yet, so their cities use that same clock and their pools accumulate too. Idle units then heal, the turn counter increments, and movement refills.
+`CityRules` is the yield, growth, and border math. `CityRules.city_mana` is the one per-city mana rate. `GameSetup` stores the queue and the buildings and applies a turn. Every city resolves on the global End Turn, before the turn counter increments: growth, then production, then one border claim. The mana paid to that city's owner is the snapshot taken before those three steps. After every city has resolved, each player's pool gains the sum of its snapshots. Rivals have no turn of their own yet, so their cities use that same clock and their pools accumulate too. Idle units then heal, spell cooldowns tick once, the turn counter increments, and movement refills.
 
-The center always adds its land yield plus `city.center_food` and `city.center_production`. Each population point works one other owned tile. The order is higher food + production, then higher food, then nearer the center, then smaller axial q, then smaller r. Building bonuses are city-wide and are not part of that choice. Mana for one city is `city.mana_base + floor(population / city.mana_per_population_divisor)`, plus `buildings.mana_well_mana` for each Mana Well. The city panel shows that city's number. `GameSetup.mana_per_turn` sums it for the player. The pool lives on `PlayerState.mana` and starts at `players.starting_mana` (10). `%ManaLabel` in the top bar of `scenes/game.tscn` shows the human pool as `Mana: N (+M/turn)`. A Mana Well finished during production is paid on the next End Turn; the displayed rate already includes it, because the rate reads the live building list.
+The center always adds its land yield plus `city.center_food` and `city.center_production`. Each population point works one other owned tile. The order is higher food + production, then higher food, then nearer the center, then smaller axial q, then smaller r. Building bonuses are city-wide and are not part of that choice. Mana for one city is `city.mana_base + floor(population / city.mana_per_population_divisor)`, plus `buildings.mana_well_mana` for each Mana Well. The city panel shows that city's number. `GameSetup.mana_per_turn` sums it for the player. The pool lives on `PlayerState.mana` and starts at `players.starting_mana` (10). `%ManaLabel` in the top bar of `scenes/game.tscn` shows the human pool as `Mana: N (+M/turn)`. A Mana Well finished during production is paid on the next End Turn; the displayed rate already includes it, because the rate reads the live building list. Spells spend this same pool.
 
 Surplus food fills a bar of `city.growth_base + city.growth_per_population * population`. Crossing it adds 1 population and subtracts the threshold; leftover food can cross the next threshold in the same turn. A shortfall drains the bar when `growth.shortfall_drains_bar` is true, and at 0 the city loses `growth.starve_population_loss` population, not below `growth.starve_population_min`.
 
@@ -102,7 +102,17 @@ The queue spends stored production on its first item. Costs are `units.<type>.co
 
 `%CityPanel` opens on a left click of the human's city. If that tile also has the human's unit, the first click selects the unit and the next click selects the city. Right click still moves. Enter still ends the turn. Queue rows are `scenes/ui/queue_row.tscn`. Building markers are `scenes/view/building_marker.tscn`. The full rules and the placement reasons are in `docs/cities.md`.
 
-No new config keys were added. Mana reads the existing `players.starting_mana`, `city.mana_base`, `city.mana_per_population_divisor`, `buildings.mana_well_mana`, and `turn_limit` keys, along with the other `city`, `growth`, `buildings`, `units`, and `borders` keys.
+No new city config keys were added. Mana reads the existing `players.starting_mana`, `city.mana_base`, `city.mana_per_population_divisor`, `buildings.mana_well_mana`, and `turn_limit` keys, along with the other `city`, `growth`, `buildings`, `units`, and `borders` keys. Spell costs and cooldowns are the existing `spells` keys, plus a display `name` on each spell.
+
+## Spells
+
+`SpellRules` in `scripts/core/spells.gd` is the area, the range check, and the reject strings. `GameSetup.cast_spell` changes land and spends `PlayerState.mana`. The button's mana check uses that pool and `GameSetup.mana_per_turn` is only the income rate, not a second pool. A radius is the target disk (`grow_forest`, `raise_hills`, `ignite`, and `restore_plains` are radius 1, 7 tiles in the open). Carve River is a line of 4 in one hex direction. Off-map tiles are dropped. Range is the distance from the target to the nearest tile the caster owns. Rival land can be targeted. The caster's fog must not be unrevealed on the target when `spells.spells_require_revealed_target` is true; explored and currently visible both count.
+
+A cast spends mana, stores the spell's cooldown, and uses the one cast allowed by `spells.casts_per_turn`. City centers stay put while `city.center_never_terraformed` is true. A unit's tile is left alone when the new land is water and `spells.skip_water_if_land_unit_present` is true. Ownership does not change. Yields, movement cost, and hills defense read the live land, so they change on the next read.
+
+Cooldown ticks once per player at End Turn, after the mana sum and idle healing and before the turn counter increments. A cooldown of 2 cast on turn N can be cast again on turn N+2. The full rule, the button reasons, and the cursor sectors are in `docs/spells.md`.
+
+`%SpellBar` sits under the top bar. Its buttons are instances of `scenes/ui/spell_button.tscn`, one per spell. A grey button's tooltip is `Not enough mana`, `On cooldown`, or `Already cast this turn`. Clicking a ready spell starts targeting. The existing highlight sprites outline the affected tiles in the new land's color; skipped tiles are grey and an illegal target is red. The tooltip shows the name, the cost, and how many tiles change. Left-click casts. Right-click or Esc cancels. Esc opens the menu only when targeting is already off. Left-click select, right-click move and attack, B, S, F, and Enter behave as before when no spell is armed.
 
 ## Commands
 
@@ -119,7 +129,7 @@ godot --headless --path . --script res://tests/smoke_game.gd
 
 `expect_missing_key.gd` must exit non-zero and report `game_config.json missing key: players.count`. The others must exit 0. CI greps every log for `SCRIPT ERROR` and `ERROR:` (`set -o pipefail`) except the missing-key step, which requires that specific error.
 
-Play the game with `godot --path .`. Left-click the start tile to select the settler, and again to select the warrior. Right-click a green tile to move. Right-click a red enemy tile to attack. S skips and F fortifies. B or **Found City** founds a city. Left-click the city to open its panel, then click a build button (for a building, click a highlighted tile next). Enter or **End Turn** ends the turn. If units still have moves, that press warns and the next one confirms. The turn resolves growth, production, borders, then mana, then healing. The top bar shows `Mana: N (+M/turn)` and the turn. F9 opens Victory, F10 opens Defeat, Escape toggles the in-game menu.
+Play the game with `godot --path .`. Left-click the start tile to select the settler, and again to select the warrior. Right-click a green tile to move. Right-click a red enemy tile to attack. S skips and F fortifies. B or **Found City** founds a city. Left-click the city to open its panel, then click a build button (for a building, click a highlighted tile next). The spell bar under the top bar lists the five spells. Click one, hover a tile to see the exact area, left-click to cast, and right-click or Esc to cancel. Enter or **End Turn** ends the turn. If units still have moves, that press warns and the next one confirms. The turn resolves growth, production, borders, then mana, then healing, then spell cooldowns. The top bar shows `Mana: N (+M/turn)` and `Turn` plus `N / 50`. F9 opens Victory, F10 opens Defeat, Escape toggles the in-game menu when no spell is armed.
 
 ## Rules for agents
 
