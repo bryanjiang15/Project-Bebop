@@ -45,7 +45,19 @@ An unseen unit is not named. The view does not offer it as a target.
 
 ## Healing
 
-Healing runs inside `end_turn`, after every city resolves and after each player's mana pool is paid, and before movement is refilled. There is one global turn, so every player's idle units heal on that clock. A unit heals `units.heal` (10) when `units.heal_only_if_idle` is true and the unit did not move or attack this turn. Skip and Fortify do not count as acting, so those units heal. The result is capped at max HP. Volcanic damage and city healing are not applied.
+Healing runs inside `end_turn`, after every city resolves and after each player's mana pool is paid, and before volcanic damage. There is one global turn, so every player's idle units heal on that clock. A unit heals `units.heal` (10) when `units.heal_only_if_idle` is true and the unit did not move or attack this turn. Skip and Fortify do not count as acting, so those units heal. The result is capped at max HP. City healing is not applied.
+
+## Volcanic ground
+
+After that heal, every unit standing on volcanic ground takes `volcanic.damage` (flat 10). The land table's `land.volcanic.hazard_damage` stays 10 as well. The applied number is `volcanic.damage`, so tuning that key changes the hit. `volcanic.flat` false, or a `volcanic.timing` other than `end_of_owner_turn`, applies nothing. There is no chance roll.
+
+The hit applies to every unit type and every player, including a unit standing on a city tile. The city itself is not damaged. Founding on volcanic ground is allowed. A spell that turns a tile volcanic does not damage on the cast; the next End Turn does. A unit that leaves the tile before End Turn takes none.
+
+Healing runs first. An idle unit below max HP gains 10 and then loses 10, so it nets 0, including a unit at 5 HP that would have died if the hit came first. An idle unit already at max HP cannot heal, then loses 10. A unit that moved or attacked does not heal, then loses 10. At 10 HP or below, with no heal, it is removed. `volcanic.can_kill` false leaves a combat unit at 1 HP instead of removing it.
+
+A settler has no HP pool. The hazard removes them when `volcanic.can_kill` is true, through the same unit-removal path combat uses. Their HP bar stays hidden.
+
+The selected unit's panel adds one line while they stand on volcanic ground: `Volcanic: -10 HP at end of turn`, using the tuned damage. Move highlights and the End Turn confirm are unchanged.
 
 ## Orders
 
@@ -63,4 +75,4 @@ Each sprite sits on the cell center. `scenes/actors/hp_bar.tscn` is instanced on
 
 ## Out of scope
 
-City attacks, capturing a city or a settler, stepping onto a killed unit's tile, volcanic damage, and rival AI.
+City attacks, capturing a city or a settler, stepping onto a killed unit's tile, and rival AI.

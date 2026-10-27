@@ -10,6 +10,7 @@ const _PLACE := Color(0.4, 0.85, 0.95, 0.95)
 const _ATTACK := Color(0.95, 0.32, 0.28, 0.95)
 const _SKIPPED := Color(0.78, 0.78, 0.82, 0.75)
 const _INVALID := Color(0.95, 0.28, 0.24, 0.95)
+const _SINK := Color(1.0, 0.78, 0.16, 0.98)
 const _LAND_TINT := {
 	"plains": Color(0.93, 0.9, 0.55, 0.95),
 	"forest": Color(0.28, 0.62, 0.32, 0.95),
@@ -455,7 +456,20 @@ func _unit_summary(unit: PlayerState.UnitState, stats: GameConfig.UnitStats) -> 
 			strength = "Strength %d" % stats.attack
 		else:
 			strength = "Ranged %d    Defense %d" % [stats.attack, stats.defense]
-	return "%s\n%s\nMoves %d / %d\nOrder %s" % [hp_line, strength, unit.mp, stats.move, _order_label(unit)]
+	var warning := _volcanic_warning(unit)
+	return "%s\n%s\nMoves %d / %d\nOrder %s%s" % [hp_line, strength, unit.mp, stats.move, _order_label(unit), warning]
+
+
+func _volcanic_warning(unit: PlayerState.UnitState) -> String:
+	if setup == null or setup.map == null or setup.config == null:
+		return ""
+	if setup.map.land_at(unit.cell) != "volcanic":
+		return ""
+	if not setup.config.volcanic_flat or setup.config.volcanic_timing != "end_of_owner_turn":
+		return ""
+	if setup.config.volcanic_damage <= 0:
+		return ""
+	return "\n[color=#f2b06a]Volcanic: -%d HP at end of turn[/color]" % setup.config.volcanic_damage
 
 
 func _order_label(unit: PlayerState.UnitState) -> String:
@@ -585,11 +599,14 @@ func _rebuild_move_highlights() -> void:
 		_add_highlight(cell as Vector2i, _WORKED)
 
 
-func _add_highlight(cell: Vector2i, tint: Color) -> void:
+func _add_highlight(cell: Vector2i, tint: Color, scale: float = 1.0) -> void:
 	var marker := _HIGHLIGHT_SCENE.instantiate() as Sprite2D
 	marker.position = _map.map_to_local(cell)
 	marker.offset = _highlight_origin
 	marker.modulate = tint
+	marker.scale = Vector2(scale, scale)
+	if scale < 1.0:
+		marker.z_index = 1
 	_moves.add_child(marker)
 
 
@@ -712,7 +729,7 @@ func hover_at_local(local: Vector2, screen: Vector2 = Vector2.INF) -> void:
 	_tooltip_panel.visible = true
 	_apply_combat_preview()
 	if screen != Vector2.INF:
-		_tooltip_panel.position = screen + Vector2(16, 16)
+		_place_tooltip(screen)
 
 
 func _tip_for(cell: Vector2i, axial: Vector2i) -> String:
@@ -1094,7 +1111,19 @@ func _cast_at_screen(screen: Vector2) -> void:
 		var stats := _config.spell(_spell_id)
 		_tooltip.text = "%s · %d mana\n%s" % [stats.spell_name, stats.mana, reason]
 	_tooltip_panel.visible = true
-	_tooltip_panel.position = screen + Vector2(16, 16)
+	_place_tooltip(screen)
+
+
+func _place_tooltip(screen: Vector2) -> void:
+	var needed := _tooltip.get_minimum_size() + Vector2(24, 16)
+	_tooltip_panel.size = needed
+	var pos := screen + Vector2(16, 16)
+	var view := get_viewport_rect().size
+	if pos.x + needed.x > view.x - 8.0:
+		pos.x = maxf(8.0, screen.x - needed.x - 16.0)
+	if pos.y + needed.y > view.y - 8.0:
+		pos.y = maxf(8.0, screen.y - needed.y - 16.0)
+	_tooltip_panel.position = pos
 
 
 func _rebuild_spell_highlights() -> void:
@@ -1107,6 +1136,9 @@ func _rebuild_spell_highlights() -> void:
 	var skipped := {}
 	for cell in preview["skipped"]:
 		skipped[cell] = true
+	var destroyed := {}
+	for cell in preview["destroyed"]:
+		destroyed[cell] = true
 	var reason := str(preview["reason"])
 	for cell in preview["tiles"]:
 		var here := cell as Vector2i
@@ -1116,6 +1148,8 @@ func _rebuild_spell_highlights() -> void:
 		elif skipped.has(here):
 			color = _SKIPPED
 		_add_highlight(here, color)
+		if reason.is_empty() and destroyed.has(here):
+			_add_highlight(here, _SINK, 0.62)
 
 
 func _sector(cell: Vector2i, local: Vector2) -> int:
@@ -1140,6 +1174,11 @@ func _spell_tip() -> String:
 	var line := "1 tile changes" if count == 1 else "%d tiles change" % count
 	if str(preview["shape"]) == "line":
 		line = "%s %s" % [line, Hex.DIRECTION_NAMES[_spell_direction]]
+	var lost := (preview["destroyed"] as Array).size()
+	if lost == 1:
+		line = "%s, 1 building destroyed" % line
+	elif lost > 1:
+		line = "%s, %d buildings destroyed" % [line, lost]
 	var skipped := (preview["skipped"] as Array).size()
 	if skipped > 0:
 		line = "%s\n%d skipped" % [line, skipped]

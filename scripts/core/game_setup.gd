@@ -16,6 +16,7 @@ const REASON_UNKNOWN := "Unknown item"
 const REASON_CENTER := "Cannot build on the city center"
 const REASON_BORDERS := "Not in city borders"
 const REASON_OCCUPIED := "Tile already has a building"
+const REASON_WATER_BUILD := "Cannot build on water"
 const REASON_BUILD_OFF_MAP := "Cannot build off the map"
 const REASON_SELECT_COMBAT := "Select a combat unit"
 const REASON_NO_MOVES := "No moves left"
@@ -335,7 +336,9 @@ func end_turn() -> void:
 	# Growth uses this turn's yields, then production (a settler sees the post-growth pop),
 	# then the border clock. Mana paid is that same snapshot, summed per player after
 	# every city has resolved, so a building finished this turn is paid next End Turn.
-	# Idle units then heal. Spell cooldowns then tick once for every player — this End
+	# Idle units then heal. Volcanic damage is next, so an idle unit on volcanic ground
+	# is healed before the flat hit (a wounded unit is not removed by damage it would
+	# have healed through). Spell cooldowns then tick once for every player — this End
 	# Turn is each player's turn until turns are sequential — and the turn counter advances.
 	# A spell with cooldown C cast on turn N is castable again on turn N+C.
 	var income: Array[int] = []
@@ -348,6 +351,7 @@ func end_turn() -> void:
 	for index in players.size():
 		players[index].mana += income[index]
 	_heal_idle_units()
+	_apply_volcanic_damage()
 	_tick_spells()
 	turn += 1
 	for player in players:
@@ -471,10 +475,12 @@ func affected_tiles(spell_id: String, target: Vector2i, direction: int) -> Array
 
 ## `reason` empty means the click casts. `changed` counts tiles whose land would differ.
 ## City centers and units that would be drowned are listed in `skipped` either way.
+## `destroyed` lists changed tiles where a finished building would be removed.
 func spell_preview(player_index: int, spell_id: String, target: Vector2i, direction: int) -> Dictionary:
 	var tiles: Array[Vector2i] = []
 	var changed: Array[Vector2i] = []
 	var skipped: Array[Vector2i] = []
+	var destroyed: Array[Vector2i] = []
 	var cost := 0
 	var land_id := ""
 	var spell_name := ""
@@ -492,11 +498,14 @@ func spell_preview(player_index: int, spell_id: String, target: Vector2i, direct
 				skipped.append(cell)
 			elif map.land_at(cell) != land_id:
 				changed.append(cell)
+				if _water_destroys_building(land_id, cell):
+					destroyed.append(cell)
 	return {
 		"reason": cast_reason(player_index, spell_id, target, direction),
 		"tiles": tiles,
 		"changed": changed,
 		"skipped": skipped,
+		"destroyed": destroyed,
 		"cost": cost,
 		"land": land_id,
 		"name": spell_name,
@@ -504,7 +513,8 @@ func spell_preview(player_index: int, spell_id: String, target: Vector2i, direct
 	}
 
 
-## Empty string on success. Ownership is left alone. Buildings stay.
+## Empty string on success. Ownership is left alone. A tile that becomes water
+## drops the building on it, and a queued building aimed at that tile.
 func cast_spell(player_index: int, spell_id: String, target: Vector2i, direction: int) -> String:
 	var reason := cast_reason(player_index, spell_id, target, direction)
 	if not reason.is_empty():
@@ -516,6 +526,8 @@ func cast_spell(player_index: int, spell_id: String, target: Vector2i, direction
 		if map.land_at(cell) == stats.land:
 			continue
 		map.set_land(cell, stats.land)
+		if stats.land == "water":
+			_sink_tile(cell)
 	var player := players[player_index]
 	player.mana -= stats.mana
 	player.casts_this_turn += 1
@@ -571,6 +583,8 @@ func placement_reason(city: MapCity, item_id: String, cell: Vector2i, ignore: Ma
 		return REASON_BORDERS
 	if config.one_building_per_tile and _tile_reserved(cell, ignore):
 		return REASON_OCCUPIED
+	if map.land_at(cell) == "water":
+		return REASON_WATER_BUILD
 	return ""
 
 
@@ -633,7 +647,11 @@ func _defense_strength(unit: PlayerState.UnitState) -> float:
 func _remove_if_dead(unit: PlayerState.UnitState) -> void:
 	if unit == null or unit.max_hp <= 0 or unit.hp > 0:
 		return
-	if unit.owner < 0 or unit.owner >= players.size():
+	_remove_unit(unit)
+
+
+func _remove_unit(unit: PlayerState.UnitState) -> void:
+	if unit == null or unit.owner < 0 or unit.owner >= players.size():
 		return
 	players[unit.owner].units.erase(unit)
 
@@ -695,6 +713,68 @@ func _heal_idle_units() -> void:
 			if config.heal_only_if_idle and unit.acted:
 				continue
 			unit.hp = mini(unit.max_hp, unit.hp + config.unit_heal)
+
+
+## Flat damage for every unit standing on volcanic ground, after idle healing.
+## A settler has no HP pool, so the hit removes them when kills are allowed.
+## A city on the same tile does not change this. The city's own HP is not touched.
+func _apply_volcanic_damage() -> void:
+	if config == null or map == null or not config.volcanic_flat:
+		return
+	if config.volcanic_timing != "end_of_owner_turn" or config.volcanic_damage <= 0:
+		return
+	var doomed: Array[PlayerState.UnitState] = []
+	for player in players:
+		for unit in player.units:
+			if map.land_at(unit.cell) != "volcanic":
+				continue
+			if unit.max_hp <= 0:
+				if config.volcanic_can_kill:
+					doomed.append(unit)
+				continue
+			var next := maxi(0, unit.hp - config.volcanic_damage)
+			if next <= 0 and not config.volcanic_can_kill:
+				unit.hp = 1
+				continue
+			unit.hp = next
+			if unit.hp <= 0:
+				doomed.append(unit)
+	for unit in doomed:
+		_remove_unit(unit)
+
+
+func _water_destroys_building(land_id: String, cell: Vector2i) -> bool:
+	return land_id == "water" and config != null and config.water_destroys_building and _building_at(cell) != null
+
+
+func _building_at(cell: Vector2i) -> MapCity.Building:
+	for city in cities:
+		for building in city.buildings:
+			if building.cell == cell:
+				return building
+	return null
+
+
+## The tile just became water. Drop the finished building and any queued building
+## aimed at it. Stored production on a drowned head item is discarded.
+func _sink_tile(cell: Vector2i) -> void:
+	if config == null or not config.water_destroys_building:
+		return
+	for city in cities:
+		var kept: Array[MapCity.Building] = []
+		for building in city.buildings:
+			if building.cell != cell:
+				kept.append(building)
+		city.buildings = kept
+		var index := 0
+		while index < city.queue.size():
+			var item: MapCity.Item = city.queue[index]
+			if item.is_building and item.cell == cell:
+				if index == 0:
+					city.production_stored = 0
+				city.queue.remove_at(index)
+			else:
+				index += 1
 
 
 func _refresh_fog() -> void:

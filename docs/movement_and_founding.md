@@ -18,7 +18,7 @@ A tile holds one unit when `units.one_unit_per_tile` is true. Another player's u
 
 `Pathfinder` searches in axial coordinates. `GameSetup` converts to offset cells at the boundary. The result maps each reachable cell to the movement points left on arrival. The origin is not included.
 
-The cost is the land of the tile being entered. Water (`passable` false, `move_cost` -1) is impassable. When `movement.allow_enter_over_budget_if_mp_left` is true and the unit still has points, it may enter a more expensive tile, arrives with 0, and does not keep searching from there.
+The cost is the land of the tile being entered. Water (`passable` false, `move_cost` -1) is impassable for the settler, scout, warrior, and archer. They cannot enter it, path through it, or see it in the move highlights. A spell that would turn their tile into water skips that tile, so the unit is not stranded. Forest, hills, volcanic ground, and plains still change under a unit, and the unit stays on that tile. When `movement.allow_enter_over_budget_if_mp_left` is true and the unit still has points, it may enter a more expensive tile, arrives with 0, and does not keep searching from there.
 
 A move sets the unit as having acted and clears Fortify. A left click selects the human unit on that cell, or clears the selection when the cell is empty. The city on that cell comes after the unit. Highlight sprites mark the selected cell and every reachable cell. A right click on a reachable cell moves. A right click on a visible enemy attacks instead; see `docs/combat.md`. A left click does not move. A left drag farther than 8 px pans, as do middle drag and the arrow keys. Founding does not spend movement points. Fog recomputes after every move.
 
@@ -32,7 +32,7 @@ The button and the B key call `GameSetup.found_city` for the selected unit. An e
 - `Too close to another city`
 - `Cannot found off the map`
 
-Distance is center to center against every city, including cities the founder has never seen. A distance below `city.min_distance` rejects. A distance equal to it accepts. The UI does not reveal the hidden city.
+Distance is center to center against every city, including cities the founder has never seen. A distance below `city.min_distance` rejects. A distance equal to it accepts. The UI does not reveal the hidden city. Volcanic ground can be founded on. A unit that later stands on that city tile still takes volcanic damage; the city is not.
 
 The new city has population 1 and territory radius `city.border_start_radius`. The claim is that disk. Water is included only when `borders.can_claim_water` is true. A tile that already has an owner is skipped when `borders.can_claim_owned_tiles` is false. Own territory can be founded on when the distance rule passes. The settler is removed.
 
