@@ -1634,6 +1634,21 @@ func _test_building_destruction() -> void:
 	_ok(spared.cast_spell(0, "carve_river", kept_plot, Hex.EAST).is_empty(), "water still changes when the flag is off")
 	_ok(kept_city.buildings.size() == 1 and spared.map.land_at(kept_plot) == "water", "the flag off leaves the building")
 	_ok(spared.placement_reason(kept_city, "granary", kept_plot) == GameSetup.REASON_OCCUPIED, "a building left on water still occupies the tile")
+	var stuck := _spell_game()
+	stuck.config.spells_require_revealed_target = false
+	stuck.config.water_destroys_building = false
+	stuck.config.spell("carve_river").length = 1
+	var stuck_city: MapCity = stuck.cities[0]
+	var stuck_plot := _step(stuck_city.cell, Hex.EAST, 1)
+	_ok(stuck.enqueue(stuck_city, "granary", stuck_plot).is_empty() and stuck.enqueue(stuck_city, "warrior").is_empty(), "a granary can lead the queue with the destroy flag off")
+	stuck_city.production_stored = 40
+	_ok(stuck.cast_spell(0, "carve_river", stuck_plot, Hex.EAST).is_empty(), "water covers a queued tile while the flag is off")
+	_ok(stuck_city.queue.size() == 1 and stuck_city.queue[0].item_id == "warrior" and stuck_city.production_stored == 0, "the queued building is dropped and the head's production is discarded")
+	var before_units := stuck.players[0].units.size()
+	stuck_city.production_stored = stuck.config.unit("warrior").cost
+	stuck.end_turn()
+	_ok(stuck_city.queue.is_empty(), "End Turn finishes the unit behind the drowned building")
+	_ok(stuck.players[0].units.size() == before_units + 1, "that unit completes instead of leaving the granary stuck")
 	var drowned := _spell_game()
 	drowned.config.spells_require_revealed_target = false
 	drowned.config.spell("carve_river").length = 1
@@ -1713,7 +1728,7 @@ func _test_volcanic_damage() -> void:
 	rival.acted = true
 	var rival_hp := rival.hp
 	rivals.end_turn()
-	_ok(rival.hp == rival_hp - 10, "a rival on volcanic ground takes the damage")
+	_ok(rival.hp == rival_hp - rivals.config.volcanic_damage, "a rival on volcanic ground takes the damage")
 	var city_game := _blank_setup("plains")
 	var city := city_game.found_city(city_game.spawn_unit(0, "settler", Vector2i(8, 8)))
 	city_game.map.set_land(city.cell, "volcanic")
@@ -1721,7 +1736,21 @@ func _test_volcanic_damage() -> void:
 	guard.acted = true
 	var guard_hp := guard.hp
 	city_game.end_turn()
-	_ok(guard.hp == guard_hp - 10 and city_game.cities.has(city), "a unit on a volcanic city tile takes damage and the city stays")
+	_ok(guard.hp == guard_hp - city_game.config.volcanic_damage and city_game.cities.has(city), "a unit on a volcanic city tile takes damage and the city stays")
+	var born := _blank_setup("plains")
+	var born_city := born.found_city(born.spawn_unit(0, "settler", Vector2i(8, 8)))
+	born.map.set_land(born_city.cell, "volcanic")
+	born_city.population = born.config.unit("settler").min_city_size
+	_ok(born.enqueue(born_city, "settler").is_empty(), "a settler can be queued onto a volcanic city center")
+	born_city.production_stored = born.config.unit("settler").cost
+	var born_before := born.players[0].units.size()
+	born.end_turn()
+	_ok(born_city.queue.is_empty() and born.cities.has(born_city), "cities finish the settler before volcanic damage")
+	var born_settlers := 0
+	for unit in born.players[0].units:
+		if unit.unit_type == "settler":
+			born_settlers += 1
+	_ok(born.players[0].units.size() == born_before and born_settlers == 0, "the settler completed onto the volcanic center dies in that same End Turn")
 	var founder_game := _blank_setup("volcanic")
 	var founder := founder_game.spawn_unit(0, "settler", Vector2i(8, 8))
 	_ok(founder_game.can_found(founder).is_empty(), "founding is allowed on volcanic ground")

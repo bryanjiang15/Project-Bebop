@@ -90,8 +90,10 @@ func _run() -> void:
 	for _frame in 3:
 		await process_frame
 	var detail := (game.get_node("%SelectionDetail") as Label).text
-	if not detail.contains("Volcanic: -%d HP at end of turn" % setup.config.volcanic_damage):
-		print("FAIL warning '", detail, "'")
+	var warning := (game.get_node("%VolcanicWarning") as Label).text
+	var expected_warning := "Volcanic: -%d HP at end of turn" % setup.config.volcanic_damage
+	if warning != expected_warning or detail.contains("Volcanic"):
+		print("FAIL warning '", warning, "' detail '", detail, "'")
 		quit(1)
 		return
 	if (game.get_node("%SelectionTitle") as Label).text != "Warrior":
@@ -100,7 +102,7 @@ func _run() -> void:
 		return
 	if not await _save("/opt/cursor/artifacts/ticket13_volcanic_warning.png"):
 		return
-	print("WARNING ", detail.replace("\n", " | "))
+	print("WARNING ", detail.replace("\n", " | "), " | ", warning)
 	(game.get_node("%SkipButton") as Button).pressed.emit()
 	var end := game.get_node("%EndTurnButton") as Button
 	end.pressed.emit()
@@ -110,13 +112,14 @@ func _run() -> void:
 	for _frame in 3:
 		await process_frame
 	detail = (game.get_node("%SelectionDetail") as Label).text
-	if warrior.hp != warrior.max_hp - setup.config.volcanic_damage or not detail.contains("HP %d / %d" % [warrior.hp, warrior.max_hp]):
-		print("FAIL after turn hp ", warrior.hp, " '", detail, "'")
+	warning = (game.get_node("%VolcanicWarning") as Label).text
+	if warrior.hp != warrior.max_hp - setup.config.volcanic_damage or not detail.contains("HP %d / %d" % [warrior.hp, warrior.max_hp]) or warning != expected_warning:
+		print("FAIL after turn hp ", warrior.hp, " '", detail, "' warning '", warning, "'")
 		quit(1)
 		return
 	if not await _save("/opt/cursor/artifacts/ticket13_after_volcanic_turn.png"):
 		return
-	print("TURN ", detail.replace("\n", " | "))
+	print("TURN ", detail.replace("\n", " | "), " | ", warning)
 	quit(0)
 
 

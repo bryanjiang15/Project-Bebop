@@ -90,6 +90,7 @@ var _spell_buttons: Dictionary = {}
 @onready var _menu: PanelContainer = %InGameMenu
 @onready var _selection_title: Label = %SelectionTitle
 @onready var _selection_detail: Label = %SelectionDetail
+@onready var _volcanic_label: Label = %VolcanicWarning
 @onready var _found_button: Button = %FoundCityButton
 @onready var _found_reason: Label = %FoundCityReason
 @onready var _combat_preview: Label = %CombatPreview
@@ -375,7 +376,7 @@ func _refresh_selection() -> void:
 	if unit == null:
 		_selection_title.text = "No unit selected"
 		_selection_detail.text = ""
-		_selection_detail.add_theme_color_override("font_color", Color(0.78, 0.78, 0.74))
+		_set_volcanic_warning("")
 		_found_button.disabled = true
 		_found_reason.text = GameSetup.REASON_SETTLER
 		_skip_button.disabled = true
@@ -384,9 +385,7 @@ func _refresh_selection() -> void:
 		var stats := _config.unit(unit.unit_type)
 		_selection_title.text = unit.unit_type.capitalize()
 		_selection_detail.text = _unit_summary(unit, stats)
-		var on_volcanic := _volcanic_warning(unit) != ""
-		var detail_color := Color(0.97, 0.62, 0.38) if on_volcanic else Color(0.78, 0.78, 0.74)
-		_selection_detail.add_theme_color_override("font_color", detail_color)
+		_set_volcanic_warning(_volcanic_warning(unit))
 		var reason := setup.can_found(unit)
 		_found_button.disabled = not reason.is_empty()
 		_found_reason.text = reason
@@ -460,8 +459,7 @@ func _unit_summary(unit: PlayerState.UnitState, stats: GameConfig.UnitStats) -> 
 			strength = "Strength %d" % stats.attack
 		else:
 			strength = "Ranged %d    Defense %d" % [stats.attack, stats.defense]
-	var warning := _volcanic_warning(unit)
-	return "%s\n%s\nMoves %d / %d\nOrder %s%s" % [hp_line, strength, unit.mp, stats.move, _order_label(unit), warning]
+	return "%s\n%s\nMoves %d / %d\nOrder %s" % [hp_line, strength, unit.mp, stats.move, _order_label(unit)]
 
 
 func _volcanic_warning(unit: PlayerState.UnitState) -> String:
@@ -473,7 +471,12 @@ func _volcanic_warning(unit: PlayerState.UnitState) -> String:
 		return ""
 	if setup.config.volcanic_damage <= 0:
 		return ""
-	return "\nVolcanic: -%d HP at end of turn" % setup.config.volcanic_damage
+	return "Volcanic: -%d HP at end of turn" % setup.config.volcanic_damage
+
+
+func _set_volcanic_warning(text: String) -> void:
+	_volcanic_label.text = text
+	_volcanic_label.visible = not text.is_empty()
 
 
 func _order_label(unit: PlayerState.UnitState) -> String:

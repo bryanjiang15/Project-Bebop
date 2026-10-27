@@ -843,8 +843,10 @@ func _land_effects(game: Node) -> bool:
 	game._refresh_board()
 	_click_cell(game, warrior.cell)
 	var detail := (game.get_node("%SelectionDetail") as Label).text
-	if not detail.contains("Volcanic: -%d HP at end of turn" % setup.config.volcanic_damage):
-		print("FAIL volcanic warning '", detail, "'")
+	var warning := (game.get_node("%VolcanicWarning") as Label).text
+	var expected_warning := "Volcanic: -%d HP at end of turn" % setup.config.volcanic_damage
+	if warning != expected_warning or detail.contains("Volcanic"):
+		print("FAIL volcanic warning '", warning, "' detail '", detail, "'")
 		quit(1)
 		return false
 	print("PASS volcanic warning")
@@ -856,8 +858,9 @@ func _land_effects(game: Node) -> bool:
 		quit(1)
 		return false
 	detail = (game.get_node("%SelectionDetail") as Label).text
-	if not detail.contains("HP %d / %d" % [warrior.hp, warrior.max_hp]) or not detail.contains("Volcanic:"):
-		print("FAIL hp line after volcanic '", detail, "'")
+	warning = (game.get_node("%VolcanicWarning") as Label).text
+	if not detail.contains("HP %d / %d" % [warrior.hp, warrior.max_hp]) or warning != expected_warning or detail.contains("Volcanic"):
+		print("FAIL hp line after volcanic '", detail, "' warning '", warning, "'")
 		quit(1)
 		return false
 	print("PASS volcanic drop ", warrior.hp)

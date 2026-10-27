@@ -514,7 +514,8 @@ func spell_preview(player_index: int, spell_id: String, target: Vector2i, direct
 
 
 ## Empty string on success. Ownership is left alone. A tile that becomes water
-## drops the building on it, and a queued building aimed at that tile.
+## drops a queued building aimed at it. The finished building is removed when
+## water_destroys_building is true.
 func cast_spell(player_index: int, spell_id: String, target: Vector2i, direction: int) -> String:
 	var reason := cast_reason(player_index, spell_id, target, direction)
 	if not reason.is_empty():
@@ -755,17 +756,19 @@ func _building_at(cell: Vector2i) -> MapCity.Building:
 	return null
 
 
-## The tile just became water. Drop the finished building and any queued building
-## aimed at it. Stored production on a drowned head item is discarded.
+## The tile just became water. A queued building aimed at it is always dropped,
+## and stored production on a drowned head item is discarded. The finished
+## building is removed only when water_destroys_building is true.
 func _sink_tile(cell: Vector2i) -> void:
-	if config == null or not config.water_destroys_building:
+	if config == null:
 		return
 	for city in cities:
-		var kept: Array[MapCity.Building] = []
-		for building in city.buildings:
-			if building.cell != cell:
-				kept.append(building)
-		city.buildings = kept
+		if config.water_destroys_building:
+			var kept: Array[MapCity.Building] = []
+			for building in city.buildings:
+				if building.cell != cell:
+					kept.append(building)
+			city.buildings = kept
 		var index := 0
 		while index < city.queue.size():
 			var item: MapCity.Item = city.queue[index]

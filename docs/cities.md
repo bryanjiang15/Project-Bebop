@@ -52,9 +52,9 @@ Founding still claims the disk of `city.border_start_radius`. After that, every 
 
 Cancelling the item in front discards the stored production. Cancelling a later item does not. Moving an item keeps the stored production and applies it to whichever item is now first.
 
-A queued building remembers the tile chosen at enqueue time. If that tile becomes water, the item is dropped and nothing is refunded. When it was the head, stored production is discarded. When it was later in the queue, the head keeps its stored production. The queue row disappears in the same refresh as the cast.
+A queued building remembers the tile chosen at enqueue time. If that tile becomes water, the item is dropped and nothing is refunded, even when `buildings.water_destroys_building` is false. That flag only removes a finished building. When the dropped item was the head, stored production is discarded. When it was later in the queue, the head keeps its stored production. The queue row disappears in the same refresh as the cast.
 
-A settler can be queued and can finish only when the population is at least `units.settler.min_city_size`. When `growth.settler_population_taken_when_finished` is true, finishing subtracts `units.settler.population_cost` and the result is not allowed to pass below `growth.starve_population_min`. If the city is too small, or no legal spawn tile exists, the item stays in front and stored production stops at its cost until it can finish.
+A settler can be queued and can finish only when the population is at least `units.settler.min_city_size`. When `growth.settler_population_taken_when_finished` is true, finishing subtracts `units.settler.population_cost` and the result is not allowed to pass below `growth.starve_population_min`. If the city is too small, or no legal spawn tile exists, the item stays in front and stored production stops at its cost until it can finish. Cities resolve before volcanic damage, so a settler that finishes onto a volcanic city center is removed later in that same End Turn. See `docs/combat.md`.
 
 Units spawn through `GameSetup.spawn_unit`. The tile is the city center when `units.spawn_on_city_center` allows it and the tile is empty. Otherwise, when `units.spawn_nearest_free_if_blocked` is true, the nearest passable tile inside this city's borders is used (distance, then smaller q, then smaller r). Water is not a spawn tile. A tile already holding a unit is not empty.
 
@@ -70,7 +70,7 @@ The panel button starts placement. The next left click on a legal tile enqueues 
 - `Cannot build on water`
 - `Cannot build off the map`
 
-`buildings.water_destroys_building` is applied when a spell turns a tile into water. The finished building on that tile is removed. Water is not a legal placement tile after that, so the slot is free and unusable. A building on a neighbor tile is left alone. With the flag off, the building stays and the tile remains occupied.
+`buildings.water_destroys_building` removes the finished building when a spell turns its tile into water. Water is not a legal placement tile after that, so the slot is free and unusable. A building on a neighbor tile is left alone. With the flag off, the finished building stays and the tile remains occupied. A queued building on the new water is dropped either way.
 
 ## Panel
 
