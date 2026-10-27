@@ -40,7 +40,7 @@ func _run() -> void:
 		print("FAIL city panel closed")
 		quit(1)
 		return
-	_aim(game, well_cell, Vector2(860, 520), 1.35)
+	_aim(game, well_cell, Vector2(1180, 620), 1.2)
 	for _frame in 2:
 		await process_frame
 	var rate_before := setup.mana_per_turn(setup.human_index)
@@ -180,9 +180,7 @@ func _hover_east(game: Node, cell: Vector2i) -> void:
 	var center: Vector2 = map.map_to_local(cell)
 	var east: Vector2 = map.map_to_local(_step(cell, Hex.EAST, 1))
 	var local := center + (east - center) * 0.42
-	var world: Vector2 = map.to_global(local)
-	var screen: Vector2 = game.get_viewport().get_canvas_transform() * world
-	game.hover_at_local(local, screen + Vector2(28, -210))
+	game.hover_at_local(local, Vector2(48, 300))
 
 
 func _aim(game: Node, cell: Vector2i, screen_point: Vector2, zoom: float) -> void:

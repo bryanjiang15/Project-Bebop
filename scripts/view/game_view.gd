@@ -375,6 +375,7 @@ func _refresh_selection() -> void:
 	if unit == null:
 		_selection_title.text = "No unit selected"
 		_selection_detail.text = ""
+		_selection_detail.add_theme_color_override("font_color", Color(0.78, 0.78, 0.74))
 		_found_button.disabled = true
 		_found_reason.text = GameSetup.REASON_SETTLER
 		_skip_button.disabled = true
@@ -383,6 +384,9 @@ func _refresh_selection() -> void:
 		var stats := _config.unit(unit.unit_type)
 		_selection_title.text = unit.unit_type.capitalize()
 		_selection_detail.text = _unit_summary(unit, stats)
+		var on_volcanic := _volcanic_warning(unit) != ""
+		var detail_color := Color(0.97, 0.62, 0.38) if on_volcanic else Color(0.78, 0.78, 0.74)
+		_selection_detail.add_theme_color_override("font_color", detail_color)
 		var reason := setup.can_found(unit)
 		_found_button.disabled = not reason.is_empty()
 		_found_reason.text = reason
@@ -469,7 +473,7 @@ func _volcanic_warning(unit: PlayerState.UnitState) -> String:
 		return ""
 	if setup.config.volcanic_damage <= 0:
 		return ""
-	return "\n[color=#f2b06a]Volcanic: -%d HP at end of turn[/color]" % setup.config.volcanic_damage
+	return "\nVolcanic: -%d HP at end of turn" % setup.config.volcanic_damage
 
 
 func _order_label(unit: PlayerState.UnitState) -> String:
@@ -1149,7 +1153,7 @@ func _rebuild_spell_highlights() -> void:
 			color = _SKIPPED
 		_add_highlight(here, color)
 		if reason.is_empty() and destroyed.has(here):
-			_add_highlight(here, _SINK, 0.62)
+			_add_highlight(here, _SINK, 0.74)
 
 
 func _sector(cell: Vector2i, local: Vector2) -> int:
