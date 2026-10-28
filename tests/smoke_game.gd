@@ -110,6 +110,8 @@ func _run() -> void:
 		return
 	if not _rival_land_cast(game):
 		return
+	if not _land_effects(game):
+		return
 	print("SMOKE OK")
 	quit(0)
 
@@ -725,6 +727,222 @@ func _rival_land_cast(game: Node) -> bool:
 		return false
 	print("PASS rival land ", (game.get_node("%CityFood") as Label).text, " ", (game.get_node("%CityProduction") as Label).text, " ", preview.text, " ", mana)
 	return true
+
+
+func _land_effects(game: Node) -> bool:
+	var setup := game.get("setup") as GameSetup
+	var city: MapCity = null
+	for item in setup.cities:
+		if item.player == setup.human_index:
+			city = item
+			break
+	if city == null:
+		print("FAIL land effects has no human city")
+		quit(1)
+		return false
+	var well_cell := _offset_step(city.cell, Hex.NORTHEAST, 1)
+	var granary_cell := _offset_step(city.cell, Hex.NORTHWEST, 1)
+	if setup.owner_at(well_cell) != setup.human_index or setup.owner_at(granary_cell) != setup.human_index:
+		print("FAIL building tiles are not in the city")
+		quit(1)
+		return false
+	var reserved := {well_cell: true, granary_cell: true, city.cell: true}
+	for player in setup.players:
+		for unit in player.units:
+			if not reserved.has(unit.cell):
+				continue
+			var park := _open_plains(setup, reserved)
+			if park.x < 0:
+				print("FAIL no tile to park a unit")
+				quit(1)
+				return false
+			unit.cell = park
+			reserved[park] = true
+	setup.map.set_land(well_cell, "forest")
+	setup.map.set_land(granary_cell, "plains")
+	var well := MapCity.Building.new()
+	well.kind = "mana_well"
+	well.cell = well_cell
+	city.buildings.append(well)
+	var granary := MapCity.Building.new()
+	granary.kind = "granary"
+	granary.cell = granary_cell
+	city.buildings.append(granary)
+	var human := setup.players[setup.human_index]
+	human.mana = 80
+	human.casts_this_turn = 0
+	human.spell_cooldowns.clear()
+	setup._refresh_fog()
+	game._refresh_board()
+	_click_cell(game, city.cell)
+	if not (game.get_node("%CityPanel") as CanvasItem).visible or not _panel_matches(game, city):
+		print("FAIL city panel before the river")
+		quit(1)
+		return false
+	var rate_before := setup.mana_per_turn(setup.human_index)
+	var mana_before := int(setup.city_yields(city)["mana"])
+	var food_before := (game.get_node("%CityFood") as Label).text
+	var growth_before := (game.get_node("%GrowthLabel") as Label).text
+	var button := game.get_node("%SpellButtons").get_node("Spell_carve_river") as Button
+	if button.disabled:
+		print("FAIL carve river greyed: ", button.tooltip_text)
+		quit(1)
+		return false
+	button.pressed.emit()
+	_hover_cell(game, well_cell)
+	var tip := (game.get_node("%Tooltip") as Label).text
+	if not tip.contains("1 building destroyed"):
+		print("FAIL preview tip '", tip, "'")
+		quit(1)
+		return false
+	var preview: Dictionary = setup.spell_preview(setup.human_index, "carve_river", well_cell, Hex.EAST)
+	var marks := game.get_node("%MoveHighlights").get_child_count()
+	var expected_marks := (preview["tiles"] as Array).size() + (preview["destroyed"] as Array).size()
+	if str(preview["reason"]) != "" or marks != expected_marks or not (preview["destroyed"] as Array).has(well_cell):
+		print("FAIL preview marks ", marks, " expected ", expected_marks, " reason '", preview["reason"], "'")
+		quit(1)
+		return false
+	print("PASS preview ", tip.replace("\n", " | "))
+	_click_cell(game, well_cell)
+	if setup.map.land_at(well_cell) != "water" or city.buildings.size() != 1 or city.buildings[0].cell != granary_cell:
+		print("FAIL after water land ", setup.map.land_at(well_cell), " buildings ", city.buildings.size())
+		quit(1)
+		return false
+	if setup.mana_per_turn(setup.human_index) != rate_before - setup.config.mana_well_mana:
+		print("FAIL mana rate ", setup.mana_per_turn(setup.human_index), " from ", rate_before)
+		quit(1)
+		return false
+	if int(setup.city_yields(city)["mana"]) != mana_before - setup.config.mana_well_mana:
+		print("FAIL city mana ", setup.city_yields(city)["mana"])
+		quit(1)
+		return false
+	if not (game.get_node("%CityPanel") as CanvasItem).visible or not _panel_matches(game, city):
+		print("FAIL panel after water food '", (game.get_node("%CityFood") as Label).text, "' mana '", (game.get_node("%CityMana") as Label).text, "'")
+		quit(1)
+		return false
+	if (game.get_node("%CityFood") as Label).text == food_before and (game.get_node("%GrowthLabel") as Label).text == growth_before:
+		print("FAIL yields did not change food ", food_before, " growth ", growth_before)
+		quit(1)
+		return false
+	if not _mana_matches(game):
+		return false
+	var marker_name := "Building_%d_%d_%d" % [city.id, well_cell.x, well_cell.y]
+	if game.get_node("%Actors").get_node_or_null(marker_name) != null:
+		print("FAIL building marker stayed")
+		quit(1)
+		return false
+	print("PASS water destroyed the well ", (game.get_node("%ManaLabel") as Label).text, " ", (game.get_node("%CityMana") as Label).text)
+	var warrior := _human_unit(setup, "warrior")
+	if warrior == null:
+		print("FAIL volcanic smoke has no warrior")
+		quit(1)
+		return false
+	setup.map.set_land(warrior.cell, "volcanic")
+	warrior.hp = warrior.max_hp
+	warrior.acted = false
+	game._refresh_board()
+	_click_cell(game, warrior.cell)
+	var detail := (game.get_node("%SelectionDetail") as Label).text
+	var warning := (game.get_node("%VolcanicWarning") as Label).text
+	var expected_warning := "Volcanic: -%d HP at end of turn" % setup.config.volcanic_damage
+	if warning != expected_warning or detail.contains("Volcanic"):
+		print("FAIL volcanic warning '", warning, "' detail '", detail, "'")
+		quit(1)
+		return false
+	print("PASS volcanic warning")
+	(game.get_node("%SkipButton") as Button).pressed.emit()
+	if not _press_end_turn(game):
+		return false
+	if warrior.hp != warrior.max_hp - setup.config.volcanic_damage:
+		print("FAIL full HP idle volcanic ", warrior.hp, " max ", warrior.max_hp)
+		quit(1)
+		return false
+	detail = (game.get_node("%SelectionDetail") as Label).text
+	warning = (game.get_node("%VolcanicWarning") as Label).text
+	if not detail.contains("HP %d / %d" % [warrior.hp, warrior.max_hp]) or warning != expected_warning or detail.contains("Volcanic"):
+		print("FAIL hp line after volcanic '", detail, "' warning '", warning, "'")
+		quit(1)
+		return false
+	print("PASS volcanic drop ", warrior.hp)
+	warrior.hp = 40
+	warrior.acted = false
+	(game.get_node("%SkipButton") as Button).pressed.emit()
+	if not _press_end_turn(game):
+		return false
+	if warrior.hp != 40 or not setup.players[setup.human_index].units.has(warrior):
+		print("FAIL wounded idle net ", warrior.hp)
+		quit(1)
+		return false
+	print("PASS volcanic net 0")
+	var away := _offset_step(warrior.cell, Hex.EAST, 1)
+	setup.map.set_land(away, "volcanic")
+	for player in setup.players:
+		for unit in player.units:
+			if unit != warrior and unit.cell == away:
+				unit.cell = _offset_step(away, Hex.WEST, 2)
+	game._refresh_board()
+	_click_cell(game, warrior.cell)
+	_click_cell(game, away, MOUSE_BUTTON_RIGHT)
+	if warrior.cell != away:
+		print("FAIL warrior did not step onto volcanic ", warrior.cell, " -> ", away)
+		quit(1)
+		return false
+	warrior.hp = 8
+	if not _press_end_turn(game):
+		return false
+	if setup.players[setup.human_index].units.has(warrior):
+		print("FAIL volcanic kill left the warrior at ", warrior.hp)
+		quit(1)
+		return false
+	if (game.get_node("%SelectionTitle") as Label).text != "No unit selected":
+		print("FAIL selection after kill '", (game.get_node("%SelectionTitle") as Label).text, "'")
+		quit(1)
+		return false
+	if game.get_node("%Actors").get_node_or_null("Unit_%d" % warrior.id) != null:
+		print("FAIL unit sprite stayed after the kill")
+		quit(1)
+		return false
+	print("PASS volcanic kill")
+	return true
+
+
+func _press_end_turn(game: Node) -> bool:
+	var setup := game.get("setup") as GameSetup
+	var turn_before := setup.turn
+	var end := game.get_node("%EndTurnButton") as Button
+	end.pressed.emit()
+	if end.text == "End anyway (Enter)":
+		end.pressed.emit()
+	if setup.turn != turn_before + 1:
+		print("FAIL end turn stayed on ", setup.turn)
+		quit(1)
+		return false
+	return true
+
+
+func _open_plains(setup: GameSetup, reserved: Dictionary) -> Vector2i:
+	for row in setup.map.height:
+		for col in setup.map.width:
+			var cell := Vector2i(col, row)
+			if reserved.has(cell):
+				continue
+			var taken := false
+			for player in setup.players:
+				for unit in player.units:
+					if unit.cell == cell:
+						taken = true
+			if taken:
+				continue
+			setup.map.set_land(cell, "plains")
+			return cell
+	return Vector2i(-1, -1)
+
+
+func _offset_step(cell: Vector2i, direction: int, steps: int) -> Vector2i:
+	var axial := Hex.offset_to_axial(cell)
+	for _i in steps:
+		axial = Hex.neighbor(axial, direction)
+	return Hex.axial_to_offset(axial)
 
 
 func _panel_matches(game: Node, city: MapCity) -> bool:

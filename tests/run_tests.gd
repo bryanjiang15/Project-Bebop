@@ -24,6 +24,7 @@ func _init() -> void:
 	_test_combat()
 	_test_spells()
 	_test_rival_land_updates()
+	_test_land_effects()
 	_test_end_turn_key()
 	print("\nPassed: %d  Failed: %d" % [_passed, _failed])
 	quit(1 if _failed > 0 else 0)
@@ -1512,3 +1513,285 @@ func _values_match(actual: Variant, expected: Variant) -> bool:
 	if (actual is int or actual is float) and (expected is int or expected is float):
 		return is_equal_approx(float(actual), float(expected))
 	return actual == expected
+
+
+func _test_land_effects() -> void:
+	print("[land effects]")
+	var types: Array[String] = ["settler", "scout", "warrior", "archer"]
+	for type in types:
+		var blocked := _blank_setup("plains")
+		var origin := Vector2i(8, 8)
+		var unit := blocked.spawn_unit(0, type, origin)
+		var water := _step(origin, Hex.EAST, 1)
+		blocked.map.set_land(water, "water")
+		var reach := blocked.reachable_tiles(unit)
+		_ok(unit != null and not reach.has(water), "%s reachable set excludes water" % type)
+		_ok(not blocked.move_unit(unit, water) and unit.cell == origin, "%s cannot enter water" % type)
+		for dir in 6:
+			blocked.map.set_land(_step(origin, dir, 1), "water")
+		blocked.map.set_land(_step(origin, Hex.EAST, 2), "plains")
+		_ok(blocked.reachable_tiles(unit).is_empty(), "%s cannot path through a ring of water" % type)
+		_ok(blocked.spawn_unit(1, type, water) == null, "%s cannot spawn on water" % type)
+	var kept := _spell_game()
+	kept.config.spells_require_revealed_target = false
+	var home := kept.cities[0].cell
+	var stood := _step(home, Hex.EAST, 2)
+	var walker := kept.spawn_unit(0, "warrior", stood)
+	_ok(kept.cast_spell(0, "carve_river", stood, Hex.EAST).is_empty(), "carve river still casts when a unit stands in the line")
+	_ok(walker.cell == stood and kept.map.land_at(stood) == "plains", "water does not replace the tile under a unit")
+	var spells: Array[String] = ["grow_forest", "raise_hills", "ignite", "restore_plains"]
+	for spell_id in spells:
+		var shifted := _spell_game()
+		shifted.config.spells_require_revealed_target = false
+		var tile := _step(shifted.cities[0].cell, Hex.EAST, 2)
+		if spell_id == "restore_plains":
+			shifted.map.set_land(tile, "forest")
+		var standing := shifted.spawn_unit(0, "scout", tile)
+		_ok(shifted.cast_spell(0, spell_id, tile, Hex.EAST).is_empty(), "%s casts under a unit" % spell_id)
+		_ok(standing.cell == tile and shifted.map.land_at(tile) == shifted.config.spell(spell_id).land, "%s changes the tile and leaves the unit" % spell_id)
+	_test_building_destruction()
+	_test_volcanic_damage()
+
+
+func _test_building_destruction() -> void:
+	var data := GameConfig.read_json(GameConfig.PATH)
+	var volcanic: Dictionary = (data["volcanic"] as Dictionary).duplicate()
+	volcanic.erase("damage")
+	data["volcanic"] = volcanic
+	_ok(GameConfig.missing_paths(data).has("volcanic.damage"), "missing volcanic.damage is reported")
+	var kinds: Array[String] = ["granary", "mana_well", "lumber_mill"]
+	for kind in kinds:
+		var game := _spell_game()
+		game.config.spells_require_revealed_target = false
+		game.config.spell("carve_river").length = 1
+		var city: MapCity = game.cities[0]
+		var plot := _step(city.cell, Hex.EAST, 1)
+		var beside := _step(city.cell, Hex.WEST, 1)
+		if kind == "lumber_mill":
+			for direction in [Hex.EAST, Hex.NORTHEAST, Hex.SOUTHEAST]:
+				game.map.set_land(_step(plot, direction, 1), "forest")
+		var building := MapCity.Building.new()
+		building.kind = kind
+		building.cell = plot
+		city.buildings.append(building)
+		var neighbor := MapCity.Building.new()
+		neighbor.kind = "granary"
+		neighbor.cell = beside
+		city.buildings.append(neighbor)
+		var before: Dictionary = game.city_yields(city)
+		var rate := game.mana_per_turn(0)
+		var preview: Dictionary = game.spell_preview(0, "carve_river", plot, Hex.EAST)
+		_ok((preview["destroyed"] as Array).size() == 1 and (preview["destroyed"] as Array).has(plot), "%s preview names the drowned tile" % kind)
+		_ok(not (preview["destroyed"] as Array).has(beside), "%s preview leaves the neighbor" % kind)
+		_ok(game.cast_spell(0, "carve_river", plot, Hex.EAST).is_empty(), "%s tile becomes water" % kind)
+		_ok(game.map.land_at(plot) == "water" and game.map.land_at(beside) == "plains", "%s water stops at that tile" % kind)
+		_ok(city.buildings.size() == 1 and city.buildings[0].cell == beside, "%s is removed and the neighbor stays" % kind)
+		_ok(game.owner_at(plot) == 0, "%s water keeps its owner" % kind)
+		var after: Dictionary = game.city_yields(city)
+		if kind == "granary":
+			_ok(int(after["food"]) == int(before["food"]) - game.config.granary_food, "granary food is gone immediately")
+			_ok(int(after["surplus"]) == int(before["surplus"]) - game.config.granary_food, "growth surplus drops with the granary")
+		elif kind == "mana_well":
+			_ok(int(after["mana"]) == int(before["mana"]) - game.config.mana_well_mana, "mana well city mana drops immediately")
+			_ok(game.mana_per_turn(0) == rate - game.config.mana_well_mana, "destroying a mana well lowers mana per turn by 2")
+		else:
+			var bonus := game.config.lumber_mill_production_per_adjacent_forest * 3
+			_ok(int(after["production"]) == int(before["production"]) - bonus, "lumber mill production is gone immediately")
+		_ok(game.placement_reason(city, kind, plot) == GameSetup.REASON_WATER_BUILD, "%s tile is free and cannot be built on" % kind)
+		_ok(not game.placement_tiles(city, kind).has(plot), "%s water is not a placement tile" % kind)
+	var queued := _spell_game()
+	queued.config.spells_require_revealed_target = false
+	queued.config.spell("carve_river").length = 1
+	var town: MapCity = queued.cities[0]
+	var reserved := _step(town.cell, Hex.EAST, 1)
+	_ok(queued.enqueue(town, "scout").is_empty() and queued.enqueue(town, "granary", reserved).is_empty(), "a building queues behind a unit")
+	town.production_stored = 7
+	_ok(queued.cast_spell(0, "carve_river", reserved, Hex.EAST).is_empty(), "water covers a queued building tile")
+	_ok(town.queue.size() == 1 and town.queue[0].item_id == "scout" and town.production_stored == 7, "a later queued building is dropped and the head keeps its progress")
+	var head := _spell_game()
+	head.config.spells_require_revealed_target = false
+	head.config.spell("carve_river").length = 1
+	var camp: MapCity = head.cities[0]
+	var chosen := _step(camp.cell, Hex.EAST, 1)
+	_ok(head.enqueue(camp, "granary", chosen).is_empty() and head.enqueue(camp, "warrior").is_empty(), "a building can lead the queue")
+	camp.production_stored = 12
+	_ok(head.cast_spell(0, "carve_river", chosen, Hex.EAST).is_empty(), "water covers the head building")
+	_ok(camp.queue.size() == 1 and camp.queue[0].item_id == "warrior" and camp.production_stored == 0, "a drowned head item is dropped and nothing is refunded")
+	var shore := _step(camp.cell, Hex.NORTHEAST, 1)
+	head.map.set_land(shore, "water")
+	_ok(head.placement_reason(camp, "granary", shore) == GameSetup.REASON_WATER_BUILD, "an empty water tile rejects a building")
+	var spared := _spell_game()
+	spared.config.spells_require_revealed_target = false
+	spared.config.water_destroys_building = false
+	spared.config.spell("carve_river").length = 1
+	var kept_city: MapCity = spared.cities[0]
+	var kept_plot := _step(kept_city.cell, Hex.EAST, 1)
+	var kept_building := MapCity.Building.new()
+	kept_building.kind = "granary"
+	kept_building.cell = kept_plot
+	kept_city.buildings.append(kept_building)
+	_ok((spared.spell_preview(0, "carve_river", kept_plot, Hex.EAST)["destroyed"] as Array).is_empty(), "the destroy flag gates the preview")
+	_ok(spared.cast_spell(0, "carve_river", kept_plot, Hex.EAST).is_empty(), "water still changes when the flag is off")
+	_ok(kept_city.buildings.size() == 1 and spared.map.land_at(kept_plot) == "water", "the flag off leaves the building")
+	_ok(spared.placement_reason(kept_city, "granary", kept_plot) == GameSetup.REASON_OCCUPIED, "a building left on water still occupies the tile")
+	var stuck := _spell_game()
+	stuck.config.spells_require_revealed_target = false
+	stuck.config.water_destroys_building = false
+	stuck.config.spell("carve_river").length = 1
+	var stuck_city: MapCity = stuck.cities[0]
+	var stuck_plot := _step(stuck_city.cell, Hex.EAST, 1)
+	_ok(stuck.enqueue(stuck_city, "granary", stuck_plot).is_empty() and stuck.enqueue(stuck_city, "warrior").is_empty(), "a granary can lead the queue with the destroy flag off")
+	stuck_city.production_stored = 40
+	_ok(stuck.cast_spell(0, "carve_river", stuck_plot, Hex.EAST).is_empty(), "water covers a queued tile while the flag is off")
+	_ok(stuck_city.queue.size() == 1 and stuck_city.queue[0].item_id == "warrior" and stuck_city.production_stored == 0, "the queued building is dropped and the head's production is discarded")
+	var before_units := stuck.players[0].units.size()
+	stuck_city.production_stored = stuck.config.unit("warrior").cost
+	stuck.end_turn()
+	_ok(stuck_city.queue.is_empty(), "End Turn finishes the unit behind the drowned building")
+	_ok(stuck.players[0].units.size() == before_units + 1, "that unit completes instead of leaving the granary stuck")
+	var drowned := _spell_game()
+	drowned.config.spells_require_revealed_target = false
+	drowned.config.spell("carve_river").length = 1
+	var wet: MapCity = drowned.cities[0]
+	var wet_plot := _step(wet.cell, Hex.EAST, 1)
+	var occupied := drowned.spawn_unit(0, "warrior", wet_plot)
+	var wet_building := MapCity.Building.new()
+	wet_building.kind = "mana_well"
+	wet_building.cell = wet_plot
+	wet.buildings.append(wet_building)
+	var wet_rate := drowned.mana_per_turn(0)
+	_ok(drowned.cast_spell(0, "carve_river", wet_plot, Hex.EAST).is_empty(), "a unit shields its tile from water")
+	_ok(occupied.cell == wet_plot and drowned.map.land_at(wet_plot) == "plains" and wet.buildings.size() == 1, "the shielded building stays")
+	_ok(drowned.mana_per_turn(0) == wet_rate, "a skipped tile does not change mana per turn")
+	var rival_game := _spell_game()
+	rival_game.config.spells_require_revealed_target = false
+	rival_game.config.spell("carve_river").length = 1
+	var rival_at := _step(rival_game.cities[0].cell, Hex.EAST, 3)
+	var rival := rival_game.found_city(rival_game.spawn_unit(1, "settler", rival_at))
+	var rival_plot := _step(rival_at, Hex.WEST, 1)
+	var rival_well := MapCity.Building.new()
+	rival_well.kind = "mana_well"
+	rival_well.cell = rival_plot
+	rival.buildings.append(rival_well)
+	var rival_rate := rival_game.mana_per_turn(1)
+	_ok(rival_game.cast_spell(0, "carve_river", rival_plot, Hex.EAST).is_empty(), "a spell can drown a rival building")
+	_ok(rival.buildings.is_empty() and rival_game.owner_at(rival_plot) == 1, "the rival building is gone and the owner stays")
+	_ok(rival_game.mana_per_turn(1) == rival_rate - rival_game.config.mana_well_mana, "the rival mana rate drops immediately")
+
+
+func _test_volcanic_damage() -> void:
+	var game := _blank_setup("plains")
+	var origin := Vector2i(6, 6)
+	var warrior := game.spawn_unit(0, "warrior", origin)
+	game.map.set_land(origin, "volcanic")
+	game.end_turn()
+	_ok(warrior.hp == warrior.max_hp - game.config.volcanic_damage, "idle full HP on volcanic ground loses the hazard after the capped heal")
+	warrior.hp = 40
+	game.end_turn()
+	_ok(warrior.hp == 40 and game.players[0].units.has(warrior), "a wounded idle unit nets 0")
+	warrior.hp = 5
+	game.end_turn()
+	_ok(warrior.hp == 5 and game.players[0].units.has(warrior), "healing runs before volcanic damage")
+	warrior.hp = 40
+	warrior.acted = true
+	game.end_turn()
+	_ok(warrior.hp == 30, "a unit that acted skips healing and takes the hazard")
+	warrior.hp = 10
+	warrior.acted = true
+	game.end_turn()
+	_ok(not game.players[0].units.has(warrior), "10 HP with no heal removes the unit")
+	var mover := game.spawn_unit(0, "scout", origin)
+	var plains := _step(origin, Hex.EAST, 1)
+	var mover_hp := mover.hp
+	_ok(game.move_unit(mover, plains), "the scout steps off volcanic ground")
+	game.end_turn()
+	_ok(mover.hp == mover_hp and mover.cell == plains, "a unit that leaves before End Turn takes no volcanic damage")
+	var safe := game.spawn_unit(0, "archer", _step(plains, Hex.EAST, 1))
+	var safe_hp := safe.hp
+	game.end_turn()
+	_ok(safe.hp == safe_hp, "a unit on plains takes no volcanic damage")
+	var roster: Array[String] = ["scout", "warrior", "archer"]
+	for type in roster:
+		var typed := _blank_setup("volcanic")
+		var unit := typed.spawn_unit(0, type, Vector2i(4, 4))
+		unit.acted = true
+		var before := unit.hp
+		typed.end_turn()
+		_ok(unit.hp == before - typed.config.volcanic_damage, "%s takes volcanic damage" % type)
+	var settlers := _blank_setup("volcanic")
+	var settler := settlers.spawn_unit(0, "settler", Vector2i(4, 4))
+	settlers.end_turn()
+	_ok(settler != null and not settlers.players[0].units.has(settler), "a settler on volcanic ground is removed")
+	var rivals := _blank_setup("plains")
+	var rival := rivals.spawn_unit(1, "warrior", Vector2i(5, 5))
+	rivals.map.set_land(rival.cell, "volcanic")
+	rival.acted = true
+	var rival_hp := rival.hp
+	rivals.end_turn()
+	_ok(rival.hp == rival_hp - rivals.config.volcanic_damage, "a rival on volcanic ground takes the damage")
+	var city_game := _blank_setup("plains")
+	var city := city_game.found_city(city_game.spawn_unit(0, "settler", Vector2i(8, 8)))
+	city_game.map.set_land(city.cell, "volcanic")
+	var guard := city_game.spawn_unit(0, "warrior", city.cell)
+	guard.acted = true
+	var guard_hp := guard.hp
+	city_game.end_turn()
+	_ok(guard.hp == guard_hp - city_game.config.volcanic_damage and city_game.cities.has(city), "a unit on a volcanic city tile takes damage and the city stays")
+	var born := _blank_setup("plains")
+	var born_city := born.found_city(born.spawn_unit(0, "settler", Vector2i(8, 8)))
+	born.map.set_land(born_city.cell, "volcanic")
+	born_city.population = born.config.unit("settler").min_city_size
+	_ok(born.enqueue(born_city, "settler").is_empty(), "a settler can be queued onto a volcanic city center")
+	born_city.production_stored = born.config.unit("settler").cost
+	var born_before := born.players[0].units.size()
+	born.end_turn()
+	_ok(born_city.queue.is_empty() and born.cities.has(born_city), "cities finish the settler before volcanic damage")
+	var born_settlers := 0
+	for unit in born.players[0].units:
+		if unit.unit_type == "settler":
+			born_settlers += 1
+	_ok(born.players[0].units.size() == born_before and born_settlers == 0, "the settler completed onto the volcanic center dies in that same End Turn")
+	var founder_game := _blank_setup("volcanic")
+	var founder := founder_game.spawn_unit(0, "settler", Vector2i(8, 8))
+	_ok(founder_game.can_found(founder).is_empty(), "founding is allowed on volcanic ground")
+	var tuned := _blank_setup("volcanic")
+	tuned.config.volcanic_damage = 3
+	var tuned_unit := tuned.spawn_unit(0, "warrior", Vector2i(3, 3))
+	tuned_unit.acted = true
+	var tuned_hp := tuned_unit.hp
+	tuned.end_turn()
+	_ok(tuned_unit.hp == tuned_hp - 3, "volcanic damage follows volcanic.damage")
+	var spared := _blank_setup("volcanic")
+	spared.config.volcanic_can_kill = false
+	var low := spared.spawn_unit(0, "scout", Vector2i(3, 3))
+	low.hp = 4
+	low.acted = true
+	spared.end_turn()
+	_ok(low.hp == 1 and spared.players[0].units.has(low), "volcanic.can_kill false leaves the unit at 1 HP")
+	var civilian := spared.spawn_unit(0, "settler", Vector2i(5, 5))
+	spared.end_turn()
+	_ok(spared.players[0].units.has(civilian), "a settler stays when volcanic kills are off")
+	var quiet := _blank_setup("volcanic")
+	quiet.config.volcanic_flat = false
+	var quiet_unit := quiet.spawn_unit(0, "warrior", Vector2i(3, 3))
+	quiet_unit.acted = true
+	var quiet_hp := quiet_unit.hp
+	quiet.end_turn()
+	_ok(quiet_unit.hp == quiet_hp, "volcanic.flat false deals no damage")
+	var later := _blank_setup("volcanic")
+	later.config.volcanic_timing = "never"
+	var later_unit := later.spawn_unit(0, "warrior", Vector2i(3, 3))
+	later_unit.acted = true
+	var later_hp := later_unit.hp
+	later.end_turn()
+	_ok(later_unit.hp == later_hp, "only end_of_owner_turn volcanic damage is applied")
+	var ignited := _spell_game()
+	ignited.config.spells_require_revealed_target = false
+	var spot := _step(ignited.cities[0].cell, Hex.EAST, 2)
+	var ignited_unit := ignited.spawn_unit(0, "warrior", spot)
+	ignited_unit.acted = true
+	var ignited_hp := ignited_unit.hp
+	_ok(ignited.cast_spell(0, "ignite", spot, Hex.EAST).is_empty(), "ignite casts under a unit")
+	_ok(ignited.map.land_at(spot) == "volcanic" and ignited_unit.cell == spot and ignited_unit.hp == ignited_hp, "ignite leaves the unit unhurt until End Turn")
+	ignited.end_turn()
+	_ok(ignited_unit.hp == ignited_hp - ignited.config.volcanic_damage, "the next End Turn damages the unit on the new volcanic tile")

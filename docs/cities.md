@@ -11,7 +11,7 @@ End Turn and the Enter key are still one global clock. Rivals do not take a turn
 3. Production uses that production. A settler sees the population after growth.
 4. The border clock ticks once.
 
-After every city has resolved, each player's mana pool gains the sum of its cities' snapshotted mana. A player with no cities gains 0. Idle units then heal, spell cooldowns tick once, the turn counter increments, and movement refills.
+After every city has resolved, each player's mana pool gains the sum of its cities' snapshotted mana. A player with no cities gains 0. Idle units then heal, volcanic damage is applied, spell cooldowns tick once, the turn counter increments, and movement refills. The volcanic rule is in `docs/combat.md`.
 
 A newly finished building changes yields on the next turn. The same turn's snapshot was taken before it existed, so a Mana Well completed this turn is paid on the next End Turn. The top bar's per-turn figure reads the live building list, so it shows the new rate as soon as the building exists.
 
@@ -28,7 +28,7 @@ Each population point works one other owned tile. The choice is the best land yi
 
 Water can be worked. It still cannot hold a unit.
 
-Mana from this city is `CityRules.city_mana`: `city.mana_base + floor(population / city.mana_per_population_divisor)`, plus `buildings.mana_well_mana` for each Mana Well. `city_yields` uses that same function, so the city panel and the pool share one number. The player's per-turn gain is the sum of `city_mana` across that player's cities (`GameSetup.mana_per_turn`). Removing a well from the building list drops the rate; terraforming does not remove buildings yet.
+Mana from this city is `CityRules.city_mana`: `city.mana_base + floor(population / city.mana_per_population_divisor)`, plus `buildings.mana_well_mana` for each Mana Well. `city_yields` uses that same function, so the city panel and the pool share one number. The player's per-turn gain is the sum of `city_mana` across that player's cities (`GameSetup.mana_per_turn`). Removing a well from the building list drops the rate. Turning that well's tile to water removes it, and the city panel and the top bar show the new rate in the cast's refresh.
 
 Each player starts with `players.starting_mana` (10), stored on `PlayerState.mana`. Mana is pooled per player. The human's pool is the only one shown. `%ManaLabel` in the top bar of `scenes/game.tscn` reads `Mana: N (+M/turn)`. The turn readout stays the Turn caption plus `%TurnLabel` (`N / turn_limit`, for example Turn 12 / 50). No new config keys were added. The keys are `players.starting_mana`, `city.mana_base`, `city.mana_per_population_divisor`, `buildings.mana_well_mana`, and `turn_limit`. Spells spend this same pool. The cast rules are in `docs/spells.md`.
 
@@ -52,7 +52,9 @@ Founding still claims the disk of `city.border_start_radius`. After that, every 
 
 Cancelling the item in front discards the stored production. Cancelling a later item does not. Moving an item keeps the stored production and applies it to whichever item is now first.
 
-A settler can be queued and can finish only when the population is at least `units.settler.min_city_size`. When `growth.settler_population_taken_when_finished` is true, finishing subtracts `units.settler.population_cost` and the result is not allowed to pass below `growth.starve_population_min`. If the city is too small, or no legal spawn tile exists, the item stays in front and stored production stops at its cost until it can finish.
+A queued building remembers the tile chosen at enqueue time. If that tile becomes water, the item is dropped and nothing is refunded, even when `buildings.water_destroys_building` is false. That flag only removes a finished building. When the dropped item was the head, stored production is discarded. When it was later in the queue, the head keeps its stored production. The queue row disappears in the same refresh as the cast.
+
+A settler can be queued and can finish only when the population is at least `units.settler.min_city_size`. When `growth.settler_population_taken_when_finished` is true, finishing subtracts `units.settler.population_cost` and the result is not allowed to pass below `growth.starve_population_min`. If the city is too small, or no legal spawn tile exists, the item stays in front and stored production stops at its cost until it can finish. Cities resolve before volcanic damage, so a settler that finishes onto a volcanic city center is removed later in that same End Turn. See `docs/combat.md`.
 
 Units spawn through `GameSetup.spawn_unit`. The tile is the city center when `units.spawn_on_city_center` allows it and the tile is empty. Otherwise, when `units.spawn_nearest_free_if_blocked` is true, the nearest passable tile inside this city's borders is used (distance, then smaller q, then smaller r). Water is not a spawn tile. A tile already holding a unit is not empty.
 
@@ -65,9 +67,10 @@ The panel button starts placement. The next left click on a legal tile enqueues 
 - `Cannot build on the city center`
 - `Not in city borders`
 - `Tile already has a building`
+- `Cannot build on water`
 - `Cannot build off the map`
 
-`buildings.water_destroys_building` is not applied yet. Turning a tile into water does not remove its building.
+`buildings.water_destroys_building` removes the finished building when a spell turns its tile into water. Water is not a legal placement tile after that, so the slot is free and unusable. A building on a neighbor tile is left alone. With the flag off, the finished building stays and the tile remains occupied. A queued building on the new water is dropped either way.
 
 ## Panel
 
