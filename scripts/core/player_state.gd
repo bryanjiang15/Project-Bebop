@@ -19,6 +19,8 @@ class UnitState extends RefCounted:
 var index: int = 0
 var human: bool = false
 var color: String = ""
+## Set when this player has no cities and no settlers. Their units are removed.
+var eliminated: bool = false
 ## Pooled mana for this player. GameSetup sets it from players.starting_mana.
 ## Spells spend it. End Turn adds the snapshotted city rates.
 var mana: int = 0

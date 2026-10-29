@@ -29,6 +29,7 @@ const REASON_UNSEEN_CITY := "Cannot see that city"
 const REASON_CITY_HELD := "A unit defends that city"
 const ORDER_SKIP := "skip"
 const ORDER_FORTIFY := "fortify"
+const REASON_OVER := "The game is over"
 const NO_CELL := Vector2i(-999999, -999999)
 
 var config: GameConfig
@@ -46,6 +47,10 @@ var _next_city_id: int = 1
 var _moving: PlayerState.UnitState
 ## True only while pathfinding a move. Spawn still rejects a stacked tile.
 var _entering_for_move: bool = false
+## Set when conquest, elimination, or the turn limit ends the match.
+var result: MatchResult
+## True after a player was just marked eliminated, until the outcome is judged.
+var _eliminated_now: bool = false
 
 
 static func start(cfg: GameConfig) -> GameSetup:
@@ -53,6 +58,7 @@ static func start(cfg: GameConfig) -> GameSetup:
 
 
 static func start_with_seed(cfg: GameConfig, seed_value: int) -> GameSetup:
+	MatchResult.latest = null
 	var base := seed_value
 	if base == 0:
 		base = _random_seed()
@@ -218,6 +224,8 @@ func reachable_tiles(unit: PlayerState.UnitState) -> Dictionary:
 
 
 func move_unit(unit: PlayerState.UnitState, dest: Vector2i) -> bool:
+	if result != null:
+		return false
 	var tiles := reachable_tiles(unit)
 	if not tiles.has(dest):
 		return false
@@ -225,6 +233,12 @@ func move_unit(unit: PlayerState.UnitState, dest: Vector2i) -> bool:
 	var city: MapCity = null
 	if _would_capture_city(unit, dest):
 		city = city_at_cell(dest)
+	var settler_owner := -1
+	if settler != null:
+		settler_owner = settler.owner
+	var city_owner := -1
+	if city != null:
+		city_owner = city.player
 	unit.cell = dest
 	if settler != null or city != null:
 		unit.mp = 0
@@ -238,6 +252,11 @@ func move_unit(unit: PlayerState.UnitState, dest: Vector2i) -> bool:
 	if city != null:
 		_apply_city_capture(unit, city)
 	_refresh_fog()
+	if settler_owner >= 0:
+		_eliminate_if_out(settler_owner)
+	if city_owner >= 0:
+		_eliminate_if_out(city_owner)
+	_finish_elimination_check()
 	return true
 
 
@@ -282,9 +301,13 @@ func preview_attack(attacker: PlayerState.UnitState, defender: PlayerState.UnitS
 ## Applies damage, sets the attacker's movement to 0, and removes units at 0 HP.
 ## The attacker does not step onto a tile this emptied. Returns the reject reason.
 func attack_unit(attacker: PlayerState.UnitState, defender: PlayerState.UnitState) -> String:
+	if result != null:
+		return REASON_OVER
 	var preview := preview_attack(attacker, defender)
 	if not bool(preview["ok"]):
 		return str(preview["reason"])
+	var defender_owner := defender.owner
+	var attacker_owner := attacker.owner
 	var civilian := not config.unit(defender.unit_type).combatant
 	if not civilian:
 		defender.hp = maxi(0, defender.hp - int(preview["damage"]))
@@ -292,12 +315,19 @@ func attack_unit(attacker: PlayerState.UnitState, defender: PlayerState.UnitStat
 	attacker.mp = 0
 	attacker.acted = true
 	attacker.order = ORDER_FORTIFY if attacker.fortified else ""
+	var defender_removed := civilian or defender.hp <= 0
+	var attacker_removed := attacker.hp <= 0
 	if civilian:
 		_remove_unit(defender)
 	else:
 		_remove_if_dead(defender)
 	_remove_if_dead(attacker)
 	_refresh_fog()
+	if defender_removed:
+		_eliminate_if_out(defender_owner)
+	if attacker_removed:
+		_eliminate_if_out(attacker_owner)
+	_finish_elimination_check()
 	return ""
 
 
@@ -340,6 +370,8 @@ func preview_city(attacker: PlayerState.UnitState, city: MapCity) -> Dictionary:
 ## Damages the city down to 0 and does not remove it. The attacker does not step in.
 ## Melee takes counter-damage. A ranged hit takes none while `ranged_takes_no_counter` is set.
 func attack_city(attacker: PlayerState.UnitState, city: MapCity) -> String:
+	if result != null:
+		return REASON_OVER
 	var preview := preview_city(attacker, city)
 	if not bool(preview["ok"]):
 		return str(preview["reason"])
@@ -348,12 +380,17 @@ func attack_city(attacker: PlayerState.UnitState, city: MapCity) -> String:
 		next = maxi(1, next)
 	city.hp = next
 	city.attacked = true
+	var attacker_owner := attacker.owner
 	attacker.hp = maxi(0, attacker.hp - int(preview["counter"]))
 	attacker.mp = 0
 	attacker.acted = true
 	attacker.order = ORDER_FORTIFY if attacker.fortified else ""
+	var attacker_removed := attacker.hp <= 0
 	_remove_if_dead(attacker)
 	_refresh_fog()
+	if attacker_removed:
+		_eliminate_if_out(attacker_owner)
+		_finish_elimination_check()
 	return ""
 
 
@@ -405,14 +442,14 @@ func attackable_cells(unit: PlayerState.UnitState) -> Array[Vector2i]:
 
 
 func skip_unit(unit: PlayerState.UnitState) -> bool:
-	if unit == null or config == null or not config.skip_enabled:
+	if result != null or unit == null or config == null or not config.skip_enabled:
 		return false
 	unit.order = ORDER_SKIP
 	return true
 
 
 func fortify_unit(unit: PlayerState.UnitState) -> bool:
-	if unit == null or config == null or not config.fortify_enabled:
+	if result != null or unit == null or config == null or not config.fortify_enabled:
 		return false
 	unit.fortified = true
 	unit.order = ORDER_FORTIFY
@@ -431,6 +468,8 @@ func has_unordered_moves(player: int) -> bool:
 
 
 func end_turn() -> void:
+	if result != null:
+		return
 	# One global clock: every city resolves here. Rivals have no turn of their own yet.
 	# Growth uses this turn's yields, then production (a settler sees the post-growth pop),
 	# then the border clock. Mana paid is that same snapshot, summed per player after
@@ -439,9 +478,12 @@ func end_turn() -> void:
 	# since its owner's last turn, then the attacked flag clears. Volcanic damage
 	# is next, so an idle unit on volcanic ground is healed before the flat hit
 	# (a wounded unit is not removed by damage it would have healed through).
-	# The city itself is not damaged by that hit. Spell cooldowns then tick once
-	# for every player — this End Turn is each player's turn until turns are
-	# sequential — and the turn counter advances.
+	# The city itself is not damaged by that hit. A volcanic death can eliminate
+	# its owner; conquest is judged there, before the turn-limit ranking.
+	# Spell cooldowns then tick once for every player — this End Turn is each
+	# player's turn until turns are sequential. When this turn is `turn_limit`,
+	# the match ends after that resolution and the counter does not advance.
+	# Otherwise the turn counter advances and movement refills.
 	# A spell with cooldown C cast on turn N is castable again on turn N+C.
 	var income: Array[int] = []
 	income.resize(players.size())
@@ -456,6 +498,11 @@ func end_turn() -> void:
 	_heal_idle_units()
 	_apply_volcanic_damage()
 	_tick_spells()
+	if result != null:
+		return
+	if turn >= config.turn_limit:
+		_finish(_human_leads_on_score(), MatchResult.REASON_SCORE)
+		return
 	turn += 1
 	for player in players:
 		for unit in player.units:
@@ -484,7 +531,8 @@ func can_found(unit: PlayerState.UnitState) -> String:
 
 
 func found_city(unit: PlayerState.UnitState) -> MapCity:
-	if not can_found(unit).is_empty():
+	# Founding spends a settler and adds a city. It is never an elimination.
+	if result != null or not can_found(unit).is_empty():
 		return null
 	var city := MapCity.new()
 	city.id = _next_city_id
@@ -515,6 +563,149 @@ func owned_cells() -> Array[Vector2i]:
 	for key in _owners.keys():
 		out.append(key as Vector2i)
 	return out
+
+
+func tile_count(player: int) -> int:
+	var count := 0
+	for cell in owned_cells():
+		if owner_at(cell) == player:
+			count += 1
+	return count
+
+
+func city_count(player: int) -> int:
+	var count := 0
+	for city in cities:
+		if city.player == player:
+			count += 1
+	return count
+
+
+func population_total(player: int) -> int:
+	var total := 0
+	for city in cities:
+		if city.player == player:
+			total += city.population
+	return total
+
+
+func settler_count(player: int) -> int:
+	if player < 0 or player >= players.size():
+		return 0
+	var count := 0
+	for unit in players[player].units:
+		if unit.unit_type == "settler":
+			count += 1
+	return count
+
+
+## Tiles in borders, including the city center and claimed water, plus cities and population.
+func score(player: int) -> int:
+	return ScoreRules.total(config, tile_count(player), city_count(player), population_total(player))
+
+
+func score_line(player: int) -> String:
+	return "%s %d" % [MatchResult.player_name(player, human_index), score(player)]
+
+
+func _standings() -> Array:
+	var rows: Array = []
+	for player in players:
+		rows.append({
+			"player": player.index,
+			"score": score(player.index),
+			"tiles": tile_count(player.index),
+			"cities": city_count(player.index),
+		})
+	return rows
+
+
+func _human_leads_on_score() -> bool:
+	return ScoreRules.human_is_first(_standings(), config.tie_order, human_index)
+
+
+func _all_rivals_eliminated(index: int) -> bool:
+	if index < 0 or index >= players.size() or players[index].eliminated:
+		return false
+	if players.size() < 2:
+		return false
+	for other in players:
+		if other.index == index:
+			continue
+		if not other.eliminated:
+			return false
+	return true
+
+
+## A player with no cities and no settlers is out. Leftover military units are removed.
+## Call `_finish_elimination_check` after the state change that may have caused it.
+## Founding does not call this.
+func _eliminate_if_out(index: int) -> void:
+	if result != null or index < 0 or index >= players.size():
+		return
+	var player := players[index]
+	if player.eliminated:
+		return
+	if city_count(index) > 0 or settler_count(index) > 0:
+		return
+	player.eliminated = true
+	_eliminated_now = true
+	var leftovers: Array[PlayerState.UnitState] = []
+	for unit in player.units:
+		leftovers.append(unit)
+	for unit in leftovers:
+		_remove_unit(unit)
+
+
+func _finish_elimination_check() -> void:
+	if not _eliminated_now or result != null:
+		_eliminated_now = false
+		return
+	_eliminated_now = false
+	_refresh_fog()
+	if players[human_index].eliminated:
+		_finish(false, MatchResult.REASON_ELIMINATED)
+		return
+	for player in players:
+		if _all_rivals_eliminated(player.index):
+			_finish(player.human, MatchResult.REASON_CONQUEST)
+			return
+
+
+func _row_reason(index: int, ending: String) -> String:
+	if players[index].eliminated:
+		return MatchResult.REASON_ELIMINATED
+	if ending == MatchResult.REASON_CONQUEST and _all_rivals_eliminated(index):
+		return MatchResult.REASON_CONQUEST
+	if ending == MatchResult.REASON_ELIMINATED and _all_rivals_eliminated(index):
+		return MatchResult.REASON_CONQUEST
+	if ending == MatchResult.REASON_SCORE:
+		return MatchResult.REASON_SCORE
+	return ""
+
+
+func _finish(human_won: bool, ending: String) -> void:
+	if result != null:
+		return
+	var outcome := MatchResult.new()
+	outcome.human_won = human_won
+	outcome.ending = ending
+	outcome.turn = turn
+	for player in players:
+		var row := MatchResult.Row.new()
+		row.player = player.index
+		row.human = player.human
+		row.color = player.color
+		row.player_name = MatchResult.player_name(player.index, human_index)
+		row.tiles = tile_count(player.index)
+		row.cities = city_count(player.index)
+		row.population = population_total(player.index)
+		row.score = ScoreRules.total(config, row.tiles, row.cities, row.population)
+		row.eliminated = player.eliminated
+		row.reason = _row_reason(player.index, ending)
+		outcome.rows.append(row)
+	result = outcome
+	MatchResult.latest = outcome
 
 
 func territory_cells(city: MapCity) -> Array[Vector2i]:
@@ -623,6 +814,8 @@ func spell_preview(player_index: int, spell_id: String, target: Vector2i, direct
 ## drops a queued building aimed at it. The finished building is removed when
 ## water_destroys_building is true.
 func cast_spell(player_index: int, spell_id: String, target: Vector2i, direction: int) -> String:
+	if result != null:
+		return REASON_OVER
 	var reason := cast_reason(player_index, spell_id, target, direction)
 	if not reason.is_empty():
 		return reason
@@ -846,8 +1039,14 @@ func _apply_volcanic_damage() -> void:
 			unit.hp = next
 			if unit.hp <= 0:
 				doomed.append(unit)
+	var owners: Array[int] = []
 	for unit in doomed:
+		if not owners.has(unit.owner):
+			owners.append(unit.owner)
 		_remove_unit(unit)
+	for index in owners:
+		_eliminate_if_out(index)
+	_finish_elimination_check()
 
 
 func _water_destroys_building(land_id: String, cell: Vector2i) -> bool:

@@ -66,53 +66,21 @@ func _run() -> void:
 	if not _capture_city_and_settler(game):
 		return
 	print("PASS restart ", turn)
-	var victory_event := InputEventAction.new()
-	victory_event.action = "debug_victory"
-	victory_event.pressed = true
-	game._unhandled_input(victory_event)
-	var victory := await _wait_for("res://scripts/view/end_screen.gd")
-	if victory == null:
-		return
-	if (victory.get_node("%Title") as Label).text != "Victory":
-		print("FAIL victory title")
-		quit(1)
-		return
-	if victory.get_node_or_null("%RestartButton") == null or victory.get_node_or_null("%MainMenuButton") == null:
-		print("FAIL victory buttons")
-		quit(1)
-		return
-	print("PASS victory")
-	(victory.get_node("%MainMenuButton") as Button).pressed.emit()
-	var back := await _wait_for("res://scripts/view/main_menu.gd")
-	if back == null:
-		return
-	(back.get_node("%NewGameButton") as Button).pressed.emit()
+	(game.get_node("%MenuButton") as Button).pressed.emit()
+	(game.get_node("%RestartButton") as Button).pressed.emit()
 	game = await _wait_for("res://scripts/view/game_view.gd")
 	if game == null:
 		return
-	var defeat_event := InputEventAction.new()
-	defeat_event.action = "debug_defeat"
-	defeat_event.pressed = true
-	game._unhandled_input(defeat_event)
-	var defeat := await _wait_for("res://scripts/view/end_screen.gd")
-	if defeat == null:
-		return
-	if (defeat.get_node("%Title") as Label).text != "Defeat":
-		print("FAIL defeat title")
+	turn = (game.get_node("%TurnLabel") as Label).text
+	if turn != "1 / 50":
+		print("FAIL fresh game before rival land: '", turn, "'")
 		quit(1)
-		return
-	print("PASS defeat")
-	(defeat.get_node("%MainMenuButton") as Button).pressed.emit()
-	var again := await _wait_for("res://scripts/view/main_menu.gd")
-	if again == null:
-		return
-	(again.get_node("%NewGameButton") as Button).pressed.emit()
-	game = await _wait_for("res://scripts/view/game_view.gd")
-	if game == null:
 		return
 	if not _rival_land_cast(game):
 		return
 	if not _land_effects(game):
+		return
+	if not await _win_loss(game):
 		return
 	print("SMOKE OK")
 	quit(0)
@@ -349,6 +317,20 @@ func _capture_city_and_settler(game: Node) -> bool:
 	var city := setup.found_city(founder)
 	if city == null:
 		print("FAIL rival city did not found")
+		quit(1)
+		return false
+	# The founder was this rival's only settler. A spare settler keeps them in the
+	# game so the capture checks below are about capture, not elimination.
+	var keeper := Vector2i(-1, -1)
+	for corner in [Vector2i(0, 0), Vector2i(setup.map.width - 1, 0), Vector2i(0, setup.map.height - 1), Vector2i(setup.map.width - 1, setup.map.height - 1)]:
+		if setup._unit_at(corner) != null or corner == city_cell or corner == warrior.cell:
+			continue
+		setup.map.set_land(corner, "plains")
+		if setup.spawn_unit(rival, "settler", corner) != null:
+			keeper = corner
+			break
+	if keeper.x < 0:
+		print("FAIL keeper settler")
 		quit(1)
 		return false
 	game._refresh_board()
@@ -1399,7 +1381,7 @@ func _mana_matches(game: Node) -> bool:
 		print("FAIL top bar mana='", label, "' turn='", turn, "' expected ", expected, " turn ", setup.turn)
 		quit(1)
 		return false
-	return true
+	return _scores_match(game)
 
 
 func _click_cell(game: Node, cell: Vector2i, button_index: int = MOUSE_BUTTON_LEFT) -> void:
@@ -1485,6 +1467,287 @@ func _hover(game: Node, cell: Vector2i, expect_land: bool) -> bool:
 			return false
 	print("PASS tooltip ", tip)
 	return true
+
+
+func _scores_match(game: Node) -> bool:
+	var setup := game.get("setup") as GameSetup
+	for index in setup.players.size():
+		var label := game.get_node("%%Score%d" % index) as Label
+		var expected := setup.score_line(index)
+		if label == null or not label.visible or label.text != expected:
+			var shown := "" if label == null else label.text
+			print("FAIL score ", index, " '", shown, "' expected ", expected)
+			quit(1)
+			return false
+	return true
+
+
+func _win_loss(game: Node) -> bool:
+	(game.get_node("%MenuButton") as Button).pressed.emit()
+	(game.get_node("%RestartButton") as Button).pressed.emit()
+	game = await _wait_for("res://scripts/view/game_view.gd")
+	if game == null:
+		return false
+	if not _fresh_turn(game, "in-game menu restart"):
+		return false
+	if not await _score_ending(game):
+		return false
+	game = await _restart_from_end("score")
+	if game == null:
+		return false
+	if not await _conquest_ending(game):
+		return false
+	game = await _restart_from_end("conquest")
+	if game == null:
+		return false
+	if not await _human_defeat(game):
+		return false
+	return true
+
+
+func _fresh_turn(game: Node, source: String) -> bool:
+	var setup := game.get("setup") as GameSetup
+	var turn := (game.get_node("%TurnLabel") as Label).text
+	if turn != "1 / 50" or setup.turn != 1 or setup.result != null or MatchResult.latest != null:
+		print("FAIL ", source, " turn '", turn, "' core ", setup.turn, " result ", setup.result, " latest ", MatchResult.latest)
+		quit(1)
+		return false
+	if not _scores_match(game):
+		return false
+	for player in setup.players:
+		if player.eliminated or setup.score(player.index) != 0:
+			print("FAIL ", source, " leftover score")
+			quit(1)
+			return false
+	print("PASS ", source, " ", turn)
+	return true
+
+
+func _score_ending(game: Node) -> bool:
+	var setup := game.get("setup") as GameSetup
+	if not _scores_match(game):
+		return false
+	setup.config.turn_limit = 1
+	game._refresh_board()
+	var shown := (game.get_node("%TurnLabel") as Label).text
+	if shown != "1 / 1":
+		print("FAIL tuned turn label '", shown, "'")
+		quit(1)
+		return false
+	_confirm_end(game)
+	var screen := await _wait_for("res://scripts/view/end_screen.gd")
+	if screen == null:
+		return false
+	var result := MatchResult.latest
+	if result == null or result.ending != MatchResult.REASON_SCORE or result.human_won or result.turn != 1:
+		print("FAIL score ending ", result)
+		quit(1)
+		return false
+	if (screen.get_node("%Title") as Label).text != "Defeat":
+		print("FAIL score title")
+		quit(1)
+		return false
+	if not _rows_match(screen, result):
+		return false
+	print("PASS turn-limit defeat")
+	return true
+
+
+func _conquest_ending(game: Node) -> bool:
+	var setup := game.get("setup") as GameSetup
+	var human := setup.human_index
+	var others: Array[int] = []
+	for index in setup.players.size():
+		if index != human:
+			others.append(index)
+	if others.size() < 2:
+		print("FAIL conquest needs two rivals")
+		quit(1)
+		return false
+	var rival_a := others[0]
+	var rival_b := others[1]
+	var park := Vector2i(20, 14)
+	for player in setup.players:
+		for unit in player.units:
+			_paint_plains(setup, park)
+			unit.cell = park
+			park.x += 1
+	var warrior := _player_unit(setup, human, "warrior")
+	var human_settler := _player_unit(setup, human, "settler")
+	var settler_b := _player_unit(setup, rival_b, "settler")
+	var warrior_a := _player_unit(setup, rival_a, "warrior")
+	if warrior == null or human_settler == null or settler_b == null or warrior_a == null:
+		print("FAIL conquest roster")
+		quit(1)
+		return false
+	_paint_plains(setup, Vector2i(0, 0))
+	_paint_plains(setup, Vector2i(1, 1))
+	human_settler.cell = Vector2i(1, 1)
+	warrior_a.cell = Vector2i(0, 0)
+	var spot := Vector2i(8, 8)
+	var beside := Hex.axial_to_offset(Hex.neighbor(Hex.offset_to_axial(spot), Hex.WEST))
+	_paint_plains(setup, spot)
+	_paint_plains(setup, beside)
+	settler_b.cell = spot
+	warrior.cell = beside
+	warrior.mp = setup.config.unit("warrior").move
+	setup._refresh_fog()
+	if not setup.move_unit(warrior, spot) or not setup.players[rival_b].eliminated or setup.result != null:
+		print("FAIL fixture did not remove the other rival")
+		quit(1)
+		return false
+	var settler_a := _player_unit(setup, rival_a, "settler")
+	if settler_a == null:
+		print("FAIL no city founder")
+		quit(1)
+		return false
+	var city_cell := Vector2i(12, 8)
+	for hex in Hex.disk(Hex.offset_to_axial(city_cell), 1):
+		_paint_plains(setup, Hex.axial_to_offset(hex))
+	settler_a.cell = city_cell
+	var city := setup.found_city(settler_a)
+	if city == null:
+		print("FAIL conquest city")
+		quit(1)
+		return false
+	city.hp = 0
+	var approach := Hex.axial_to_offset(Hex.neighbor(Hex.offset_to_axial(city_cell), Hex.EAST))
+	_paint_plains(setup, approach)
+	warrior.cell = approach
+	warrior.mp = setup.config.unit("warrior").move
+	setup._refresh_fog()
+	game._refresh_board()
+	if setup.result != null:
+		print("FAIL game ended before the capture click")
+		quit(1)
+		return false
+	_click_cell(game, approach)
+	if (game.get_node("%SelectionTitle") as Label).text != "Warrior":
+		_click_cell(game, approach)
+	_click_cell(game, city_cell, MOUSE_BUTTON_RIGHT)
+	var screen := await _wait_for("res://scripts/view/end_screen.gd")
+	if screen == null:
+		return false
+	var result := MatchResult.latest
+	if result == null or not result.human_won or result.ending != MatchResult.REASON_CONQUEST:
+		print("FAIL conquest result ", result)
+		quit(1)
+		return false
+	if (screen.get_node("%Title") as Label).text != "Victory":
+		print("FAIL conquest title")
+		quit(1)
+		return false
+	if not _rows_match(screen, result):
+		return false
+	print("PASS conquest victory")
+	return true
+
+
+func _human_defeat(game: Node) -> bool:
+	var setup := game.get("setup") as GameSetup
+	var settler := _player_unit(setup, setup.human_index, "settler")
+	if settler == null:
+		print("FAIL no human settler")
+		quit(1)
+		return false
+	setup.map.set_land(settler.cell, "volcanic")
+	game._refresh_board()
+	_confirm_end(game)
+	var screen := await _wait_for("res://scripts/view/end_screen.gd")
+	if screen == null:
+		return false
+	var result := MatchResult.latest
+	if result == null or result.human_won or result.ending != MatchResult.REASON_ELIMINATED:
+		print("FAIL elimination result ", result)
+		quit(1)
+		return false
+	if (screen.get_node("%Title") as Label).text != "Defeat":
+		print("FAIL elimination title")
+		quit(1)
+		return false
+	if not _rows_match(screen, result):
+		return false
+	var human_reason := ""
+	for row in result.rows:
+		if row.human:
+			human_reason = row.reason
+	if human_reason != MatchResult.REASON_ELIMINATED:
+		print("FAIL human reason ", human_reason)
+		quit(1)
+		return false
+	print("PASS human elimination")
+	(screen.get_node("%MainMenuButton") as Button).pressed.emit()
+	var menu := await _wait_for("res://scripts/view/main_menu.gd")
+	if menu == null:
+		return false
+	if menu.get_node_or_null("%NewGameButton") == null:
+		print("FAIL main menu")
+		quit(1)
+		return false
+	print("PASS main menu")
+	return true
+
+
+func _restart_from_end(source: String) -> Node:
+	var screen := current_scene
+	(screen.get_node("%RestartButton") as Button).pressed.emit()
+	var game := await _wait_for("res://scripts/view/game_view.gd")
+	if game == null:
+		return null
+	if not _fresh_turn(game, source + " restart"):
+		return null
+	return game
+
+
+func _confirm_end(game: Node) -> void:
+	var button := game.get_node("%EndTurnButton") as Button
+	button.pressed.emit()
+	if not is_instance_valid(game):
+		return
+	var setup := game.get("setup") as GameSetup
+	if setup == null or setup.result != null:
+		return
+	if not (game.get_node("%EndTurnWarning") as Label).text.is_empty():
+		button.pressed.emit()
+
+
+func _rows_match(screen: Node, result: MatchResult) -> bool:
+	var table := screen.get_node("%ScoreTable")
+	for row in result.rows:
+		var line := table.get_node_or_null("ScoreLine%d" % row.player) as HBoxContainer
+		if line == null:
+			print("FAIL missing score row ", row.player)
+			quit(1)
+			return false
+		var text := (line.get_node("Text") as Label).text
+		if text != row.line():
+			print("FAIL score row '", text, "' expected '", row.line(), "'")
+			quit(1)
+			return false
+		var swatch := line.get_node("Swatch") as ColorRect
+		if not swatch.color.is_equal_approx(Color.html(row.color)):
+			print("FAIL score color ", row.player)
+			quit(1)
+			return false
+		var weight := row.tiles * 1 + row.cities * 10 + row.population * 3
+		if row.score != weight:
+			print("FAIL row formula ", row.score, " ", weight)
+			quit(1)
+			return false
+	print("PASS score rows")
+	return true
+
+
+func _player_unit(setup: GameSetup, player: int, unit_type: String) -> PlayerState.UnitState:
+	for unit in setup.players[player].units:
+		if unit.unit_type == unit_type:
+			return unit
+	return null
+
+
+func _paint_plains(setup: GameSetup, cell: Vector2i) -> void:
+	if setup.map.in_bounds(cell):
+		setup.map.set_land(cell, "plains")
 
 
 func _wait_for(script_path: String) -> Node:
