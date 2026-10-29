@@ -24,6 +24,9 @@ const REASON_OWN_UNIT := "Cannot attack your own unit"
 const REASON_ATTACK_SETTLER := "Cannot attack a settler"
 const REASON_RANGE := "Out of range"
 const REASON_UNSEEN := "Cannot see that unit"
+const REASON_OWN_CITY := "Cannot attack your own city"
+const REASON_UNSEEN_CITY := "Cannot see that city"
+const REASON_CITY_HELD := "A unit defends that city"
 const ORDER_SKIP := "skip"
 const ORDER_FORTIFY := "fortify"
 const NO_CELL := Vector2i(-999999, -999999)
@@ -41,6 +44,8 @@ var _city_tiles: Dictionary = {}
 var _next_unit_id: int = 1
 var _next_city_id: int = 1
 var _moving: PlayerState.UnitState
+## True only while pathfinding a move. Spawn still rejects a stacked tile.
+var _entering_for_move: bool = false
 
 
 static func start(cfg: GameConfig) -> GameSetup:
@@ -193,6 +198,7 @@ func reachable_tiles(unit: PlayerState.UnitState) -> Dictionary:
 	if unit == null or unit.mp <= 0 or config == null:
 		return {}
 	_moving = unit
+	_entering_for_move = true
 	var axial_tiles := Pathfinder.reachable(
 		Hex.offset_to_axial(unit.cell),
 		unit.mp,
@@ -201,7 +207,9 @@ func reachable_tiles(unit: PlayerState.UnitState) -> Dictionary:
 		Callable(self, "_enter_cost_axial"),
 		Callable(self, "_blocked_axial"),
 		config.allow_enter_over_budget_if_mp_left,
+		Callable(self, "_ends_move_axial"),
 	)
+	_entering_for_move = false
 	_moving = null
 	var cells := {}
 	for key in axial_tiles.keys():
@@ -213,16 +221,28 @@ func move_unit(unit: PlayerState.UnitState, dest: Vector2i) -> bool:
 	var tiles := reachable_tiles(unit)
 	if not tiles.has(dest):
 		return false
+	var settler := _capturable_settler(unit, dest)
+	var city: MapCity = null
+	if _would_capture_city(unit, dest):
+		city = city_at_cell(dest)
 	unit.cell = dest
-	unit.mp = int(tiles[dest])
+	if settler != null or city != null:
+		unit.mp = 0
+	else:
+		unit.mp = int(tiles[dest])
 	unit.acted = true
 	unit.fortified = false
 	unit.order = ""
+	if settler != null:
+		_capture_settler(unit, settler)
+	if city != null:
+		_apply_city_capture(unit, city)
 	_refresh_fog()
 	return true
 
 
-## Empty string means the attack is legal. Cities are not targets.
+## Empty string means the attack is legal.
+## A melee strike still rejects a settler. A ranged strike destroys a lone settler.
 func can_attack(attacker: PlayerState.UnitState, defender: PlayerState.UnitState) -> String:
 	if attacker == null or config == null or not config.unit(attacker.unit_type).combatant:
 		return REASON_SELECT_COMBAT
@@ -233,7 +253,8 @@ func can_attack(attacker: PlayerState.UnitState, defender: PlayerState.UnitState
 	if fog == null or not fog.unit_visible(attacker.owner, defender.cell):
 		return REASON_UNSEEN
 	if not config.unit(defender.unit_type).combatant:
-		return REASON_ATTACK_SETTLER
+		if _uses_melee(attacker) or _military_on(defender.cell) != null:
+			return REASON_ATTACK_SETTLER
 	if attacker.mp <= 0:
 		return REASON_NO_MOVES
 	var dist := Hex.distance(Hex.offset_to_axial(attacker.cell), Hex.offset_to_axial(defender.cell))
@@ -264,15 +285,81 @@ func attack_unit(attacker: PlayerState.UnitState, defender: PlayerState.UnitStat
 	var preview := preview_attack(attacker, defender)
 	if not bool(preview["ok"]):
 		return str(preview["reason"])
-	defender.hp = maxi(0, defender.hp - int(preview["damage"]))
+	var civilian := not config.unit(defender.unit_type).combatant
+	if not civilian:
+		defender.hp = maxi(0, defender.hp - int(preview["damage"]))
 	attacker.hp = maxi(0, attacker.hp - int(preview["counter"]))
 	attacker.mp = 0
 	attacker.acted = true
 	attacker.order = ORDER_FORTIFY if attacker.fortified else ""
-	_remove_if_dead(defender)
+	if civilian:
+		_remove_unit(defender)
+	else:
+		_remove_if_dead(defender)
 	_remove_if_dead(attacker)
 	_refresh_fog()
 	return ""
+
+
+## Empty string means the city attack is legal. A military unit on the tile is the target instead.
+func can_attack_city(attacker: PlayerState.UnitState, city: MapCity) -> String:
+	if attacker == null or config == null or not config.unit(attacker.unit_type).combatant:
+		return REASON_SELECT_COMBAT
+	if city == null:
+		return REASON_RANGE
+	if city.player == attacker.owner:
+		return REASON_OWN_CITY
+	if fog == null or not fog.unit_visible(attacker.owner, city.cell):
+		return REASON_UNSEEN_CITY
+	if _military_on(city.cell) != null:
+		return REASON_CITY_HELD
+	if attacker.mp <= 0:
+		return REASON_NO_MOVES
+	var dist := Hex.distance(Hex.offset_to_axial(attacker.cell), Hex.offset_to_axial(city.cell))
+	var reach := config.unit(attacker.unit_type).range
+	if reach > 0:
+		if dist < 1 or dist > reach:
+			return REASON_RANGE
+	elif dist != 1:
+		return REASON_RANGE
+	return ""
+
+
+## Same shape as `preview_attack`. Hills on the city tile modify the city's strength.
+func preview_city(attacker: PlayerState.UnitState, city: MapCity) -> Dictionary:
+	var reason := can_attack_city(attacker, city)
+	if not reason.is_empty():
+		return {"ok": false, "reason": reason, "damage": 0, "counter": 0}
+	var dealt := _city_blow(attacker, city)
+	var counter := 0
+	if _uses_melee(attacker) or not config.ranged_takes_no_counter:
+		counter = _city_counter(city, attacker)
+	return {"ok": true, "reason": "", "damage": dealt, "counter": counter}
+
+
+## Damages the city down to 0 and does not remove it. The attacker does not step in.
+## Melee takes counter-damage. A ranged hit takes none while `ranged_takes_no_counter` is set.
+func attack_city(attacker: PlayerState.UnitState, city: MapCity) -> String:
+	var preview := preview_city(attacker, city)
+	if not bool(preview["ok"]):
+		return str(preview["reason"])
+	var next := maxi(0, city.hp - int(preview["damage"]))
+	if not _uses_melee(attacker) and not config.archers_can_zero_city_hp and city.hp > 0:
+		next = maxi(1, next)
+	city.hp = next
+	city.attacked = true
+	attacker.hp = maxi(0, attacker.hp - int(preview["counter"]))
+	attacker.mp = 0
+	attacker.acted = true
+	attacker.order = ORDER_FORTIFY if attacker.fortified else ""
+	_remove_if_dead(attacker)
+	_refresh_fog()
+	return ""
+
+
+## True when moving onto `cell` would capture a city, a lone settler, or both.
+func capture_destination(unit: PlayerState.UnitState, cell: Vector2i) -> bool:
+	return _would_capture_city(unit, cell) or _capturable_settler(unit, cell) != null
 
 
 ## Combatant on the tile, or the civilian when that is all the enemy has there.
@@ -296,12 +383,24 @@ func attackable_cells(unit: PlayerState.UnitState) -> Array[Vector2i]:
 	var cells: Array[Vector2i] = []
 	if unit == null:
 		return cells
+	var capturing := {}
+	for key in reachable_tiles(unit).keys():
+		var cell := key as Vector2i
+		if capture_destination(unit, cell):
+			capturing[cell] = true
 	for player in players:
 		if player.index == unit.owner:
 			continue
 		for other in player.units:
-			if can_attack(unit, other).is_empty():
+			if capturing.has(other.cell):
+				continue
+			if can_attack(unit, other).is_empty() and not cells.has(other.cell):
 				cells.append(other.cell)
+	for city in cities:
+		if capturing.has(city.cell) or cells.has(city.cell):
+			continue
+		if can_attack_city(unit, city).is_empty():
+			cells.append(city.cell)
 	return cells
 
 
@@ -336,10 +435,13 @@ func end_turn() -> void:
 	# Growth uses this turn's yields, then production (a settler sees the post-growth pop),
 	# then the border clock. Mana paid is that same snapshot, summed per player after
 	# every city has resolved, so a building finished this turn is paid next End Turn.
-	# Idle units then heal. Volcanic damage is next, so an idle unit on volcanic ground
-	# is healed before the flat hit (a wounded unit is not removed by damage it would
-	# have healed through). Spell cooldowns then tick once for every player — this End
-	# Turn is each player's turn until turns are sequential — and the turn counter advances.
+	# Idle units then heal. A city heals in that same gap when it was not attacked
+	# since its owner's last turn, then the attacked flag clears. Volcanic damage
+	# is next, so an idle unit on volcanic ground is healed before the flat hit
+	# (a wounded unit is not removed by damage it would have healed through).
+	# The city itself is not damaged by that hit. Spell cooldowns then tick once
+	# for every player — this End Turn is each player's turn until turns are
+	# sequential — and the turn counter advances.
 	# A spell with cooldown C cast on turn N is castable again on turn N+C.
 	var income: Array[int] = []
 	income.resize(players.size())
@@ -350,6 +452,7 @@ func end_turn() -> void:
 			income[city.player] += gained
 	for index in players.size():
 		players[index].mana += income[index]
+	_heal_cities()
 	_heal_idle_units()
 	_apply_volcanic_damage()
 	_tick_spells()
@@ -390,6 +493,9 @@ func found_city(unit: PlayerState.UnitState) -> MapCity:
 	city.cell = unit.cell
 	city.population = 1
 	city.radius = config.border_start_radius
+	city.hp = config.city_hp
+	city.max_hp = config.city_hp
+	city.attacked = false
 	city.city_name = _next_city_name(unit.owner)
 	cities.append(city)
 	_claim(city)
@@ -819,6 +925,15 @@ func _blocked_axial(axial: Vector2i) -> bool:
 
 
 func _can_enter(unit: PlayerState.UnitState, cell: Vector2i) -> bool:
+	if unit == null or config == null:
+		return false
+	# Capture is a move onto the tile. Spawn and friendly stacking stay one unit
+	# per tile, so this exception is only live while pathfinding that move.
+	if _entering_for_move and _military_on(cell) == null and (_would_capture_city(unit, cell) or _capturable_settler(unit, cell) != null):
+		return true
+	var city := city_at_cell(cell)
+	if city != null and city.player != unit.owner:
+		return false
 	for player in players:
 		for other in player.units:
 			if other == unit or other.cell != cell:
@@ -826,6 +941,103 @@ func _can_enter(unit: PlayerState.UnitState, cell: Vector2i) -> bool:
 			if other.owner != unit.owner or config.one_unit_per_tile:
 				return false
 	return true
+
+
+func _ends_move_axial(axial: Vector2i) -> bool:
+	if _moving == null:
+		return false
+	return capture_destination(_moving, Hex.axial_to_offset(axial))
+
+
+func _can_capture_cities(unit: PlayerState.UnitState) -> bool:
+	if unit == null or config == null or not config.melee_captures_city:
+		return false
+	return config.unit(unit.unit_type).can_capture
+
+
+func _would_capture_city(unit: PlayerState.UnitState, cell: Vector2i) -> bool:
+	if not _can_capture_cities(unit):
+		return false
+	var city := city_at_cell(cell)
+	if city == null or city.player == unit.owner or city.hp > 0:
+		return false
+	return _military_on(cell) == null
+
+
+func _capturable_settler(unit: PlayerState.UnitState, cell: Vector2i) -> PlayerState.UnitState:
+	if unit == null or config == null or not config.capture_lone_settler:
+		return null
+	if not config.unit(unit.unit_type).combatant:
+		return null
+	var city := city_at_cell(cell)
+	if city != null and city.player != unit.owner and not _would_capture_city(unit, cell):
+		return null
+	return _lone_enemy_settler(unit, cell)
+
+
+func _lone_enemy_settler(unit: PlayerState.UnitState, cell: Vector2i) -> PlayerState.UnitState:
+	var found: PlayerState.UnitState = null
+	for player in players:
+		for other in player.units:
+			if other == unit or other.cell != cell:
+				continue
+			if other.owner == unit.owner or config.unit(other.unit_type).combatant:
+				return null
+			if found != null:
+				return null
+			found = other
+	return found
+
+
+func _military_on(cell: Vector2i) -> PlayerState.UnitState:
+	if config == null:
+		return null
+	for player in players:
+		for other in player.units:
+			if other.cell == cell and config.unit(other.unit_type).combatant:
+				return other
+	return null
+
+
+func _capture_settler(taker: PlayerState.UnitState, settler: PlayerState.UnitState) -> void:
+	if settler.owner >= 0 and settler.owner < players.size():
+		players[settler.owner].units.erase(settler)
+	settler.owner = taker.owner
+	players[taker.owner].units.append(settler)
+
+
+func _apply_city_capture(taker: PlayerState.UnitState, city: MapCity) -> void:
+	city.player = taker.owner
+	city.population = maxi(config.capture_population_min, city.population - config.capture_population_loss)
+	city.hp = clampi(roundi(float(city.max_hp) * config.capture_hp_fraction), 0, city.max_hp)
+	city.queue.clear()
+	city.production_stored = 0
+	city.attacked = false
+	for cell in territory_cells(city):
+		_owners[cell] = taker.owner
+
+
+func _heal_cities() -> void:
+	if config == null:
+		return
+	for city in cities:
+		var skip := config.city_heals_if_not_attacked and city.attacked
+		if not skip:
+			city.hp = mini(city.max_hp, city.hp + config.city_heal)
+		city.attacked = false
+
+
+func _city_blow(attacker: PlayerState.UnitState, city: MapCity) -> int:
+	return Combat.damage(config, float(config.unit(attacker.unit_type).attack), _city_defense_strength(city))
+
+
+func _city_counter(city: MapCity, attacker: PlayerState.UnitState) -> int:
+	return Combat.damage(config, _city_defense_strength(city), float(config.unit(attacker.unit_type).attack))
+
+
+func _city_defense_strength(city: MapCity) -> float:
+	var on_hills := map != null and map.land_at(city.cell) == "hills"
+	return Combat.defender_strength(config, float(config.city_defense), on_hills, false)
 
 
 ## First free passable tile, preferring the anchor, then nearer tiles, then smaller q, then smaller r.

@@ -100,6 +100,7 @@ var _spell_buttons: Dictionary = {}
 @onready var _end_warning: Label = %EndTurnWarning
 @onready var _city_panel: PanelContainer = %CityPanel
 @onready var _city_name: Label = %CityName
+@onready var _city_hp: Label = %CityHp
 @onready var _city_food: Label = %CityFood
 @onready var _city_production: Label = %CityProduction
 @onready var _city_mana: Label = %CityMana
@@ -337,16 +338,8 @@ func _move_at_screen(screen: Vector2) -> void:
 	var cell := _cell_at_screen(screen)
 	if not Hex.in_map(Hex.offset_to_axial(cell), _config.map_width, _config.map_height):
 		return
-	if setup.fog.unit_visible(unit.owner, cell):
-		var enemy := setup.enemy_at(unit, cell)
-		if enemy != null:
-			var reason := setup.attack_unit(unit, enemy)
-			_cancel_end_confirm()
-			if reason.is_empty():
-				_refresh_board()
-			else:
-				_refresh_selection()
-			return
+	if setup.fog.unit_visible(unit.owner, cell) and _engage(unit, cell):
+		return
 	if not setup.reachable_tiles(unit).has(cell):
 		return
 	setup.move_unit(unit, cell)
@@ -354,7 +347,40 @@ func _move_at_screen(screen: Vector2) -> void:
 	_refresh_board()
 
 
+## Capture-move first, then a military unit, then the city, then a lone settler.
+## Returns true when the click was an attack or a capture, so it does not also move.
+func _engage(unit: PlayerState.UnitState, cell: Vector2i) -> bool:
+	if setup.capture_destination(unit, cell) and setup.reachable_tiles(unit).has(cell):
+		setup.move_unit(unit, cell)
+		_cancel_end_confirm()
+		_refresh_board()
+		return true
+	var enemy := setup.enemy_at(unit, cell)
+	if enemy != null and _config.unit(enemy.unit_type).combatant and setup.can_attack(unit, enemy).is_empty():
+		return _resolve_strike(setup.attack_unit(unit, enemy))
+	var city := setup.city_at_cell(cell)
+	if city != null and city.player != unit.owner and setup.can_attack_city(unit, city).is_empty():
+		return _resolve_strike(setup.attack_city(unit, city))
+	if enemy != null and setup.can_attack(unit, enemy).is_empty():
+		return _resolve_strike(setup.attack_unit(unit, enemy))
+	if enemy != null or (city != null and city.player != unit.owner):
+		_cancel_end_confirm()
+		_refresh_selection()
+		return true
+	return false
+
+
+func _resolve_strike(reason: String) -> bool:
+	_cancel_end_confirm()
+	if reason.is_empty():
+		_refresh_board()
+	else:
+		_refresh_selection()
+	return true
+
+
 func _refresh_board() -> void:
+	_drop_lost_city_selection()
 	_paint_map()
 	_fog.show_fog(setup, _config, _map)
 	_refresh_actors()
@@ -362,6 +388,19 @@ func _refresh_board() -> void:
 	_refresh_turn()
 	_refresh_selection()
 	_refresh_city_panel()
+
+
+func _drop_lost_city_selection() -> void:
+	if setup == null:
+		return
+	if _selected_city_id >= 0:
+		var selected := setup.city_by_id(_selected_city_id)
+		if selected == null or selected.player != setup.human_index:
+			_selected_city_id = -1
+	if _panel_city_id >= 0:
+		var shown := setup.city_by_id(_panel_city_id)
+		if shown == null or shown.player != setup.human_index:
+			_panel_city_id = -1
 
 
 func _refresh_turn() -> void:
@@ -535,6 +574,12 @@ func _refresh_actors() -> void:
 		mat.set_shader_parameter("team_color", Color.html(setup.players[city.player].color))
 		sprite.material = mat
 		(marker.get_node("Name") as Label).text = city.city_name
+		var hp_label := marker.get_node("Hp") as Label
+		hp_label.text = "%d / %d" % [city.hp, city.max_hp]
+		var hp_color := Color(0.96, 0.95, 0.9, 1)
+		if city.hp <= 0:
+			hp_color = Color(0.95, 0.35, 0.28, 1)
+		hp_label.add_theme_color_override("font_color", hp_color)
 		_actors.add_child(marker)
 		for building in city.buildings:
 			var placed := building as MapCity.Building
@@ -758,10 +803,20 @@ func _combat_hover_text() -> String:
 		return ""
 	if not setup.fog.unit_visible(unit.owner, _hovered):
 		return ""
+	if setup.capture_destination(unit, _hovered) and setup.reachable_tiles(unit).has(_hovered):
+		return "Capture"
 	var enemy := setup.enemy_at(unit, _hovered)
-	if enemy == null:
-		return ""
-	var preview := setup.preview_attack(unit, enemy)
+	if enemy != null and _config.unit(enemy.unit_type).combatant:
+		return _preview_line(setup.preview_attack(unit, enemy))
+	var city := setup.city_at_cell(_hovered)
+	if city != null and city.player != unit.owner:
+		return _preview_line(setup.preview_city(unit, city))
+	if enemy != null:
+		return _preview_line(setup.preview_attack(unit, enemy))
+	return ""
+
+
+func _preview_line(preview: Dictionary) -> String:
 	if bool(preview["ok"]):
 		return "Damage %d   Counter %d" % [int(preview["damage"]), int(preview["counter"])]
 	return str(preview["reason"])
@@ -771,7 +826,7 @@ func _apply_combat_preview() -> void:
 	var text := _combat_hover_text()
 	_combat_preview.text = text
 	var color := Color(0.96, 0.95, 0.9, 1)
-	if not text.is_empty() and not text.begins_with("Damage"):
+	if not text.is_empty() and not text.begins_with("Damage") and text != "Capture":
 		color = Color(0.95, 0.62, 0.48, 1)
 	_combat_preview.add_theme_color_override("font_color", color)
 
@@ -942,6 +997,7 @@ func _refresh_city_panel(notice: String = "") -> void:
 		button.disabled = not city_selected
 	var snapshot: Dictionary = setup.city_yields(city)
 	_city_name.text = city.city_name
+	_city_hp.text = "HP %d / %d" % [city.hp, city.max_hp]
 	_city_food.text = "Food %d" % int(snapshot["food"])
 	_city_production.text = "Production %d" % int(snapshot["production"])
 	_city_mana.text = "Mana %d" % int(snapshot["mana"])

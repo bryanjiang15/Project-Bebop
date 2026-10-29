@@ -100,10 +100,10 @@
     "fortify_enabled": true,
     "fortify_defense_bonus": 0.25,
     "end_turn_warns_if_unordered": true,
-    "scout": {"hp": 50, "attack": 5, "defense": 5, "move": 3, "cost": 20, "range": 0, "combatant": true, "population_cost": 0, "min_city_size": 0},
-    "warrior": {"hp": 100, "attack": 20, "defense": 20, "move": 2, "cost": 30, "range": 0, "combatant": true, "population_cost": 0, "min_city_size": 0},
-    "archer": {"hp": 100, "attack": 25, "defense": 12, "move": 2, "cost": 45, "range": 2, "combatant": true, "population_cost": 0, "min_city_size": 0},
-    "settler": {"hp": 0, "attack": 0, "defense": 0, "move": 2, "cost": 40, "range": 0, "combatant": false, "population_cost": 1, "min_city_size": 2}
+    "scout": {"hp": 50, "attack": 5, "defense": 5, "move": 3, "cost": 20, "range": 0, "combatant": true, "population_cost": 0, "min_city_size": 0, "can_capture": false},
+    "warrior": {"hp": 100, "attack": 20, "defense": 20, "move": 2, "cost": 30, "range": 0, "combatant": true, "population_cost": 0, "min_city_size": 0, "can_capture": true},
+    "archer": {"hp": 100, "attack": 25, "defense": 12, "move": 2, "cost": 45, "range": 2, "combatant": true, "population_cost": 0, "min_city_size": 0, "can_capture": false},
+    "settler": {"hp": 0, "attack": 0, "defense": 0, "move": 2, "cost": 40, "range": 0, "combatant": false, "population_cost": 1, "min_city_size": 2, "can_capture": false}
   },
   "combat": {
     "base_damage": 30,

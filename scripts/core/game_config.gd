@@ -11,7 +11,7 @@ const LAND_FIELDS: PackedStringArray = ["food", "production", "move_cost", "defe
 const SPELL_IDS: PackedStringArray = ["grow_forest", "raise_hills", "carve_river", "ignite", "restore_plains"]
 const SPELL_FIELDS: PackedStringArray = ["name", "shape", "radius", "length", "mana", "range", "cooldown", "land"]
 const UNIT_IDS: PackedStringArray = ["scout", "warrior", "archer", "settler"]
-const UNIT_FIELDS: PackedStringArray = ["hp", "attack", "defense", "move", "cost", "range", "combatant", "population_cost", "min_city_size"]
+const UNIT_FIELDS: PackedStringArray = ["hp", "attack", "defense", "move", "cost", "range", "combatant", "population_cost", "min_city_size", "can_capture"]
 
 var turn_limit: int
 var player_count: int
@@ -172,6 +172,7 @@ class UnitStats extends RefCounted:
 	var combatant: bool
 	var population_cost: int
 	var min_city_size: int
+	var can_capture: bool
 
 	func to_dict() -> Dictionary:
 		return {
@@ -184,6 +185,7 @@ class UnitStats extends RefCounted:
 			"combatant": combatant,
 			"population_cost": population_cost,
 			"min_city_size": min_city_size,
+			"can_capture": can_capture,
 		}
 
 
@@ -682,6 +684,7 @@ func _read(data: Dictionary) -> void:
 		unit_stats.combatant = _bool(data, prefix + ".combatant")
 		unit_stats.population_cost = _int(data, prefix + ".population_cost")
 		unit_stats.min_city_size = _int(data, prefix + ".min_city_size")
+		unit_stats.can_capture = _bool(data, prefix + ".can_capture")
 		units[unit_id] = unit_stats
 	combat_base_damage = _int(data, "combat.base_damage")
 	strength_exponent_base = _float(data, "combat.strength_exponent_base")

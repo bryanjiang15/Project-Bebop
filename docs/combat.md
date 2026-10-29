@@ -31,7 +31,7 @@ A unit at 0 HP is removed. The attacker does not step onto a tile this emptied. 
 
 ## Who can be attacked
 
-The target has to be another player's unit on a tile the attacker can currently see. Own units are rejected. A settler is rejected with `Cannot attack a settler`. Cities are not targets. A tile holds one unit, so that unit is the target.
+The target has to be another player's unit or city on a tile the attacker can currently see. Own units are rejected. A melee strike rejects a settler with `Cannot attack a settler`. A ranged strike against a lone settler is legal and destroys that settler through `_remove_unit`, the same path volcanic damage uses, because a settler has no HP pool. A settler sharing a tile with a military unit is not a target until that unit is gone. A tile may hold one military unit and, after a capture, one civilian.
 
 Other reasons, shown in the unit panel and the hover tooltip:
 
@@ -40,12 +40,37 @@ Other reasons, shown in the unit panel and the hover tooltip:
 - `Cannot attack your own unit`
 - `Cannot see that unit`
 - `Out of range`
+- `Cannot attack your own city`
+- `Cannot see that city`
+- `A unit defends that city`
 
 An unseen unit is not named. The view does not offer it as a target.
 
+## Cities
+
+A city stores HP. Founding sets it to `city.hp` (100), which is also its max. Defense strength is `city.defense` (15). Hills multiply that strength the same way they multiply a unit. A city does not fortify and does not strike on its own turn. Melee against a city takes counter-damage from that strength. A ranged attack takes none while `combat.ranged_takes_no_counter` is true. Scouts use the same rule.
+
+The city's HP never drops below 0, and 0 does not remove the city. While `combat.archers_can_zero_city_hp` is false, a ranged hit that would reach 0 leaves the city at 1 if it still had HP. A military unit standing on the city tile is the target instead. The city attack is rejected with `A unit defends that city`.
+
+`%CombatPreview` and the hover tooltip show `Damage N   Counter N` for a city the same way they do for a unit. The city marker draws `current / max` under the name. At 0 HP that line is red. `%CityPanel` shows `HP current / max` for the human's city.
+
+## Capturing a city
+
+`units.<type>.can_capture` is true for the warrior and false for the scout, the archer, and the settler. `combat.melee_captures_city` has to be true as well. With both, that unit may move onto an enemy city at 0 HP. The move has to be reachable, then movement is set to 0. A scout or an archer cannot enter. A healthy city blocks movement. A military unit on the tile blocks the capture until that unit is dead.
+
+On capture the city changes owner. Buildings stay. Every tile that city owns changes owner with it. Population drops by `city.capture_population_loss` and not below `city.capture_population_min`. HP becomes `roundi(max_hp × city.capture_hp_fraction)`, clamped to the max. The queue and the stored production are cleared. The food bar and the border clock stay. The attacked flag clears, so the new owner can heal it on a later End Turn. Fog recomputes in that same step: the capturer gains the city disk, and the previous owner loses it. `GameSetup.mana_per_turn` follows the new owner immediately. The top bar, borders, and markers refresh through `_refresh_board`. If the open city panel belonged to the previous owner, it closes. A player left with no cities keeps their units.
+
+## Capturing a settler
+
+`units.capture_lone_settler` lets any military unit, including a scout, move onto a tile that holds only an enemy settler. The settler becomes the mover's unit and stays a civilian. The mover ends with 0 movement. The two share the tile. Spawn and ordinary movement still reject a second unit, so this stack is the capture exception, not a general stack rule.
+
+Right-click prefers that move when the tile is reachable. When it is not, and the attacker is ranged and in range, the click is an attack and the settler is removed. A settler on an enemy city is not walked onto unless the city itself is being captured in that same move. Right-click on a living enemy city attacks the city.
+
 ## Healing
 
-Healing runs inside `end_turn`, after every city resolves and after each player's mana pool is paid, and before volcanic damage. There is one global turn, so every player's idle units heal on that clock. A unit heals `units.heal` (10) when `units.heal_only_if_idle` is true and the unit did not move or attack this turn. Skip and Fortify do not count as acting, so those units heal. The result is capped at max HP. City healing is not applied.
+Healing runs inside `end_turn`, after every city resolves and after each player's mana pool is paid, and before volcanic damage. There is one global turn, so every player's idle units and cities heal on that clock. A unit heals `units.heal` (10) when `units.heal_only_if_idle` is true and the unit did not move or attack this turn. Skip and Fortify do not count as acting, so those units heal. The result is capped at max HP.
+
+A city heals `city.heal` (10) in that same gap, capped at max HP. While `city.heals_if_not_attacked` is true, a city that was attacked since its owner's last turn does not heal. The flag then clears. The next End Turn heals it if nobody attacked it again. An attack that spends the attacker's movement therefore leaves the city at 0 through the following turn, which is the turn a capture move can be spent. Ending that following turn without a new attack lets the city heal off 0. With the flag off, a city heals even after an attack. Volcanic damage does not touch city HP.
 
 ## Volcanic ground
 
@@ -67,7 +92,7 @@ Skip (`skip_unit`, S) and Fortify (`fortify_unit`, F) are the orders. Fortify se
 
 ## View
 
-`%SkipButton` and `%FortifyButton` sit in the unit panel with the HP, strength, moves, and order lines. `%VolcanicWarning` is the amber hazard line under that summary. `%CombatPreview` and the hover tooltip show `Damage N   Counter N` over a legal target. Attackable tiles use the move-highlight scene tinted red. Reachable tiles stay green. A right click on a visible enemy attacks and does not move. A right click on an empty reachable tile still moves. A left click still selects.
+`%SkipButton` and `%FortifyButton` sit in the unit panel with the HP, strength, moves, and order lines. `%VolcanicWarning` is the amber hazard line under that summary. `%CombatPreview` and the hover tooltip show `Damage N   Counter N` over a legal unit or city. A reachable capture shows `Capture`. Attackable tiles use the move-highlight scene tinted red. A tile that would capture a city or a settler stays green. A right click captures when that move is legal, otherwise attacks a visible enemy, and does not also step. A right click on an empty reachable tile still moves. A left click still selects.
 
 A left click selects the unit on that tile. If the tile also has the human's city, the next click selects the city.
 
@@ -75,4 +100,4 @@ Each sprite sits on the cell center. `scenes/actors/hp_bar.tscn` is instanced on
 
 ## Out of scope
 
-City attacks, capturing a city or a settler, stepping onto a killed unit's tile, and rival AI.
+Stepping onto a tile emptied by a killing blow, elimination, rival AI, and a combat log.

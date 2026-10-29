@@ -17,6 +17,7 @@ static func reachable(
 	cost_of: Callable,
 	blocked: Callable,
 	allow_over: bool,
+	ends_move: Callable = Callable(),
 ) -> Dictionary:
 	var best: Dictionary = {origin: mp}
 	var queue: Array[Vector2i] = [origin]
@@ -48,6 +49,10 @@ static func reachable(
 				next_remaining = 0
 			else:
 				continue
+			# A capture tile is entered, then the move ends. The search does not
+			# walk through a lone settler or a city that this step would capture.
+			if ends_move.is_valid() and bool(ends_move.call(next)):
+				next_remaining = 0
 			if best.has(next) and int(best[next]) >= next_remaining:
 				continue
 			best[next] = next_remaining

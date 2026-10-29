@@ -44,6 +44,10 @@ Unit vision is a disk of `fog.unit_vision`. City vision is a disk of territory r
 
 Unrevealed cells have no land atlas. Revealed cells that are not currently visible keep their land and are dimmed. Rival units are drawn only while visible. Rival cities and territory edges are drawn once the relevant tile has been explored, and they remain as last-known information.
 
+## Capture moves
+
+A healthy enemy city blocks entry. At 0 HP, a unit with `can_capture` may enter, and that step ends movement. Any military unit may enter a tile that holds only an enemy settler when `units.capture_lone_settler` is true. That step also ends movement. The rules are in `docs/combat.md`.
+
 ## Follow-ups
 
-Settler training and border growth are in `docs/cities.md`. The queue calls `spawn_unit`. Combat and capture are tickets 14 and 15. AI turns are later.
+Settler training and border growth are in `docs/cities.md`. The queue calls `spawn_unit`. AI turns are later.
