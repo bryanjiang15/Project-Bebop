@@ -27,6 +27,7 @@ func _init() -> void:
 	_test_rival_land_updates()
 	_test_land_effects()
 	_test_end_turn_key()
+	_test_win_loss()
 	print("\nPassed: %d  Failed: %d" % [_passed, _failed])
 	quit(1 if _failed > 0 else 0)
 
@@ -1228,9 +1229,9 @@ func _test_city_capture() -> void:
 	_ok(game.mana_per_turn(0) == CityRules.city_mana(game.config, city) and game.mana_per_turn(1) == 0, "mana per turn moves to the new owner")
 	_ok(game.fog.sight(0, far) == FogState.Sight.VISIBLE, "the capturer gains the city's vision")
 	_ok(game.fog.sight(1, far) == FogState.Sight.REVEALED, "the previous owner keeps the tile as revealed")
-	_ok(game.players[1].units.has(rival_warrior) and game.cities.has(city), "a player with no cities keeps their units")
+	_ok(game.players[1].eliminated and not game.players[1].units.has(rival_warrior) and game.cities.has(city), "capturing the last city with no settler eliminates that player and removes their units")
 	game.end_turn()
-	_ok(game.players[1].units.has(rival_warrior), "the next turn does not eliminate that player")
+	_ok(game.players[1].eliminated and not game.players[1].units.has(rival_warrior) and game.result == null, "the next turn leaves that player eliminated")
 
 	game.config.city_hp = 80
 	game.config.capture_hp_fraction = 0.25
@@ -1879,6 +1880,8 @@ func _test_volcanic_damage() -> void:
 	var game := _blank_setup("plains")
 	var origin := Vector2i(6, 6)
 	var warrior := game.spawn_unit(0, "warrior", origin)
+	var keeper := game.spawn_unit(0, "settler", Vector2i(2, 2))
+	_ok(keeper != null, "a settler elsewhere keeps the human in the game when the warrior dies")
 	game.map.set_land(origin, "volcanic")
 	game.end_turn()
 	_ok(warrior.hp == warrior.max_hp - game.config.volcanic_damage, "idle full HP on volcanic ground loses the hazard after the capped heal")
@@ -1991,3 +1994,220 @@ func _test_volcanic_damage() -> void:
 	_ok(ignited.map.land_at(spot) == "volcanic" and ignited_unit.cell == spot and ignited_unit.hp == ignited_hp, "ignite leaves the unit unhurt until End Turn")
 	ignited.end_turn()
 	_ok(ignited_unit.hp == ignited_hp - ignited.config.volcanic_damage, "the next End Turn damages the unit on the new volcanic tile")
+
+
+func _test_win_loss() -> void:
+	print("[win/loss]")
+	var cfg: GameConfig = GameConfig.load_file()
+	var started := GameSetup.start_with_seed(cfg, 12345)
+	_ok(started != null and started.result == null and MatchResult.latest == null, "a new game has no ending")
+	_ok(started.turn == 1, "a new game starts on turn 1")
+	for player in started.players:
+		_ok(not player.eliminated and started.settler_count(player.index) >= 1, "player %d starts with a settler and is not eliminated" % player.index)
+		_ok(started.score(player.index) == 0, "player %d starts at score 0" % player.index)
+
+	var game := _blank_setup("plains")
+	var origin := Vector2i(10, 8)
+	var water := _step(origin, Hex.EAST, 1)
+	game.map.set_land(water, "water")
+	var city := game.found_city(game.spawn_unit(0, "settler", origin))
+	_ok(city != null and not game.players[0].eliminated and game.result == null, "founding is not an elimination")
+	_ok(game.owner_at(origin) == 0, "the city center counts as a controlled tile")
+	_ok(game.owner_at(water) == 0, "claimed water counts as a controlled tile")
+	_ok(game.tile_count(0) == 7 and game.territory_cells(city).size() == 7, "radius 1 is 7 tiles, water and center included")
+	_ok(game.city_count(0) == 1 and game.population_total(0) == 1, "one city and its population")
+	_ok(game.score(0) == 7 * game.config.score_per_tile + game.config.score_per_city + game.config.score_per_population, "default score weights")
+	_ok(game.score(0) == 20, "default score is 20")
+	game.config.score_per_tile = 4
+	game.config.score_per_city = 5
+	game.config.score_per_population = 6
+	_ok(game.score(0) == 7 * 4 + 5 + 6, "tuned score weights")
+	_ok(game.score_line(0) == "You %d" % game.score(0), "the top-bar line uses the live score")
+	game.config.score_per_tile = 1
+	game.config.score_per_city = 10
+	game.config.score_per_population = 3
+	var before_spell := game.score(0)
+	game.players[0].mana = 100
+	game.config.spells_require_revealed_target = false
+	_ok(game.cast_spell(0, "grow_forest", origin, Hex.EAST).is_empty(), "a spell resolves")
+	_ok(game.score(0) == before_spell and game.owner_at(origin) == 0, "a spell that keeps ownership leaves the score unchanged")
+
+	var kept := _blank_setup("plains")
+	var kept_city := kept.found_city(kept.spawn_unit(1, "settler", origin))
+	var spare := kept.spawn_unit(1, "settler", Vector2i(2, 2))
+	var guard := kept.spawn_unit(1, "warrior", Vector2i(16, 8))
+	kept_city.hp = 0
+	var taker := kept.spawn_unit(0, "warrior", _step(origin, Hex.EAST, 1))
+	kept.spawn_unit(0, "settler", Vector2i(2, 6))
+	_ok(kept.move_unit(taker, origin), "the city is captured while a settler remains")
+	_ok(not kept.players[1].eliminated and kept.players[1].units.has(spare) and kept.players[1].units.has(guard), "a settler keeps the player and their units in the game")
+	_ok(kept.result == null, "one rival with a settler does not end the game")
+
+	var captured := _blank_setup("plains")
+	var lone := captured.spawn_unit(1, "settler", Vector2i(8, 8))
+	var leftover := captured.spawn_unit(1, "warrior", Vector2i(12, 8))
+	var captor := captured.spawn_unit(0, "warrior", _step(lone.cell, Hex.WEST, 1))
+	captured.spawn_unit(0, "settler", Vector2i(2, 2))
+	captured.spawn_unit(2, "settler", Vector2i(2, 8))
+	_ok(captured.move_unit(captor, lone.cell), "the warrior captures the settler")
+	_ok(lone.owner == 0 and captured.players[1].eliminated and not captured.players[1].units.has(leftover), "settler capture eliminates a player with no city and removes their units")
+	_ok(captured.result == null and captured.turn == 1, "another rival still in the game keeps it going")
+
+	var volcano := _blank_setup("plains")
+	var doomed := volcano.spawn_unit(1, "settler", Vector2i(6, 6))
+	volcano.map.set_land(doomed.cell, "volcanic")
+	var parked := volcano.spawn_unit(1, "warrior", Vector2i(10, 6))
+	volcano.spawn_unit(0, "settler", Vector2i(2, 2))
+	volcano.spawn_unit(2, "settler", Vector2i(2, 8))
+	volcano.end_turn()
+	_ok(volcano.players[1].eliminated and not volcano.players[1].units.has(doomed) and not volcano.players[1].units.has(parked), "volcanic death of the last settler eliminates that player at End Turn")
+	_ok(volcano.result == null and volcano.turn == 2, "eliminating one rival does not end the turn-limit clock")
+
+	var conquest := _blank_setup("plains")
+	conquest.turn = 10
+	conquest.spawn_unit(0, "settler", Vector2i(2, 2))
+	var first := conquest.spawn_unit(1, "settler", Vector2i(8, 8))
+	var second := conquest.spawn_unit(2, "settler", Vector2i(14, 8))
+	var army := conquest.spawn_unit(2, "warrior", Vector2i(16, 8))
+	var hunter := conquest.spawn_unit(0, "warrior", _step(first.cell, Hex.WEST, 1))
+	_ok(conquest.move_unit(hunter, first.cell) and conquest.players[1].eliminated and conquest.result == null, "the first rival's elimination is not yet conquest")
+	var beside := _step(hunter.cell, Hex.EAST, 1)
+	second.cell = beside
+	conquest._refresh_fog()
+	hunter.mp = conquest.config.unit("warrior").move
+	_ok(conquest.move_unit(hunter, beside), "the warrior captures the last rival settler")
+	_ok(conquest.players[2].eliminated and not conquest.players[2].units.has(army), "the last rival's military is removed")
+	_ok(conquest.result != null and conquest.result.human_won and conquest.result.ending == MatchResult.REASON_CONQUEST, "conquest wins immediately, before turn 50")
+	_ok(conquest.turn == 10, "conquest does not advance the turn")
+	var mana_before := conquest.players[0].mana
+	conquest.end_turn()
+	_ok(conquest.turn == 10 and conquest.players[0].mana == mana_before, "End Turn does nothing after the game is over")
+	_ok(conquest.move_unit(hunter, _step(beside, Hex.EAST, 1)) == false, "a move is rejected after the game is over")
+	_ok(conquest.cast_spell(0, "grow_forest", Vector2i(4, 4), Hex.EAST) == GameSetup.REASON_OVER, "a spell is rejected after the game is over")
+	_ok(conquest.result.rows.size() == 3, "the result lists every player")
+	var saw_conquest := false
+	var saw_eliminated := 0
+	for row in conquest.result.rows:
+		_ok(row.score == row.tiles * 1 + row.cities * 10 + row.population * 3, "row score matches the formula")
+		if row.reason == MatchResult.REASON_CONQUEST and row.human:
+			saw_conquest = true
+		if row.reason == MatchResult.REASON_ELIMINATED:
+			saw_eliminated += 1
+	_ok(saw_conquest and saw_eliminated == 2, "conquest names the winner and the eliminated rivals")
+
+	var loss := _blank_setup("plains")
+	var human_settler := loss.spawn_unit(0, "settler", Vector2i(8, 8))
+	var human_warrior := loss.spawn_unit(0, "warrior", Vector2i(12, 8))
+	var rival_warrior := loss.spawn_unit(1, "warrior", _step(human_settler.cell, Hex.EAST, 1))
+	loss.spawn_unit(1, "settler", Vector2i(2, 2))
+	loss.spawn_unit(2, "settler", Vector2i(2, 8))
+	_ok(loss.move_unit(rival_warrior, human_settler.cell), "a rival captures the human settler")
+	_ok(loss.players[0].eliminated and not loss.players[0].units.has(human_warrior), "the human's leftover units are removed")
+	_ok(loss.result != null and not loss.result.human_won and loss.result.ending == MatchResult.REASON_ELIMINATED, "eliminating the human is Defeat")
+	_ok(loss.turn == 1, "defeat does not advance the turn")
+	var human_row: MatchResult.Row = loss.result.rows[0]
+	_ok(human_row.reason == MatchResult.REASON_ELIMINATED, "the human's row says Eliminated")
+
+	var limit := _blank_setup("plains")
+	limit.spawn_unit(0, "settler", Vector2i(4, 4))
+	limit.spawn_unit(1, "settler", Vector2i(8, 4))
+	limit.spawn_unit(2, "settler", Vector2i(12, 4))
+	limit.turn = 50
+	limit.end_turn()
+	_ok(limit.result != null and limit.result.ending == MatchResult.REASON_SCORE and not limit.result.human_won, "turn 50 with a tie is Defeat")
+	_ok(limit.turn == 50, "the turn counter never reaches 51")
+	limit.end_turn()
+	_ok(limit.turn == 50, "another End Turn stays on 50")
+
+	var early := _blank_setup("plains")
+	early.config.turn_limit = 3
+	early.spawn_unit(0, "settler", Vector2i(4, 4))
+	early.spawn_unit(1, "settler", Vector2i(8, 4))
+	early.spawn_unit(2, "settler", Vector2i(12, 4))
+	early.end_turn()
+	_ok(early.turn == 2 and early.result == null, "turn 1 of a 3-turn game advances")
+	early.end_turn()
+	_ok(early.turn == 3 and early.result == null, "the limit turn is still playable")
+	early.end_turn()
+	_ok(early.result != null and early.result.ending == MatchResult.REASON_SCORE and early.turn == 3, "tuned turn_limit 3 ends on turn 3")
+
+	var scored := _blank_setup("plains")
+	var human_city := scored.found_city(scored.spawn_unit(0, "settler", Vector2i(4, 4)))
+	var rival_city := scored.found_city(scored.spawn_unit(1, "settler", Vector2i(10, 4)))
+	scored.spawn_unit(2, "settler", Vector2i(4, 12))
+	_ok(human_city != null and rival_city != null, "two cities can tie")
+	_ok(scored.score(0) == scored.score(1) and scored.tile_count(0) == scored.tile_count(1) and scored.city_count(0) == scored.city_count(1), "the cities tie on score, tiles, and city count")
+	scored.turn = scored.config.turn_limit
+	scored.end_turn()
+	_ok(scored.result != null and not scored.result.human_won and scored.result.ending == MatchResult.REASON_SCORE, "an even score at the limit eliminates the human on the last tie-break")
+	_ok(scored.turn == scored.config.turn_limit, "a score ending leaves the turn on the limit")
+
+	var ahead := _blank_setup("plains")
+	ahead.found_city(ahead.spawn_unit(0, "settler", Vector2i(4, 4)))
+	ahead.spawn_unit(1, "settler", Vector2i(10, 4))
+	ahead.spawn_unit(2, "settler", Vector2i(4, 12))
+	ahead.turn = ahead.config.turn_limit
+	ahead.end_turn()
+	_ok(ahead.result != null and ahead.result.human_won and ahead.result.ending == MatchResult.REASON_SCORE, "a strictly higher score wins at the turn limit")
+
+	var human_lead := {"player": 0, "score": 20, "tiles": 7, "cities": 1}
+	var rival_low := {"player": 1, "score": 10, "tiles": 20, "cities": 3}
+	var rival_tiles := {"player": 1, "score": 20, "tiles": 8, "cities": 0}
+	var rival_cities := {"player": 1, "score": 20, "tiles": 7, "cities": 2}
+	var rival_even := {"player": 1, "score": 20, "tiles": 7, "cities": 1}
+	var order: PackedStringArray = PackedStringArray(["tiles", "cities", "human_loses"])
+	_ok(ScoreRules.ranks_above(human_lead, rival_low, order, 0), "a higher score ranks first")
+	_ok(ScoreRules.ranks_above(rival_tiles, human_lead, order, 0) and not ScoreRules.ranks_above(human_lead, rival_tiles, order, 0), "equal score, more tiles wins")
+	_ok(ScoreRules.ranks_above(rival_cities, human_lead, order, 0) and not ScoreRules.ranks_above(human_lead, rival_cities, order, 0), "equal score and tiles, more cities wins")
+	_ok(not ScoreRules.ranks_above(human_lead, rival_even, order, 0) and ScoreRules.ranks_above(rival_even, human_lead, order, 0), "a full tie makes the human lose")
+	_ok(ScoreRules.human_is_first([human_lead, rival_low, {"player": 2, "score": 0, "tiles": 0, "cities": 0}], order, 0), "the human is first only when they beat every rival")
+	_ok(not ScoreRules.human_is_first([human_lead, rival_even], order, 0), "one tied rival is enough for the human to lose")
+
+	var tiled := _blank_setup("plains")
+	tiled.config.score_per_tile = 0
+	tiled.config.score_per_city = 0
+	tiled.config.score_per_population = 0
+	var wide := tiled.found_city(tiled.spawn_unit(0, "settler", Vector2i(4, 4)))
+	var narrow := tiled.found_city(tiled.spawn_unit(1, "settler", Vector2i(10, 4)))
+	tiled.spawn_unit(2, "settler", Vector2i(4, 12))
+	var extra := _step(wide.cell, Hex.EAST, 2)
+	tiled._claim_cell(wide, extra)
+	_ok(tiled.owner_at(extra) == 0, "an extra tile can be claimed for the tie-break")
+	_ok(tiled.tile_count(0) > tiled.tile_count(1) and tiled.score(0) == tiled.score(1), "scores tie while the human holds more tiles")
+	tiled.turn = tiled.config.turn_limit
+	tiled.end_turn()
+	_ok(tiled.result != null and tiled.result.human_won, "more tiles wins a score tie on the turn limit")
+
+	var civic := _blank_setup("plains")
+	civic.config.score_per_tile = 0
+	civic.config.score_per_city = 0
+	civic.config.score_per_population = 0
+	civic.config.tie_order = PackedStringArray(["cities", "tiles", "human_loses"])
+	civic.found_city(civic.spawn_unit(0, "settler", Vector2i(4, 4)))
+	civic.found_city(civic.spawn_unit(1, "settler", Vector2i(10, 4)))
+	civic.found_city(civic.spawn_unit(1, "settler", Vector2i(16, 4)))
+	civic.spawn_unit(2, "settler", Vector2i(4, 12))
+	_ok(civic.city_count(1) > civic.city_count(0) and civic.score(0) == civic.score(1), "scores tie while the rival has more cities")
+	civic.turn = civic.config.turn_limit
+	civic.end_turn()
+	_ok(civic.result != null and not civic.result.human_won and civic.result.ending == MatchResult.REASON_SCORE, "more cities wins when that tie-break comes first")
+
+	var same_turn := _blank_setup("plains")
+	same_turn.turn = same_turn.config.turn_limit
+	same_turn.spawn_unit(0, "settler", Vector2i(2, 2))
+	var gone := same_turn.spawn_unit(2, "settler", Vector2i(8, 4))
+	var closer := same_turn.spawn_unit(0, "warrior", _step(gone.cell, Hex.EAST, 1))
+	_ok(same_turn.move_unit(closer, gone.cell) and same_turn.result == null, "one rival remains on the limit turn")
+	var last := same_turn.spawn_unit(1, "settler", Vector2i(6, 8))
+	same_turn.map.set_land(last.cell, "volcanic")
+	same_turn.end_turn()
+	_ok(same_turn.result != null and same_turn.result.human_won and same_turn.result.ending == MatchResult.REASON_CONQUEST, "conquest on the limit turn beats the score ending")
+	_ok(same_turn.turn == same_turn.config.turn_limit, "that conquest still does not reach the next turn")
+
+	var raw: Dictionary = GameConfig.read_json(GameConfig.PATH)
+	var missing_score: Dictionary = raw.duplicate(true)
+	(missing_score["score"] as Dictionary).erase("per_tile")
+	_ok(GameConfig.missing_paths(missing_score).has("score.per_tile"), "missing score.per_tile is reported")
+	var missing_ties: Dictionary = raw.duplicate(true)
+	(missing_ties["ties"] as Dictionary).erase("order")
+	_ok(GameConfig.missing_paths(missing_ties).has("ties.order"), "missing ties.order is reported")

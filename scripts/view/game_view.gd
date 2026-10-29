@@ -74,6 +74,7 @@ var _spell_id: String = ""
 var _spell_direction: int = Hex.EAST
 var _hover_local: Vector2 = Vector2.ZERO
 var _spell_buttons: Dictionary = {}
+var _leaving: bool = false
 
 @onready var _camera: Camera2D = %Camera
 @onready var _map: TileMapLayer = %Map
@@ -84,6 +85,9 @@ var _spell_buttons: Dictionary = {}
 @onready var _actors: Node2D = %Actors
 @onready var _turn_label: Label = %TurnLabel
 @onready var _mana_label: Label = %ManaLabel
+@onready var _score_0: Label = %Score0
+@onready var _score_1: Label = %Score1
+@onready var _score_2: Label = %Score2
 @onready var _spell_row: HBoxContainer = %SpellButtons
 @onready var _tooltip: Label = %Tooltip
 @onready var _tooltip_panel: PanelContainer = %TooltipPanel
@@ -139,13 +143,7 @@ func _ready() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if _config == null or setup == null:
-		return
-	if event.is_action_pressed("debug_victory"):
-		get_tree().change_scene_to_file("res://scenes/victory.tscn")
-		return
-	if event.is_action_pressed("debug_defeat"):
-		get_tree().change_scene_to_file("res://scenes/defeat.tscn")
+	if _config == null or setup == null or _leaving or setup.result != null:
 		return
 	if event.is_action_pressed("toggle_menu"):
 		if not _spell_id.is_empty():
@@ -228,7 +226,7 @@ func _process(delta: float) -> void:
 
 
 func _on_end_turn_pressed() -> void:
-	if setup == null:
+	if setup == null or _leaving or setup.result != null:
 		return
 	if _config.end_turn_warns_if_unordered and setup.has_unordered_moves(setup.human_index) and not _end_confirm:
 		_end_confirm = true
@@ -241,7 +239,7 @@ func _on_end_turn_pressed() -> void:
 
 
 func _on_skip_pressed() -> void:
-	if setup == null or _menu.visible:
+	if setup == null or _menu.visible or _leaving or setup.result != null:
 		return
 	var unit := _selected_unit()
 	if unit == null or not setup.skip_unit(unit):
@@ -251,7 +249,7 @@ func _on_skip_pressed() -> void:
 
 
 func _on_fortify_pressed() -> void:
-	if setup == null or _menu.visible:
+	if setup == null or _menu.visible or _leaving or setup.result != null:
 		return
 	var unit := _selected_unit()
 	if unit == null or not setup.fortify_unit(unit):
@@ -261,7 +259,7 @@ func _on_fortify_pressed() -> void:
 
 
 func _on_found_city_pressed() -> void:
-	if setup == null or _menu.visible:
+	if setup == null or _menu.visible or _leaving or setup.result != null:
 		return
 	var unit := _selected_unit()
 	if unit == null or not setup.can_found(unit).is_empty():
@@ -380,6 +378,9 @@ func _resolve_strike(reason: String) -> bool:
 
 
 func _refresh_board() -> void:
+	if setup != null and setup.result != null:
+		_show_result()
+		return
 	_drop_lost_city_selection()
 	_paint_map()
 	_fog.show_fog(setup, _config, _map)
@@ -407,7 +408,28 @@ func _refresh_turn() -> void:
 	_turn_label.text = "%d / %d" % [setup.turn, _config.turn_limit]
 	var human := setup.players[setup.human_index]
 	_mana_label.text = "Mana: %d (+%d/turn)" % [human.mana, setup.mana_per_turn(human.index)]
+	_refresh_scores()
 	_refresh_spells()
+
+
+func _refresh_scores() -> void:
+	var labels: Array[Label] = [_score_0, _score_1, _score_2]
+	for index in labels.size():
+		var label := labels[index]
+		var shown := index < setup.players.size()
+		label.visible = shown
+		if not shown:
+			continue
+		label.text = setup.score_line(index)
+		label.add_theme_color_override("font_color", Color.html(setup.players[index].color))
+
+
+func _show_result() -> void:
+	if _leaving or setup == null or setup.result == null:
+		return
+	_leaving = true
+	var path := "res://scenes/victory.tscn" if setup.result.human_won else "res://scenes/defeat.tscn"
+	get_tree().change_scene_to_file(path)
 
 
 func _refresh_selection() -> void:

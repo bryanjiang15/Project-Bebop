@@ -58,7 +58,7 @@ The city's HP never drops below 0, and 0 does not remove the city. While `combat
 
 `units.<type>.can_capture` is true for the warrior and false for the scout, the archer, and the settler. `combat.melee_captures_city` has to be true as well. With both, that unit may move onto an enemy city at 0 HP. The move has to be reachable, then movement is set to 0. A scout or an archer cannot enter. A healthy city blocks movement. A military unit on the tile blocks the capture until that unit is dead.
 
-On capture the city changes owner. Buildings stay. Every tile that city owns changes owner with it. Population drops by `city.capture_population_loss` and not below `city.capture_population_min`. HP becomes `roundi(max_hp × city.capture_hp_fraction)`, clamped to the max. The queue and the stored production are cleared. The food bar and the border clock stay. The attacked flag clears, so the new owner can heal it on a later End Turn. Fog recomputes in that same step: the capturer gains the city disk, and the previous owner loses it. `GameSetup.mana_per_turn` follows the new owner immediately. The top bar, borders, and markers refresh through `_refresh_board`. If the open city panel belonged to the previous owner, it closes. A player left with no cities keeps their units.
+On capture the city changes owner. Buildings stay. Every tile that city owns changes owner with it. Population drops by `city.capture_population_loss` and not below `city.capture_population_min`. HP becomes `roundi(max_hp × city.capture_hp_fraction)`, clamped to the max. The queue and the stored production are cleared. The food bar and the border clock stay. The attacked flag clears, so the new owner can heal it on a later End Turn. Fog recomputes in that same step: the capturer gains the city disk, and the previous owner loses it. `GameSetup.mana_per_turn` follows the new owner immediately. The top bar, borders, and markers refresh through `_refresh_board`. If the open city panel belonged to the previous owner, it closes. If that player has no settler left, they are eliminated and their remaining units are removed. The rule is in `docs/win_loss.md`.
 
 ## Capturing a settler
 
@@ -80,7 +80,7 @@ The hit applies to every unit type and every player, including a unit standing o
 
 Healing runs first. An idle unit below max HP gains 10 and then loses 10, so it nets 0, including a unit at 5 HP that would have died if the hit came first. An idle unit already at max HP cannot heal, then loses 10. A unit that moved or attacked does not heal, then loses 10. At 10 HP or below, with no heal, it is removed. `volcanic.can_kill` false leaves a combat unit at 1 HP instead of removing it.
 
-A settler has no HP pool. The hazard removes them when `volcanic.can_kill` is true, through the same unit-removal path combat uses. Their HP bar stays hidden. Cities resolve before this hit, so a settler completed onto a volcanic city center in the same End Turn is removed before the turn counter increments. The city stays.
+A settler has no HP pool. The hazard removes them when `volcanic.can_kill` is true, through the same unit-removal path combat uses. Their HP bar stays hidden. Cities resolve before this hit, so a settler completed onto a volcanic city center in the same End Turn is removed before the turn counter increments. The city stays. If that death leaves its owner with no cities and no settlers, the owner is eliminated in that same End Turn, before the turn-limit check. See `docs/win_loss.md`.
 
 The selected unit's panel adds one line while they stand on volcanic ground: `Volcanic: -10 HP at end of turn`, using the tuned damage. That line is `%VolcanicWarning`, authored under the summary, and only that line is amber. HP, strength, moves, and order stay on `%SelectionDetail` in the summary color. Move highlights and the End Turn confirm are unchanged.
 
@@ -100,4 +100,4 @@ Each sprite sits on the cell center. `scenes/actors/hp_bar.tscn` is instanced on
 
 ## Out of scope
 
-Stepping onto a tile emptied by a killing blow, elimination, rival AI, and a combat log.
+Stepping onto a tile emptied by a killing blow, rival AI, and a combat log. Elimination is in `docs/win_loss.md`.

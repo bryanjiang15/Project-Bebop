@@ -76,7 +76,7 @@ The panel button starts placement. The next left click on a legal tile enqueues 
 
 Founding sets HP to `city.hp`. The city panel line is `HP current / max`. The map marker draws the same pair under the name, in red at 0. Combat, the capture move, and the heal rule are in `docs/combat.md`.
 
-End Turn heals `city.heal` after mana is paid and before unit healing, unless `city.heals_if_not_attacked` is true and the city was attacked since its owner's last turn. A captured city keeps its buildings and its border tiles, which change owner with it. It loses `city.capture_population_loss` population, not below `city.capture_population_min`, resets HP with `city.capture_hp_fraction`, and drops the queue and the stored production. The food bar and the border clock stay. The panel closes when the city no longer belongs to the human. A player with no cities left keeps their units.
+End Turn heals `city.heal` after mana is paid and before unit healing, unless `city.heals_if_not_attacked` is true and the city was attacked since its owner's last turn. A captured city keeps its buildings and its border tiles, which change owner with it. It loses `city.capture_population_loss` population, not below `city.capture_population_min`, resets HP with `city.capture_hp_fraction`, and drops the queue and the stored production. The food bar and the border clock stay. The panel closes when the city no longer belongs to the human. A player with no cities and no settlers is eliminated; the rule is in `docs/win_loss.md`.
 
 ## Panel
 
