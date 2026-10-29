@@ -23,3 +23,8 @@ var production_stored: int = 0
 var border_turns: int = 0
 var queue: Array[Item] = []
 var buildings: Array[Building] = []
+## Current and founding HP. A city at 0 is capturable and is not removed.
+var hp: int = 0
+var max_hp: int = 0
+## Set when the city is attacked. End Turn heals only if this is still false.
+var attacked: bool = false

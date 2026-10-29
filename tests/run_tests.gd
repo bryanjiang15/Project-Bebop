@@ -22,6 +22,7 @@ func _init() -> void:
 	_test_city_economy()
 	_test_mana_pool()
 	_test_combat()
+	_test_city_capture()
 	_test_spells()
 	_test_rival_land_updates()
 	_test_land_effects()
@@ -106,7 +107,9 @@ func _test_config() -> void:
 	_ok(cfg.skip_enabled and cfg.fortify_enabled and is_equal_approx(cfg.fortify_defense_bonus, 0.25), "skip and fortify")
 	_ok(cfg.end_turn_warns_if_unordered, "end turn warning flag")
 	_ok(cfg.tie_order.size() == 3 and cfg.tie_order[0] == "tiles" and cfg.tie_order[1] == "cities" and cfg.tie_order[2] == "human_loses", "tie break")
-	_ok(is_equal_approx(cfg.capture_hp_fraction, 0.5) and cfg.capture_population_loss == 1, "capture resets")
+	_ok(is_equal_approx(cfg.capture_hp_fraction, 0.5) and cfg.capture_population_loss == 1 and cfg.capture_population_min == 1, "capture resets")
+	_ok(cfg.city_heals_if_not_attacked, "a city heals only when it was not attacked")
+	_ok(cfg.unit("warrior").can_capture and not cfg.unit("scout").can_capture and not cfg.unit("archer").can_capture and not cfg.unit("settler").can_capture, "only a warrior can capture a city")
 	_ok(cfg.only_target_must_be_in_range and cfg.drop_off_map and cfg.city_center_never_terraformed, "line and terraforming limits")
 	_ok(cfg.one_unit_per_tile and cfg.capture_lone_settler, "one unit per tile")
 	_ok(cfg.spawn_on_city_center and cfg.spawn_nearest_free_if_blocked and cfg.heal_only_if_idle, "spawn and heal")
@@ -126,6 +129,10 @@ func _test_config() -> void:
 	var grow: Dictionary = (spell_broken["spells"] as Dictionary)["grow_forest"]
 	grow.erase("mana")
 	_ok(GameConfig.missing_paths(spell_broken).has("spells.grow_forest.mana"), "missing spell cost is reported")
+	var capture_broken: Dictionary = raw.duplicate(true)
+	var warrior_stats: Dictionary = (capture_broken["units"] as Dictionary)["warrior"]
+	warrior_stats.erase("can_capture")
+	_ok(GameConfig.missing_paths(capture_broken).has("units.warrior.can_capture"), "missing can_capture is reported")
 
 
 func _test_hex_neighbors() -> void:
@@ -1089,6 +1096,195 @@ func _test_combat() -> void:
 	_ok(partial.mp > 0 and game.has_unordered_moves(0), "moves left after a step still need an order")
 	partial.mp = 0
 	_ok(not game.has_unordered_moves(0), "a unit with no moves left does not warn")
+
+
+func _test_city_capture() -> void:
+	print("[city attack and capture]")
+	var cfg: GameConfig = GameConfig.load_file()
+	var game := _blank_setup("plains")
+	var origin := Vector2i(10, 8)
+	var beside := _step(origin, Hex.EAST, 1)
+	var city := game.found_city(game.spawn_unit(1, "settler", origin))
+	var warrior := game.spawn_unit(0, "warrior", beside)
+	_ok(city != null and city.hp == cfg.city_hp and city.max_hp == cfg.city_hp and not city.attacked, "a new city starts at full HP")
+	var defense := Combat.defender_strength(cfg, float(cfg.city_defense), false, false)
+	var dealt := Combat.damage(cfg, float(cfg.unit("warrior").attack), defense)
+	var counter := Combat.damage(cfg, defense, float(cfg.unit("warrior").attack))
+	var preview := game.preview_city(warrior, city)
+	_ok(bool(preview["ok"]) and int(preview["damage"]) == dealt and int(preview["counter"]) == counter, "warrior preview uses city defense")
+	_ok(dealt > 0 and counter > 0, "melee takes counter-damage from a city")
+	game.map.set_land(origin, "hills")
+	var hill_defense := Combat.defender_strength(cfg, float(cfg.city_defense), true, false)
+	var hill_hit := game.preview_city(warrior, city)
+	_ok(int(hill_hit["damage"]) == Combat.damage(cfg, float(cfg.unit("warrior").attack), hill_defense), "hills modify the city like any defender")
+	game.map.set_land(origin, "plains")
+	var before_hp := warrior.hp
+	_ok(game.attack_city(warrior, city).is_empty(), "warrior attack on a city resolves")
+	_ok(city.hp == cfg.city_hp - dealt and city.attacked and warrior.hp == before_hp - counter, "city and warrior both lose HP")
+	_ok(warrior.cell == beside and warrior.mp == 0, "a city attack does not advance the attacker")
+	var archer := game.spawn_unit(0, "archer", _step(origin, Hex.EAST, 2))
+	var shot := game.preview_city(archer, city)
+	_ok(bool(shot["ok"]) and int(shot["counter"]) == 0, "an archer takes no counter from a city")
+	var archer_hp := archer.hp
+	var city_before := city.hp
+	_ok(game.attack_city(archer, city).is_empty(), "archer attack on a city resolves")
+	_ok(archer.hp == archer_hp and archer.cell == _step(origin, Hex.EAST, 2) and city.hp == city_before - int(shot["damage"]), "archer damage lands and the archer stays put")
+	var scout := game.spawn_unit(0, "scout", _step(origin, Hex.NORTHEAST, 1))
+	var scout_preview := game.preview_city(scout, city)
+	_ok(bool(scout_preview["ok"]) and int(scout_preview["damage"]) > 0 and int(scout_preview["counter"]) > 0, "a scout attacks a city with the same formula")
+	_ok(game.attack_city(scout, city).is_empty() and scout.hp < cfg.unit("scout").hp, "a scout takes the city's counter")
+	warrior.mp = cfg.unit("warrior").move
+	var guard := 0
+	while city.hp > 0 and guard < 8:
+		guard += 1
+		warrior.mp = cfg.unit("warrior").move
+		_ok(game.attack_city(warrior, city).is_empty(), "follow-up city attack resolves")
+	_ok(city.hp == 0 and game.cities.has(city), "city HP floors at 0 and the city stays")
+	warrior.mp = cfg.unit("warrior").move
+	_ok(game.attack_city(warrior, city).is_empty() and city.hp == 0, "another hit does not destroy the city")
+	game.config.archers_can_zero_city_hp = false
+	city.hp = 10
+	archer.mp = cfg.unit("archer").move
+	_ok(game.attack_city(archer, city).is_empty() and city.hp == 1, "a ranged hit cannot zero a city when the flag is off")
+	game.config.archers_can_zero_city_hp = true
+	city.hp = 40
+	city.attacked = false
+	game.end_turn()
+	_ok(city.hp == 50, "a city that was not attacked heals 10")
+	city.hp = 95
+	city.attacked = false
+	game.end_turn()
+	_ok(city.hp == 100, "city healing stops at max HP")
+	city.hp = 40
+	city.attacked = true
+	game.end_turn()
+	_ok(city.hp == 40 and not city.attacked, "an attacked city does not heal, and the flag clears")
+	game.end_turn()
+	_ok(city.hp == 50, "the next turn heals a city that was not attacked again")
+	game.config.city_heal = 4
+	city.hp = 40
+	city.attacked = false
+	game.end_turn()
+	_ok(city.hp == 44, "city heal amount follows the config")
+	game.config.city_heals_if_not_attacked = false
+	city.hp = 40
+	city.attacked = true
+	game.end_turn()
+	_ok(city.hp == 44, "cities heal after an attack when the flag is off")
+
+	print("[capture]")
+	game = _blank_setup("plains")
+	origin = Vector2i(10, 8)
+	beside = _step(origin, Hex.EAST, 1)
+	city = game.found_city(game.spawn_unit(1, "settler", origin))
+	warrior = game.spawn_unit(0, "warrior", beside)
+	var rival_warrior := game.spawn_unit(1, "warrior", _step(origin, Hex.WEST, 6))
+	var border := game.territory_cells(city).duplicate()
+	var radius := city.radius
+	var building := MapCity.Building.new()
+	building.kind = "mana_well"
+	building.cell = _step(origin, Hex.NORTHEAST, 1)
+	city.buildings.append(building)
+	_ok(game.enqueue(city, "warrior").is_empty(), "the city can queue a warrior")
+	city.production_stored = 12
+	city.population = 1
+	var rate := CityRules.city_mana(game.config, city)
+	_ok(game.mana_per_turn(1) == rate and game.mana_per_turn(0) == 0, "mana rate starts with the owner")
+	_ok(not game.reachable_tiles(warrior).has(origin), "a healthy city blocks movement")
+	city.hp = 0
+	var scout_block := game.spawn_unit(0, "scout", _step(origin, Hex.SOUTHEAST, 1))
+	var archer_block := game.spawn_unit(0, "archer", _step(origin, Hex.NORTHWEST, 1))
+	_ok(not game.reachable_tiles(scout_block).has(origin) and not game.move_unit(scout_block, origin), "a scout cannot capture a city")
+	_ok(not game.reachable_tiles(archer_block).has(origin) and not game.move_unit(archer_block, origin), "an archer cannot capture a city")
+	game.config.melee_captures_city = false
+	_ok(not game.capture_destination(warrior, origin) and not game.move_unit(warrior, origin), "the melee capture flag can turn capture off")
+	game.config.melee_captures_city = true
+	game.config.unit("warrior").can_capture = false
+	_ok(not game.move_unit(warrior, origin), "can_capture false rejects the warrior")
+	game.config.unit("warrior").can_capture = true
+	var garrison := game.spawn_unit(1, "scout", _step(origin, Hex.WEST, 4))
+	garrison.cell = origin
+	_ok(game.can_attack_city(warrior, city) == GameSetup.REASON_CITY_HELD, "a military unit on the tile is the target")
+	_ok(not game.move_unit(warrior, origin), "capture is blocked while a military unit stands on the city")
+	garrison.hp = 5
+	_ok(game.attack_unit(warrior, garrison).is_empty() and not game.players[1].units.has(garrison), "the garrison dies and the attacker does not step in")
+	_ok(warrior.cell == beside and city.player == 1, "the city is still the rival's after the garrison dies")
+	warrior.mp = game.config.unit("warrior").move
+	var far := _step(origin, Hex.WEST, city.radius + game.config.city_vision_beyond_border)
+	_ok(game.fog.sight(1, far) == FogState.Sight.VISIBLE, "the owner sees the city vision ring")
+	_ok(game.fog.sight(0, far) != FogState.Sight.VISIBLE, "the attacker does not see that ring yet")
+	var pop_before := city.population
+	_ok(game.move_unit(warrior, origin), "the warrior moves in and captures")
+	_ok(city.player == 0 and warrior.cell == origin and warrior.mp == 0, "the capturer owns the city and ends with no movement")
+	_ok(city.population == maxi(game.config.capture_population_min, pop_before - game.config.capture_population_loss), "population drops by the config, not below the minimum")
+	_ok(city.hp == roundi(float(city.max_hp) * game.config.capture_hp_fraction), "HP resets to the config fraction")
+	_ok(city.queue.is_empty() and city.production_stored == 0 and city.buildings.size() == 1 and city.buildings[0].kind == "mana_well", "the queue clears and the buildings stay")
+	_ok(city.radius == radius, "the border radius stays")
+	var borders_ok := true
+	for cell in border:
+		if game.owner_at(cell) != 0:
+			borders_ok = false
+	_ok(borders_ok and game.owner_at(building.cell) == 0, "border tiles change owner with the city")
+	_ok(game.mana_per_turn(0) == CityRules.city_mana(game.config, city) and game.mana_per_turn(1) == 0, "mana per turn moves to the new owner")
+	_ok(game.fog.sight(0, far) == FogState.Sight.VISIBLE, "the capturer gains the city's vision")
+	_ok(game.fog.sight(1, far) == FogState.Sight.REVEALED, "the previous owner keeps the tile as revealed")
+	_ok(game.players[1].units.has(rival_warrior) and game.cities.has(city), "a player with no cities keeps their units")
+	game.end_turn()
+	_ok(game.players[1].units.has(rival_warrior), "the next turn does not eliminate that player")
+
+	game.config.city_hp = 80
+	game.config.capture_hp_fraction = 0.25
+	game.config.capture_population_loss = 3
+	var tuned_at := Vector2i(2, 2)
+	var tuned := game.found_city(game.spawn_unit(1, "settler", tuned_at))
+	_ok(tuned != null and tuned.hp == 80 and tuned.max_hp == 80, "founding reads the tuned city HP")
+	tuned.population = 2
+	tuned.hp = 0
+	var taker := game.spawn_unit(0, "warrior", _step(tuned_at, Hex.EAST, 1))
+	_ok(game.move_unit(taker, tuned_at), "tuned capture resolves")
+	_ok(tuned.population == 1 and tuned.hp == 20, "pop loss and HP percent follow the config")
+	game.config.unit("scout").can_capture = true
+	var scout_city := game.found_city(game.spawn_unit(1, "settler", Vector2i(2, 8)))
+	scout_city.hp = 0
+	var capturing_scout := game.spawn_unit(0, "scout", _step(Vector2i(2, 8), Hex.EAST, 1))
+	_ok(game.move_unit(capturing_scout, scout_city.cell) and scout_city.player == 0, "a scout captures when can_capture is turned on")
+
+	print("[settler capture]")
+	game = _blank_setup("plains")
+	origin = Vector2i(8, 8)
+	var captor := game.spawn_unit(0, "warrior", origin)
+	var settler := game.spawn_unit(1, "settler", _step(origin, Hex.EAST, 1))
+	var past := _step(origin, Hex.EAST, 2)
+	captor.mp = 1
+	var reach := game.reachable_tiles(captor)
+	_ok(reach.has(settler.cell) and int(reach[settler.cell]) == 0 and not reach.has(past), "a capture tile ends the move")
+	captor.mp = 2
+	_ok(game.move_unit(captor, settler.cell), "a warrior moves onto a lone settler")
+	_ok(settler.owner == 0 and settler.cell == captor.cell and captor.mp == 0, "the settler changes owner and the mover stops")
+	_ok(game.players[0].units.has(settler) and not game.players[1].units.has(settler), "the settler joins the captor's roster")
+	var scout_taker := game.spawn_unit(0, "scout", _step(origin, Hex.WEST, 2))
+	var second := game.spawn_unit(1, "settler", _step(scout_taker.cell, Hex.WEST, 1))
+	_ok(game.move_unit(scout_taker, second.cell) and second.owner == 0, "a scout captures a settler without can_capture")
+	var shooter := game.spawn_unit(0, "archer", Vector2i(14, 8))
+	var victim := game.spawn_unit(1, "settler", _step(shooter.cell, Hex.EAST, 2))
+	shooter.mp = 1
+	_ok(not game.reachable_tiles(shooter).has(victim.cell), "the archer cannot walk onto the settler")
+	_ok(game.attack_unit(shooter, victim).is_empty() and not game.players[1].units.has(victim), "a ranged attack destroys a lone settler")
+	_ok(shooter.cell == Vector2i(14, 8), "the ranged attacker does not step onto the settler")
+	var shield := game.spawn_unit(1, "warrior", Vector2i(18, 8))
+	var hidden_settler := game.spawn_unit(1, "settler", _step(shield.cell, Hex.EAST, 1))
+	hidden_settler.cell = shield.cell
+	var hunter := game.spawn_unit(0, "warrior", _step(shield.cell, Hex.WEST, 1))
+	_ok(game.can_attack(hunter, hidden_settler) == GameSetup.REASON_ATTACK_SETTLER, "a settler stacked with a military unit is protected")
+	_ok(not game.reachable_tiles(hunter).has(shield.cell), "the stacked tile cannot be entered")
+	shield.hp = 5
+	_ok(game.attack_unit(hunter, shield).is_empty() and game.players[1].units.has(hidden_settler), "killing the guard leaves the settler")
+	hunter.mp = game.config.unit("warrior").move
+	_ok(game.move_unit(hunter, hidden_settler.cell) and hidden_settler.owner == 0, "the settler can be captured once the guard is dead")
+	game.config.capture_lone_settler = false
+	var walker := game.spawn_unit(0, "warrior", Vector2i(4, 4))
+	var refused := game.spawn_unit(1, "settler", _step(walker.cell, Hex.EAST, 1))
+	_ok(refused != null and not game.move_unit(walker, refused.cell), "the lone-settler flag can turn capture off")
 
 
 func _test_spells() -> void:

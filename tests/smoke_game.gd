@@ -63,6 +63,8 @@ func _run() -> void:
 		return
 	if not _assert_new_game(game):
 		return
+	if not _capture_city_and_settler(game):
+		return
 	print("PASS restart ", turn)
 	var victory_event := InputEventAction.new()
 	victory_event.action = "debug_victory"
@@ -316,6 +318,194 @@ func _warrior_orders(game: Node) -> bool:
 		quit(1)
 		return false
 	print("PASS end turn confirmed")
+	return true
+
+
+func _capture_city_and_settler(game: Node) -> bool:
+	var setup := game.get("setup") as GameSetup
+	var warrior := _human_unit(setup, "warrior")
+	if warrior == null:
+		print("FAIL capture has no warrior")
+		quit(1)
+		return false
+	var city_cell := _open_neighbor(setup, warrior.cell)
+	if city_cell.x < 0:
+		print("FAIL no tile for the rival city")
+		quit(1)
+		return false
+	setup.map.set_land(city_cell, "plains")
+	setup.map.set_land(warrior.cell, "plains")
+	var rival := 0 if setup.human_index != 0 else 1
+	var founder: PlayerState.UnitState = null
+	for unit in setup.players[rival].units:
+		if unit.unit_type == "settler":
+			founder = unit
+			break
+	if founder == null:
+		print("FAIL no rival settler")
+		quit(1)
+		return false
+	founder.cell = city_cell
+	var city := setup.found_city(founder)
+	if city == null:
+		print("FAIL rival city did not found")
+		quit(1)
+		return false
+	game._refresh_board()
+	_click_cell(game, warrior.cell)
+	if (game.get_node("%SelectionTitle") as Label).text != "Warrior":
+		_click_cell(game, warrior.cell)
+	if (game.get_node("%SelectionTitle") as Label).text != "Warrior":
+		print("FAIL capture selection")
+		quit(1)
+		return false
+	_hover_cell(game, city_cell)
+	var preview := (game.get_node("%CombatPreview") as Label).text
+	var tip := (game.get_node("%Tooltip") as Label).text
+	if not preview.begins_with("Damage") or not preview.contains("Counter") or not tip.contains(preview):
+		print("FAIL city preview '", preview, "' tip '", tip, "'")
+		quit(1)
+		return false
+	var dealt := int(setup.preview_city(warrior, city)["damage"])
+	if dealt <= 0 or not preview.contains(str(dealt)):
+		print("FAIL city damage ", dealt, " preview ", preview)
+		quit(1)
+		return false
+	print("PASS city attack preview ", preview)
+	city.hp = dealt
+	game._refresh_board()
+	var home := warrior.cell
+	_click_cell(game, city_cell, MOUSE_BUTTON_RIGHT)
+	if city.hp != 0 or city.player != rival or warrior.cell != home or warrior.mp != 0:
+		print("FAIL city attack hp ", city.hp, " owner ", city.player, " cell ", warrior.cell)
+		quit(1)
+		return false
+	var marker_hp := ""
+	for child in game.get_node("%Actors").get_children():
+		if str(child.name) == "City_%d" % city.id:
+			marker_hp = (child.get_node("Hp") as Label).text
+	if marker_hp != "0 / %d" % city.max_hp:
+		print("FAIL zero HP marker '", marker_hp, "'")
+		quit(1)
+		return false
+	print("PASS city at 0 HP")
+	(game.get_node("%EndTurnButton") as Button).pressed.emit()
+	if not (game.get_node("%EndTurnWarning") as Label).text.is_empty():
+		(game.get_node("%EndTurnButton") as Button).pressed.emit()
+	if city.hp != 0:
+		print("FAIL attacked city healed to ", city.hp)
+		quit(1)
+		return false
+	_click_cell(game, warrior.cell)
+	if (game.get_node("%SelectionTitle") as Label).text != "Warrior":
+		_click_cell(game, warrior.cell)
+	var pop_before := city.population
+	var income_before := setup.mana_per_turn(setup.human_index)
+	_click_cell(game, city_cell, MOUSE_BUTTON_RIGHT)
+	if city.player != setup.human_index or warrior.cell != city_cell or warrior.mp != 0:
+		print("FAIL capture owner ", city.player, " cell ", warrior.cell, " mp ", warrior.mp)
+		quit(1)
+		return false
+	if city.population != maxi(setup.config.capture_population_min, pop_before - setup.config.capture_population_loss):
+		print("FAIL capture pop ", city.population)
+		quit(1)
+		return false
+	if city.hp != roundi(float(city.max_hp) * setup.config.capture_hp_fraction):
+		print("FAIL capture hp ", city.hp)
+		quit(1)
+		return false
+	for cell in setup.territory_cells(city):
+		if setup.owner_at(cell) != setup.human_index:
+			print("FAIL border owner ", cell)
+			quit(1)
+			return false
+	if not _mana_matches(game):
+		return false
+	if setup.mana_per_turn(setup.human_index) <= income_before:
+		print("FAIL income did not move")
+		quit(1)
+		return false
+	var human_color := Color.html(setup.players[setup.human_index].color)
+	var tinted := false
+	for child in game.get_node("%Actors").get_children():
+		if str(child.name) != "City_%d" % city.id:
+			continue
+		var sprite := child.get_node("Sprite") as Sprite2D
+		var mat := sprite.material as ShaderMaterial
+		tinted = (mat.get_shader_parameter("team_color") as Color).is_equal_approx(human_color)
+	if not tinted:
+		print("FAIL captured city color")
+		quit(1)
+		return false
+	if not _select_city(game, city):
+		return false
+	var hp_line := (game.get_node("%CityHp") as Label).text
+	if hp_line != "HP %d / %d" % [city.hp, city.max_hp] or (game.get_node("%CityName") as Label).text != city.city_name:
+		print("FAIL captured panel '", hp_line, "'")
+		quit(1)
+		return false
+	print("PASS captured city ", city.city_name, " ", (game.get_node("%ManaLabel") as Label).text, " ", hp_line)
+	(game.get_node("%EndTurnButton") as Button).pressed.emit()
+	if not (game.get_node("%EndTurnWarning") as Label).text.is_empty():
+		(game.get_node("%EndTurnButton") as Button).pressed.emit()
+	var settler_cell := _open_neighbor(setup, warrior.cell)
+	if settler_cell.x < 0:
+		print("FAIL no settler tile")
+		quit(1)
+		return false
+	setup.map.set_land(settler_cell, "plains")
+	var settler := setup.spawn_unit(rival, "settler", settler_cell)
+	if settler == null:
+		print("FAIL rival settler spawn")
+		quit(1)
+		return false
+	game._refresh_board()
+	_click_cell(game, warrior.cell)
+	if (game.get_node("%SelectionTitle") as Label).text != "Warrior":
+		_click_cell(game, warrior.cell)
+	_click_cell(game, settler_cell, MOUSE_BUTTON_RIGHT)
+	if settler.owner != setup.human_index or settler.cell != warrior.cell or warrior.mp != 0:
+		print("FAIL settler capture owner ", settler.owner, " cell ", settler.cell, " mp ", warrior.mp)
+		quit(1)
+		return false
+	if not setup.players[setup.human_index].units.has(settler):
+		print("FAIL settler did not join the human")
+		quit(1)
+		return false
+	print("PASS settler captured")
+	if not _select_city(game, city):
+		return false
+	city.hp = 0
+	var rival_warrior: PlayerState.UnitState = null
+	for unit in setup.players[rival].units:
+		if unit.unit_type == "warrior":
+			rival_warrior = unit
+			break
+	if rival_warrior == null:
+		print("FAIL no rival warrior")
+		quit(1)
+		return false
+	var approach := _open_neighbor(setup, city.cell)
+	if approach.x < 0:
+		print("FAIL no approach")
+		quit(1)
+		return false
+	setup.map.set_land(approach, "plains")
+	setup.map.set_land(city.cell, "plains")
+	rival_warrior.cell = approach
+	rival_warrior.mp = setup.config.unit("warrior").move
+	if not setup.move_unit(rival_warrior, city.cell):
+		print("FAIL rival could not take the city back")
+		quit(1)
+		return false
+	game._refresh_board()
+	if (game.get_node("%CityPanel") as CanvasItem).visible:
+		print("FAIL panel stayed open after the city changed owner")
+		quit(1)
+		return false
+	if not _mana_matches(game):
+		return false
+	print("PASS city panel closed")
 	return true
 
 
