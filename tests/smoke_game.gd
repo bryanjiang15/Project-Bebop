@@ -266,6 +266,15 @@ func _warrior_orders(game: Node) -> bool:
 	if settler != null and settler.mp <= 0 and not setup.has_unordered_moves(setup.human_index):
 		settler.mp = 1
 		settler.order = ""
+	# A settler has no HP, so volcanic ground removes them on this End Turn.
+	# No city has been founded yet, and that elimination ends the match on
+	# turn 1. The confirm check below needs the turn to advance.
+	for player in setup.players:
+		for unit in player.units:
+			if unit.unit_type != "settler":
+				continue
+			if setup.map.land_at(unit.cell) == "volcanic":
+				setup.map.set_land(unit.cell, "plains")
 	(game.get_node("%EndTurnButton") as Button).pressed.emit()
 	var turn := (game.get_node("%TurnLabel") as Label).text
 	var warning := (game.get_node("%EndTurnWarning") as Label).text
