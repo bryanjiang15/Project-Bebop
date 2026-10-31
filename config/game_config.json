@@ -158,5 +158,9 @@
     "pan_margin": 160.0,
     "key_pan_speed": 1200.0,
     "default_zoom": 0.72
+  },
+  "log": {
+    "enabled": true,
+    "directory": "user://logs"
   }
 }

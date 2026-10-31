@@ -28,6 +28,7 @@ func _init() -> void:
 	_test_land_effects()
 	_test_end_turn_key()
 	_test_win_loss()
+	_test_game_log()
 	print("\nPassed: %d  Failed: %d" % [_passed, _failed])
 	quit(1 if _failed > 0 else 0)
 
@@ -118,6 +119,8 @@ func _test_config() -> void:
 	_ok(cfg.skip_water_if_land_unit_present and cfg.cooldown_uses_caster_turns, "water skip and cooldown")
 	_ok(cfg.ranged_takes_no_counter and cfg.melee_captures_city and cfg.archers_can_zero_city_hp, "combat capture flags")
 	_ok(is_equal_approx(cfg.camera_default_zoom, 0.72), "camera default zoom")
+	_ok(cfg.log_enabled, "logging is on")
+	_ok(cfg.log_directory == "user://logs", "log directory is user://logs")
 	var again: GameConfig = GameConfig.load_file()
 	_ok(again != cfg and again.turn_limit == cfg.turn_limit and is_equal_approx(again.camera_default_zoom, cfg.camera_default_zoom), "load reads the file again")
 	var broken: Dictionary = raw.duplicate(true)
@@ -134,6 +137,12 @@ func _test_config() -> void:
 	var warrior_stats: Dictionary = (capture_broken["units"] as Dictionary)["warrior"]
 	warrior_stats.erase("can_capture")
 	_ok(GameConfig.missing_paths(capture_broken).has("units.warrior.can_capture"), "missing can_capture is reported")
+	var missing_log: Dictionary = raw.duplicate(true)
+	(missing_log["log"] as Dictionary).erase("enabled")
+	_ok(GameConfig.missing_paths(missing_log).has("log.enabled"), "missing log.enabled is reported")
+	var missing_dir: Dictionary = raw.duplicate(true)
+	(missing_dir["log"] as Dictionary).erase("directory")
+	_ok(GameConfig.missing_paths(missing_dir).has("log.directory"), "missing log.directory is reported")
 
 
 func _test_hex_neighbors() -> void:
@@ -298,6 +307,7 @@ func _test_pixels() -> void:
 func _test_map_and_fog() -> void:
 	print("[map and fog]")
 	var cfg: GameConfig = GameConfig.load_file()
+	cfg.log_enabled = false
 	var first := GameSetup.start_with_seed(cfg, 12345)
 	var again := GameSetup.start_with_seed(cfg, 12345)
 	var other := GameSetup.start_with_seed(cfg, 99991)
@@ -827,6 +837,7 @@ func _test_mana_pool() -> void:
 	for player in fresh.players:
 		_ok(player.mana == 10, "player %d stays at 10 with no cities" % player.index)
 	var tuned_start: GameConfig = GameConfig.load_file()
+	tuned_start.log_enabled = false
 	tuned_start.starting_mana = 21
 	var started := GameSetup.start_with_seed(tuned_start, 12345)
 	_ok(started != null, "tuned starting mana still builds a game")
@@ -1999,6 +2010,7 @@ func _test_volcanic_damage() -> void:
 func _test_win_loss() -> void:
 	print("[win/loss]")
 	var cfg: GameConfig = GameConfig.load_file()
+	cfg.log_enabled = false
 	var started := GameSetup.start_with_seed(cfg, 12345)
 	_ok(started != null and started.result == null and MatchResult.latest == null, "a new game has no ending")
 	_ok(started.turn == 1, "a new game starts on turn 1")
@@ -2211,3 +2223,377 @@ func _test_win_loss() -> void:
 	var missing_ties: Dictionary = raw.duplicate(true)
 	(missing_ties["ties"] as Dictionary).erase("order")
 	_ok(GameConfig.missing_paths(missing_ties).has("ties.order"), "missing ties.order is reported")
+
+
+func _test_game_log() -> void:
+	print("[game log]")
+	var cfg: GameConfig = GameConfig.load_file()
+	var off_dir := _fresh_log_dir("off")
+	cfg.log_enabled = false
+	cfg.log_directory = off_dir
+	var quiet := GameSetup.start_with_seed(cfg, 12345)
+	_ok(quiet != null and quiet.log != null and not quiet.log.active, "logging off still starts a game")
+	_ok(_jsonl_files(off_dir).is_empty(), "log.enabled false writes no file")
+
+	var start_dir := _fresh_log_dir("start")
+	var started_cfg: GameConfig = GameConfig.load_file()
+	started_cfg.log_enabled = true
+	started_cfg.log_directory = start_dir
+	var started := GameSetup.start_with_seed(started_cfg, 12345)
+	_ok(started != null and started.log.active, "a new game opens a log")
+	if started == null or not started.log.active:
+		return
+	_ok(started.log.absolute_path.begins_with(start_dir), "the log is in the configured directory")
+	_ok(started.log.absolute_path.ends_with("_12345.jsonl") or started.log.absolute_path.contains("_12345_"), "the file name carries the seed")
+	var started_events := _log_events(started.log.absolute_path)
+	_ok(started_events.size() == 1 and started_events[0] is Dictionary, "the start line parses as JSON")
+	if started_events.is_empty() or not (started_events[0] is Dictionary):
+		return
+	var start_event: Dictionary = started_events[0]
+	_ok(str(start_event["event"]) == "start", "the first line is a start event")
+	_ok(int(start_event["seed"]) == 12345, "the start event records the seed")
+	_ok(int(start_event["turn_limit"]) == started_cfg.turn_limit, "the start event records turn_limit")
+	var start_map: Dictionary = start_event["map"]
+	_ok(int(start_map["width"]) == started_cfg.map_width and int(start_map["height"]) == started_cfg.map_height, "the start event records the map size")
+	var start_score: Dictionary = start_event["score"]
+	_ok(int(start_score["per_tile"]) == started_cfg.score_per_tile and int(start_score["per_city"]) == started_cfg.score_per_city and int(start_score["per_population"]) == started_cfg.score_per_population, "the start event records the score weights")
+	_ok(str(start_event["timestamp"]).contains("T"), "the start event has a wall-clock timestamp")
+	var start_players: Array = start_event["players"]
+	_ok(start_players.size() == started.players.size(), "the start event lists every player")
+	var players_ok := start_players.size() == started.players.size()
+	for i in start_players.size():
+		var logged: Dictionary = start_players[i]
+		var player := started.players[i]
+		var expected_name := MatchResult.player_name(player.index, started.human_index)
+		if int(logged["index"]) != player.index or str(logged["name"]) != expected_name or str(logged["color"]) != player.color or bool(logged["human"]) != player.human:
+			players_ok = false
+	_ok(players_ok, "player index, name, color, and human flag match the game")
+	var again := GameSetup.start_with_seed(started_cfg, 12345)
+	_ok(again != null and again.log.absolute_path != started.log.absolute_path, "a second New Game opens a new file")
+	_ok(_jsonl_files(start_dir).size() == 2, "both games have a file")
+	var abandoned := _log_events(started.log.absolute_path)
+	_ok(_count_kind(abandoned, "end") == 0 and _count_kind(abandoned, "start") == 1, "a game left without finishing has no end line")
+
+	var blocker := "/tmp/bebop-ticket19-not-a-directory"
+	var blocked_file := FileAccess.open(blocker, FileAccess.WRITE)
+	if blocked_file != null:
+		blocked_file.store_string("x")
+		blocked_file.close()
+	var bad_cfg: GameConfig = GameConfig.load_file()
+	bad_cfg.log_enabled = true
+	bad_cfg.log_directory = blocker + "/logs"
+	var bad := GameSetup.start_with_seed(bad_cfg, 42)
+	_ok(bad != null and bad.players.size() == bad_cfg.player_count and not bad.log.active, "an unwritable directory does not stop the game")
+	if bad != null:
+		bad.end_turn()
+		_ok(bad.turn == 2 and bad.result == null, "play continues after the log warning")
+
+	var radius := _logged_game("radius")
+	var radius_city := radius.found_city(radius.spawn_unit(0, "settler", Vector2i(10, 8)))
+	radius.players[0].mana = 100
+	var east := _step(radius_city.cell, Hex.EAST, 1)
+	radius.map.set_land(east, "forest")
+	var radius_preview: Dictionary = radius.spell_preview(0, "grow_forest", radius_city.cell, Hex.EAST)
+	var radius_expected := _tile_oracle(radius, radius_preview)
+	_ok(radius.cast_spell(0, "grow_forest", radius_city.cell, Hex.EAST).is_empty(), "grow forest casts for the log")
+	var radius_events := _log_events(radius.log.absolute_path)
+	_ok(_count_kind(radius_events, "cast") == 1 and radius_events.size() == 2, "a radius cast logs exactly one cast event")
+	var radius_cast: Dictionary = radius_events[1]
+	_ok(str(radius_cast["event"]) == "cast" and str(radius_cast["spell"]) == "grow_forest" and str(radius_cast["spell_name"]) == "Grow Forest", "the radius event names the spell")
+	_ok(str(radius_cast["shape"]) == "radius" and radius_cast["direction"] == null, "a radius cast has no direction")
+	_ok(int(radius_cast["turn"]) == 1 and int(radius_cast["player"]) == 0 and str(radius_cast["player_name"]) == "You", "the radius cast records the human on turn 1")
+	_ok(int(radius_cast["mana"]) == radius.config.spell("grow_forest").mana, "the radius cast records the mana cost")
+	var radius_target: Dictionary = radius_cast["target"]
+	_ok(int(radius_target["col"]) == radius_city.cell.x and int(radius_target["row"]) == radius_city.cell.y, "the radius target is the city cell")
+	_ok(_tiles_equal(radius_cast["tiles"], radius_expected), "radius tiles match the preview: from, to, skip, owner")
+	var saw_center := false
+	var saw_same := false
+	var saw_change := false
+	for tile in radius_cast["tiles"]:
+		var row: Dictionary = tile
+		if int(row["col"]) == radius_city.cell.x and int(row["row"]) == radius_city.cell.y:
+			saw_center = str(row["skip"]) == SpellRules.SKIP_CENTER and str(row["from"]) == str(row["to"]) and int(row["owner"]) == 0
+		elif int(row["col"]) == east.x and int(row["row"]) == east.y:
+			saw_same = str(row["from"]) == "forest" and str(row["to"]) == "forest" and str(row["skip"]).is_empty() and int(row["owner"]) == 0
+		elif str(row["from"]) == "plains" and str(row["to"]) == "forest" and str(row["skip"]).is_empty():
+			saw_change = true
+	_ok(saw_center and saw_same and saw_change, "center is skipped, forest stays, plains become forest")
+	var before_blocked := radius_events.size()
+	_ok(radius.cast_spell(0, "grow_forest", radius_city.cell, Hex.EAST) == SpellRules.REASON_COOLDOWN, "cooldown blocks a second radius cast")
+	radius.players[0].mana = 0
+	_ok(radius.cast_spell(0, "raise_hills", east, Hex.EAST) == SpellRules.REASON_MANA, "mana blocks a cast")
+	radius.players[0].mana = 100
+	_ok(radius.cast_spell(0, "restore_plains", east, Hex.EAST) == SpellRules.REASON_TURN, "the one-cast limit blocks a cast")
+	radius.config.casts_per_turn = 5
+	var far := Vector2i(0, 0)
+	_ok(radius.cast_spell(0, "restore_plains", far, Hex.EAST) == SpellRules.REASON_RANGE, "range blocks a cast")
+	_ok(_log_events(radius.log.absolute_path).size() == before_blocked, "blocked casts log nothing")
+
+	var line := _logged_game("line")
+	var line_city := line.found_city(line.spawn_unit(0, "settler", Vector2i(10, 8)))
+	line.players[0].mana = 100
+	var mouth := _step(line_city.cell, Hex.EAST, 1)
+	var shielded := _step(mouth, Hex.EAST, 1)
+	var beyond := _step(shielded, Hex.EAST, 1)
+	var granary := MapCity.Building.new()
+	granary.kind = "granary"
+	granary.cell = mouth
+	line_city.buildings.append(granary)
+	_ok(line.enqueue(line_city, "lumber_mill", _step(line_city.cell, Hex.WEST, 1)).is_empty(), "a queued building sits off the river")
+	line.spawn_unit(0, "warrior", shielded)
+	var line_preview: Dictionary = line.spell_preview(0, "carve_river", mouth, Hex.EAST)
+	var line_expected := _tile_oracle(line, line_preview)
+	_ok((line_preview["destroyed"] as Array).has(mouth), "the preview names the drowned granary")
+	_ok(line.cast_spell(0, "carve_river", mouth, Hex.EAST).is_empty(), "carve river casts for the log")
+	var line_events := _log_events(line.log.absolute_path)
+	_ok(_count_kind(line_events, "cast") == 1, "a line cast logs exactly one cast event")
+	var line_cast: Dictionary = line_events[1]
+	_ok(str(line_cast["spell"]) == "carve_river" and str(line_cast["shape"]) == "line" and str(line_cast["direction"]) == "east", "the line event records the direction")
+	_ok(int(line_cast["mana"]) == line.config.spell("carve_river").mana, "the line cast records the mana cost")
+	_ok(_tiles_equal(line_cast["tiles"], line_expected), "line tiles match the preview")
+	var saw_building := false
+	var saw_skip := false
+	var saw_unowned := false
+	for tile in line_cast["tiles"]:
+		var row: Dictionary = tile
+		if int(row["col"]) == mouth.x and int(row["row"]) == mouth.y:
+			saw_building = str(row["from"]) == "plains" and str(row["to"]) == "water" and str(row["building"]) == "granary" and int(row["owner"]) == 0 and str(row["skip"]).is_empty()
+		elif int(row["col"]) == shielded.x and int(row["row"]) == shielded.y:
+			saw_skip = str(row["skip"]) == SpellRules.SKIP_UNIT and str(row["from"]) == str(row["to"]) and str(row["building"]).is_empty()
+		elif int(row["col"]) == beyond.x and int(row["row"]) == beyond.y:
+			saw_unowned = int(row["owner"]) == -1 and str(row["to"]) == "water"
+	_ok(saw_building and saw_skip and saw_unowned, "water destroys the granary, skips the unit, and records an unowned tile")
+
+	var queued := _logged_game("queue")
+	var queued_city := queued.found_city(queued.spawn_unit(0, "settler", Vector2i(10, 8)))
+	queued.players[0].mana = 100
+	queued.config.spell("carve_river").length = 1
+	var reserved := _step(queued_city.cell, Hex.EAST, 1)
+	_ok(queued.enqueue(queued_city, "granary", reserved).is_empty(), "a granary is queued on the river tile")
+	var queued_preview: Dictionary = queued.spell_preview(0, "carve_river", reserved, Hex.EAST)
+	var queued_expected := _tile_oracle(queued, queued_preview)
+	_ok(queued.cast_spell(0, "carve_river", reserved, Hex.EAST).is_empty(), "water covers the queued tile")
+	var queued_cast: Dictionary = _log_events(queued.log.absolute_path)[1]
+	_ok(_tiles_equal(queued_cast["tiles"], queued_expected), "a dropped queue item is part of the preview record")
+	var saw_queue := false
+	for tile in queued_cast["tiles"]:
+		var row: Dictionary = tile
+		if int(row["col"]) == reserved.x and int(row["row"]) == reserved.y:
+			saw_queue = str(row["queue_dropped"]) == "granary" and str(row["building"]).is_empty() and str(row["to"]) == "water"
+	_ok(saw_queue, "the queued granary is recorded as dropped")
+
+	var rival := _logged_game("rival")
+	rival.found_city(rival.spawn_unit(0, "settler", Vector2i(10, 8)))
+	var rival_at := _step(Vector2i(10, 8), Hex.SOUTHEAST, 4)
+	var rival_city := rival.found_city(rival.spawn_unit(1, "settler", rival_at))
+	rival.players[1].mana = 100
+	_ok(rival_city != null and rival.cast_spell(1, "grow_forest", rival_at, Hex.EAST).is_empty(), "a rival casts")
+	var rival_cast: Dictionary = _log_events(rival.log.absolute_path)[1]
+	_ok(int(rival_cast["player"]) == 1 and str(rival_cast["player_name"]) == "Rival 2", "a non-human cast is logged with that player")
+	var rival_owned := false
+	for tile in rival_cast["tiles"]:
+		var row: Dictionary = tile
+		if int(row["col"]) == rival_at.x and int(row["row"]) == rival_at.y and int(row["owner"]) == 1:
+			rival_owned = true
+	_ok(rival_owned, "the rival cast records the owner at cast time")
+
+	_assert_end_log("conquest", MatchResult.REASON_CONQUEST, true)
+	_assert_end_log("eliminated", MatchResult.REASON_ELIMINATED, false)
+	_assert_end_log("score", MatchResult.REASON_SCORE, false)
+
+
+func _assert_end_log(name: String, ending: String, human_won: bool) -> void:
+	var game := _logged_game(name)
+	if ending == MatchResult.REASON_CONQUEST:
+		game.turn = 10
+		game.spawn_unit(0, "settler", Vector2i(2, 2))
+		var first := game.spawn_unit(1, "settler", Vector2i(8, 8))
+		var second := game.spawn_unit(2, "settler", Vector2i(14, 8))
+		game.spawn_unit(2, "warrior", Vector2i(16, 8))
+		var hunter := game.spawn_unit(0, "warrior", _step(first.cell, Hex.WEST, 1))
+		_ok(game.move_unit(hunter, first.cell) and game.result == null, "the first elimination is not the ending")
+		var beside := _step(hunter.cell, Hex.EAST, 1)
+		second.cell = beside
+		game._refresh_fog()
+		hunter.mp = game.config.unit("warrior").move
+		_ok(game.move_unit(hunter, beside), "conquest removes the last rival")
+	elif ending == MatchResult.REASON_ELIMINATED:
+		var human_settler := game.spawn_unit(0, "settler", Vector2i(8, 8))
+		game.spawn_unit(0, "warrior", Vector2i(12, 8))
+		var rival_warrior := game.spawn_unit(1, "warrior", _step(human_settler.cell, Hex.EAST, 1))
+		game.spawn_unit(1, "settler", Vector2i(2, 2))
+		game.spawn_unit(2, "settler", Vector2i(2, 8))
+		_ok(game.move_unit(rival_warrior, human_settler.cell), "the rival captures the human settler")
+	else:
+		game.spawn_unit(0, "settler", Vector2i(4, 4))
+		game.spawn_unit(1, "settler", Vector2i(8, 4))
+		game.spawn_unit(2, "settler", Vector2i(12, 4))
+		game.turn = game.config.turn_limit
+		game.end_turn()
+	_ok(game.result != null and game.result.ending == ending and game.result.human_won == human_won, "%s ending is logged from MatchResult" % ending)
+	if game.result == null:
+		return
+	var events := _log_events(game.log.absolute_path)
+	_ok(_count_kind(events, "end") == 1 and str(events[events.size() - 1]["event"]) == "end", "%s writes one end event" % ending)
+	var end_event: Dictionary = events[events.size() - 1]
+	_ok(str(end_event["ending"]) == ending and bool(end_event["human_won"]) == human_won and int(end_event["turn"]) == game.result.turn, "%s end fields match the result" % ending)
+	_ok(_rows_equal(end_event["rows"], game.result), "%s rows equal MatchResult.rows" % ending)
+	var lines_before := events.size()
+	game.cast_spell(0, "grow_forest", Vector2i(4, 4), Hex.EAST)
+	game.end_turn()
+	var after := _log_events(game.log.absolute_path)
+	_ok(after.size() == lines_before and _count_kind(after, "end") == 1, "no events are written after %s" % ending)
+	for event in after:
+		_ok(event is Dictionary, "each %s line parses as JSON" % ending)
+
+
+func _logged_game(name: String) -> GameSetup:
+	var game := _blank_setup("plains")
+	game.seed_used = 19019
+	game.config.log_enabled = true
+	game.config.log_directory = _fresh_log_dir(name)
+	game.config.spells_require_revealed_target = false
+	game.open_log()
+	return game
+
+
+func _fresh_log_dir(name: String) -> String:
+	var path := "/tmp/bebop-ticket19/%s" % name
+	_remove_tree(path)
+	DirAccess.make_dir_recursive_absolute(path)
+	return path
+
+
+func _remove_tree(path: String) -> void:
+	if FileAccess.file_exists(path):
+		DirAccess.remove_absolute(path)
+		return
+	if not DirAccess.dir_exists_absolute(path):
+		return
+	var dir := DirAccess.open(path)
+	if dir == null:
+		return
+	dir.list_dir_begin()
+	var entry := dir.get_next()
+	while entry != "":
+		if entry != "." and entry != "..":
+			var child := path.path_join(entry)
+			if dir.current_is_dir():
+				_remove_tree(child)
+			else:
+				dir.remove(entry)
+		entry = dir.get_next()
+	dir.list_dir_end()
+	DirAccess.remove_absolute(path)
+
+
+func _jsonl_files(path: String) -> PackedStringArray:
+	var out := PackedStringArray()
+	if not DirAccess.dir_exists_absolute(path):
+		return out
+	for file_name in DirAccess.get_files_at(path):
+		if file_name.ends_with(".jsonl"):
+			out.append(path.path_join(file_name))
+	return out
+
+
+func _log_events(path: String) -> Array:
+	var events: Array = []
+	if path.is_empty() or not FileAccess.file_exists(path):
+		return events
+	var text := FileAccess.get_file_as_string(path)
+	for line in text.split("\n", false):
+		if line.strip_edges().is_empty():
+			continue
+		events.append(JSON.parse_string(line))
+	return events
+
+
+func _count_kind(events: Array, kind: String) -> int:
+	var count := 0
+	for event in events:
+		if event is Dictionary and str((event as Dictionary).get("event", "")) == kind:
+			count += 1
+	return count
+
+
+func _tile_oracle(game: GameSetup, preview: Dictionary) -> Array:
+	var land_id := str(preview["land"])
+	var changed := {}
+	for cell in preview["changed"]:
+		changed[cell] = true
+	var destroyed := {}
+	for cell in preview["destroyed"]:
+		destroyed[cell] = true
+	var out: Array = []
+	for cell in preview["tiles"]:
+		var here := cell as Vector2i
+		var from_land := game.map.land_at(here)
+		var skip := game.spell_skip(land_id, here)
+		var to_land := from_land
+		if skip.is_empty() and changed.has(here):
+			to_land = land_id
+		var building := ""
+		if destroyed.has(here):
+			for city in game.cities:
+				for placed in city.buildings:
+					if placed.cell == here:
+						building = placed.kind
+		var dropped := ""
+		if to_land == "water" and from_land != "water":
+			for city in game.cities:
+				for item in city.queue:
+					if item.is_building and item.cell == here:
+						dropped = item.item_id
+						break
+		out.append({
+			"col": here.x,
+			"row": here.y,
+			"from": from_land,
+			"to": to_land,
+			"owner": game.owner_at(here),
+			"skip": skip,
+			"building": building,
+			"queue_dropped": dropped,
+		})
+	return out
+
+
+func _tiles_equal(got: Array, expected: Array) -> bool:
+	if got.size() != expected.size():
+		return false
+	for i in got.size():
+		if not (got[i] is Dictionary):
+			return false
+		var row: Dictionary = got[i]
+		var want: Dictionary = expected[i]
+		if int(row["col"]) != int(want["col"]) or int(row["row"]) != int(want["row"]):
+			return false
+		if str(row["from"]) != str(want["from"]) or str(row["to"]) != str(want["to"]):
+			return false
+		if int(row["owner"]) != int(want["owner"]) or str(row["skip"]) != str(want["skip"]):
+			return false
+		if str(row["building"]) != str(want["building"]) or str(row["queue_dropped"]) != str(want["queue_dropped"]):
+			return false
+	return true
+
+
+func _rows_equal(got: Array, result: MatchResult) -> bool:
+	if got.size() != result.rows.size():
+		return false
+	for i in result.rows.size():
+		if not (got[i] is Dictionary):
+			return false
+		var row: Dictionary = got[i]
+		var want := result.rows[i]
+		if int(row["player"]) != want.player or str(row["name"]) != want.player_name:
+			return false
+		if str(row["color"]) != want.color or bool(row["human"]) != want.human:
+			return false
+		if int(row["score"]) != want.score or int(row["tiles"]) != want.tiles:
+			return false
+		if int(row["cities"]) != want.cities or int(row["population"]) != want.population:
+			return false
+		if bool(row["eliminated"]) != want.eliminated or str(row["reason"]) != want.reason:
+			return false
+	return true
