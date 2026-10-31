@@ -49,6 +49,8 @@ var _moving: PlayerState.UnitState
 var _entering_for_move: bool = false
 ## Set when conquest, elimination, or the turn limit ends the match.
 var result: MatchResult
+## JSONL writer for this game. Null until open_log. Inactive when logging is off.
+var log: GameLog.Writer
 ## True after a player was just marked eliminated, until the outcome is judged.
 var _eliminated_now: bool = false
 
@@ -75,7 +77,32 @@ static func start_with_seed(cfg: GameConfig, seed_value: int) -> GameSetup:
 		push_error("no fair starts after %d maps from seed %d" % [cfg.generation_attempts, base])
 		return null
 	print("map seed: %d" % setup.seed_used)
+	setup.open_log()
 	return setup
+
+
+## Opens this game's log and writes the start line. A second call is ignored.
+## Logging off, or a directory that cannot be created, leaves play running.
+func open_log() -> void:
+	if log != null:
+		return
+	log = GameLog.Writer.open(config, seed_used)
+	if log == null or not log.active:
+		return
+	var roster: Array = []
+	for player in players:
+		roster.append({
+			"index": player.index,
+			"name": MatchResult.player_name(player.index, human_index),
+			"color": player.color,
+			"human": player.human,
+		})
+	var width := 0
+	var height := 0
+	if map != null:
+		width = map.width
+		height = map.height
+	log.append(GameLog.start_event(seed_used, width, height, config.turn_limit, roster, config.score_per_tile, config.score_per_city, config.score_per_population, GameLog.timestamp()))
 
 
 static func _assemble(cfg: GameConfig, map: MapState, starts: Array[Vector2i], seed_value: int) -> GameSetup:
@@ -704,8 +731,12 @@ func _finish(human_won: bool, ending: String) -> void:
 		row.eliminated = player.eliminated
 		row.reason = _row_reason(player.index, ending)
 		outcome.rows.append(row)
+	if log != null:
+		outcome.log_path = log.absolute_path
 	result = outcome
 	MatchResult.latest = outcome
+	if log != null and log.active:
+		log.append(GameLog.end_event(outcome))
 
 
 func territory_cells(city: MapCity) -> Array[Vector2i]:
@@ -820,6 +851,10 @@ func cast_spell(player_index: int, spell_id: String, target: Vector2i, direction
 	if not reason.is_empty():
 		return reason
 	var stats := config.spell(spell_id)
+	var logging := log != null and log.active
+	var event := {}
+	if logging:
+		event = _cast_log_event(player_index, spell_id, target, direction, spell_preview(player_index, spell_id, target, direction))
 	for cell in affected_tiles(spell_id, target, direction):
 		if not spell_skip(stats.land, cell).is_empty():
 			continue
@@ -833,6 +868,45 @@ func cast_spell(player_index: int, spell_id: String, target: Vector2i, direction
 	player.casts_this_turn += 1
 	if stats.cooldown > 0:
 		player.spell_cooldowns[spell_id] = stats.cooldown
+	if logging:
+		log.append(event)
+	return ""
+
+
+## Snapshot of a cast that is about to succeed. Tiles come from spell_preview.
+func _cast_log_event(player_index: int, spell_id: String, target: Vector2i, direction: int, preview: Dictionary) -> Dictionary:
+	var stats := config.spell(spell_id)
+	var changed := {}
+	for cell in preview["changed"]:
+		changed[cell] = true
+	var destroyed := {}
+	for cell in preview["destroyed"]:
+		destroyed[cell] = true
+	var tiles: Array = []
+	for cell in preview["tiles"]:
+		var here := cell as Vector2i
+		var from_land := map.land_at(here)
+		var skip := spell_skip(stats.land, here)
+		var to_land := from_land
+		if skip.is_empty() and changed.has(here):
+			to_land = stats.land
+		var building := ""
+		if destroyed.has(here):
+			var placed := _building_at(here)
+			if placed != null:
+				building = placed.kind
+		var dropped := ""
+		if to_land == "water" and from_land != "water":
+			dropped = _queued_building_id(here)
+		tiles.append(GameLog.tile_record(here, from_land, to_land, owner_at(here), skip, building, dropped))
+	return GameLog.cast_event(turn, player_index, MatchResult.player_name(player_index, human_index), spell_id, stats.spell_name, stats.shape, target, direction, stats.mana, tiles)
+
+
+func _queued_building_id(cell: Vector2i) -> String:
+	for city in cities:
+		for item in city.queue:
+			if item.is_building and item.cell == cell:
+				return item.item_id
 	return ""
 
 

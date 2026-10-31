@@ -24,7 +24,7 @@ The score ending's reason text is `Turn 50 score`, including when `turn_limit` i
 
 ## Screens
 
-`scenes/victory.tscn` and `scenes/defeat.tscn` are the only end screens. Each has a `%ScoreTable` and a hidden `%ScoreRow` template. The screen duplicates that row once per player and shows the name, color, score, tiles, cities, population, and reason. Restart loads the config again and opens a new game. Main Menu returns to the menu. The in-game menu's Restart does the same new game.
+`scenes/victory.tscn` and `scenes/defeat.tscn` are the only end screens. Each has a `%ScoreTable` and a hidden `%ScoreRow` template. The screen duplicates that row once per player and shows the name, color, score, tiles, cities, population, and reason. `%LogPath` shows the absolute path of this game's log (`MatchResult.log_path`). Restart loads the config again and opens a new game. Main Menu returns to the menu. The in-game menu's Restart does the same new game. Leaving either way before the match ends writes no `end` line. See `docs/game_log.md`.
 
 Map input stops once `GameSetup.result` is set. End Turn, spells, and orders do nothing, and the view changes scene from `_refresh_board`.
 

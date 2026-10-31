@@ -6,6 +6,8 @@ extends Control
 
 func _ready() -> void:
 	var result := MatchResult.latest
+	var log_path := %LogPath as Label
+	log_path.text = "" if result == null else result.log_path
 	var template := %ScoreRow as HBoxContainer
 	template.visible = false
 	if result == null:

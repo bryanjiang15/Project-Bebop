@@ -21,6 +21,8 @@ func _init() -> void:
 
 
 func _run() -> void:
+	# The suite must not write into the real user://logs folder.
+	GameLog.directory_override = "/tmp/bebop-smoke-logs"
 	change_scene_to_file("res://scenes/main_menu.tscn")
 	var menu := await _wait_for("res://scripts/view/main_menu.gd")
 	if menu == null:
