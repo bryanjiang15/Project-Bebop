@@ -7,6 +7,7 @@ extends SceneTree
 
 const LOG_DIR := "/tmp/bebop-ticket19-smoke"
 const CONFIG_PATH := "/tmp/bebop-ticket19-smoke-config.json"
+const _SceneDriver = preload("res://tests/scene_driver.gd")
 
 
 func _init() -> void:
@@ -16,7 +17,7 @@ func _init() -> void:
 func _run() -> void:
 	if not _write_config():
 		return
-	_remove_tree(LOG_DIR)
+	_SceneDriver.remove_tree(LOG_DIR)
 	DirAccess.make_dir_recursive_absolute(LOG_DIR)
 	GameConfig.path_override = CONFIG_PATH
 	change_scene_to_file("res://scenes/main_menu.tscn")
@@ -38,7 +39,7 @@ func _run() -> void:
 		quit(1)
 		return
 	var settler := setup.human_settler_cell()
-	_click_cell(game, settler)
+	_SceneDriver.click_cell(game, settler)
 	var found := game.get_node("%FoundCityButton") as Button
 	if found.disabled:
 		print("FAIL found city ", (game.get_node("%FoundCityReason") as Label).text)
@@ -55,7 +56,7 @@ func _run() -> void:
 	var mouth := Hex.axial_to_offset(Hex.neighbor(Hex.offset_to_axial(city.cell), Hex.EAST))
 	if not _cast_through_bar(game, "carve_river", mouth):
 		return
-	if _count_kind(_log_events(log_path), "cast") != 2:
+	if _SceneDriver.count_kind(_SceneDriver.log_events(log_path), "cast") != 2:
 		print("FAIL cast count")
 		quit(1)
 		return
@@ -78,8 +79,8 @@ func _run() -> void:
 		print("FAIL log label '", shown, "' expected ", log_path)
 		quit(1)
 		return
-	var events := _log_events(log_path)
-	if _count_kind(events, "start") != 1 or _count_kind(events, "cast") != 2 or _count_kind(events, "end") != 1:
+	var events := _SceneDriver.log_events(log_path)
+	if _SceneDriver.count_kind(events, "start") != 1 or _SceneDriver.count_kind(events, "cast") != 2 or _SceneDriver.count_kind(events, "end") != 1:
 		print("FAIL events ", events.size())
 		quit(1)
 		return
@@ -116,13 +117,13 @@ func _run() -> void:
 		print("FAIL second log ", second.log.absolute_path)
 		quit(1)
 		return
-	var second_events := _log_events(second.log.absolute_path)
-	var first_events := _log_events(log_path)
-	if _count_kind(second_events, "start") != 1 or _count_kind(second_events, "end") != 0:
+	var second_events := _SceneDriver.log_events(second.log.absolute_path)
+	var first_events := _SceneDriver.log_events(log_path)
+	if _SceneDriver.count_kind(second_events, "start") != 1 or _SceneDriver.count_kind(second_events, "end") != 0:
 		print("FAIL second file is not a fresh start")
 		quit(1)
 		return
-	if _count_kind(first_events, "end") != 1:
+	if _SceneDriver.count_kind(first_events, "end") != 1:
 		print("FAIL the finished game lost its end line")
 		quit(1)
 		return
@@ -169,50 +170,13 @@ func _cast_through_bar(game: Node, spell_id: String, cell: Vector2i) -> bool:
 		quit(1)
 		return false
 	button.pressed.emit()
-	_click_cell(game, cell)
+	_SceneDriver.click_cell(game, cell)
 	if setup.players[setup.human_index].casts_this_turn != before + 1:
 		print("FAIL ", spell_id, " did not cast")
 		quit(1)
 		return false
 	print("PASS cast ", spell_id, " at ", cell)
 	return true
-
-
-func _click_cell(game: Node, cell: Vector2i) -> void:
-	var map := game.get_node("%Map") as TileMapLayer
-	var world: Vector2 = map.to_global(map.map_to_local(cell))
-	var screen: Vector2 = game.get_viewport().get_canvas_transform() * world
-	var press := InputEventMouseButton.new()
-	press.button_index = MOUSE_BUTTON_LEFT
-	press.pressed = true
-	press.position = screen
-	press.global_position = screen
-	game._unhandled_input(press)
-	var release := press.duplicate() as InputEventMouseButton
-	release.pressed = false
-	game._unhandled_input(release)
-
-
-func _log_events(path: String) -> Array:
-	var events: Array = []
-	var text := FileAccess.get_file_as_string(path)
-	for line in text.split("\n", false):
-		if line.strip_edges().is_empty():
-			continue
-		var parsed: Variant = JSON.parse_string(line)
-		if parsed == null or not (parsed is Dictionary):
-			events.append({"event": ""})
-		else:
-			events.append(parsed)
-	return events
-
-
-func _count_kind(events: Array, kind: String) -> int:
-	var count := 0
-	for event in events:
-		if str((event as Dictionary).get("event", "")) == kind:
-			count += 1
-	return count
 
 
 func _jsonl_files(path: String) -> PackedStringArray:
@@ -223,36 +187,5 @@ func _jsonl_files(path: String) -> PackedStringArray:
 	return out
 
 
-func _remove_tree(path: String) -> void:
-	if FileAccess.file_exists(path):
-		DirAccess.remove_absolute(path)
-		return
-	if not DirAccess.dir_exists_absolute(path):
-		return
-	var dir := DirAccess.open(path)
-	if dir == null:
-		return
-	dir.list_dir_begin()
-	var entry := dir.get_next()
-	while entry != "":
-		if entry != "." and entry != "..":
-			var child := path.path_join(entry)
-			if dir.current_is_dir():
-				_remove_tree(child)
-			else:
-				dir.remove(entry)
-		entry = dir.get_next()
-	dir.list_dir_end()
-	DirAccess.remove_absolute(path)
-
-
 func _wait_for(script_path: String) -> Node:
-	for _i in 80:
-		await process_frame
-		var scene := current_scene
-		if scene != null and scene.get_script() != null and scene.get_script().resource_path == script_path:
-			await process_frame
-			return scene
-	print("FAIL scene did not load: ", script_path)
-	quit(1)
-	return null
+	return await _SceneDriver.wait_for(self, script_path, 80)
