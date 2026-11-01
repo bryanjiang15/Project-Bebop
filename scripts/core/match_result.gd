@@ -31,6 +31,8 @@ var human_won: bool
 var ending: String = ""
 var turn: int
 var rows: Array[Row] = []
+## Absolute path of this game's log. Empty when logging is off or the file could not be opened.
+var log_path: String = ""
 
 
 static func player_name(index: int, human_index: int) -> String:

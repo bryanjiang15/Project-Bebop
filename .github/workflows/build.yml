@@ -109,6 +109,19 @@ jobs:
             exit 1
           fi
 
+      - name: Run game-log smoke test
+        run: |
+          set -o pipefail
+          godot --headless --path . --script res://tests/smoke_log.gd 2>&1 | tee test_smoke_log.log
+          if grep -E "SCRIPT ERROR|^ERROR:" test_smoke_log.log; then
+            echo "Game-log smoke produced errors"
+            exit 1
+          fi
+          if ! grep -q "SMOKE LOG OK" test_smoke_log.log; then
+            echo "Game-log smoke did not finish"
+            exit 1
+          fi
+
       - name: Export macOS build
         run: |
           set -o pipefail

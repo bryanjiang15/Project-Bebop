@@ -21,6 +21,8 @@ func _init() -> void:
 
 
 func _run() -> void:
+	# The suite must not write into the real user://logs folder.
+	GameLog.directory_override = "/tmp/bebop-smoke-logs"
 	change_scene_to_file("res://scenes/main_menu.tscn")
 	var menu := await _wait_for("res://scripts/view/main_menu.gd")
 	if menu == null:
@@ -264,6 +266,9 @@ func _warrior_orders(game: Node) -> bool:
 	if settler != null and settler.mp <= 0 and not setup.has_unordered_moves(setup.human_index):
 		settler.mp = 1
 		settler.order = ""
+	# A settler has no HP. Volcanic ground removes them on End Turn, and with
+	# no city yet that eliminates the player. This check needs the turn to advance.
+	_spare_settlers(setup)
 	(game.get_node("%EndTurnButton") as Button).pressed.emit()
 	var turn := (game.get_node("%TurnLabel") as Label).text
 	var warning := (game.get_node("%EndTurnWarning") as Label).text
@@ -371,6 +376,9 @@ func _capture_city_and_settler(game: Node) -> bool:
 		quit(1)
 		return false
 	print("PASS city at 0 HP")
+	# The human settler is still on the start tile and the human has no city.
+	# Volcanic ground here eliminates them and leaves the game scene.
+	_spare_settlers(setup)
 	(game.get_node("%EndTurnButton") as Button).pressed.emit()
 	if not (game.get_node("%EndTurnWarning") as Label).text.is_empty():
 		(game.get_node("%EndTurnButton") as Button).pressed.emit()
@@ -1534,6 +1542,9 @@ func _score_ending(game: Node) -> bool:
 		print("FAIL tuned turn label '", shown, "'")
 		quit(1)
 		return false
+	# Volcanic damage is applied before the turn-limit ranking. A settler on
+	# that ground would end the match as an elimination instead of the score.
+	_spare_settlers(setup)
 	_confirm_end(game)
 	var screen := await _wait_for("res://scripts/view/end_screen.gd")
 	if screen == null:
@@ -1748,6 +1759,17 @@ func _player_unit(setup: GameSetup, player: int, unit_type: String) -> PlayerSta
 func _paint_plains(setup: GameSetup, cell: Vector2i) -> void:
 	if setup.map.in_bounds(cell):
 		setup.map.set_land(cell, "plains")
+
+
+## Settlers have no HP, so volcanic ground removes them at End Turn.
+## That can eliminate a player who has not founded a city yet.
+func _spare_settlers(setup: GameSetup) -> void:
+	for player in setup.players:
+		for unit in player.units:
+			if unit.unit_type != "settler":
+				continue
+			if setup.map.land_at(unit.cell) == "volcanic":
+				setup.map.set_land(unit.cell, "plains")
 
 
 func _wait_for(script_path: String) -> Node:

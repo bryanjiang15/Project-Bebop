@@ -11,7 +11,7 @@ scenes/           main_menu.tscn, game.tscn, victory.tscn, defeat.tscn
 scenes/ui/        menu_button.tscn (instanced buttons), queue_row.tscn, spell_button.tscn
 scenes/actors/    unit.tscn (instanced once per visible unit), hp_bar.tscn
 scenes/view/      move_highlight.tscn, city_marker.tscn, border_segment.tscn, building_marker.tscn
-scripts/core/     RefCounted rules: hex.gd, game_config.gd, map_state.gd, map_generator.gd, player_state.gd, fog_state.gd, game_setup.gd, pathfinder.gd, map_city.gd, city_rules.gd, combat.gd, spells.gd, score.gd, match_result.gd
+scripts/core/     RefCounted rules: hex.gd, game_config.gd, map_state.gd, map_generator.gd, player_state.gd, fog_state.gd, game_setup.gd, pathfinder.gd, map_city.gd, city_rules.gd, combat.gd, spells.gd, score.gd, match_result.gd, game_log.gd
 scripts/view/     rendering and input, including fog_overlay.gd
 config/game_config.json
 assets/art/       greybox art v0.2, bebop_tileset.tres, team_tint.gdshader
@@ -120,7 +120,13 @@ Cooldown ticks once per player at End Turn, after the mana sum, idle healing, an
 
 A player with no cities and no settlers is eliminated. Combat, settler capture, city capture, and volcanic death at End Turn run that check. Founding does not. An eliminated player's units are removed. Eliminating the human is Defeat immediately. Eliminating every rival is a conquest Victory immediately, and that check wins over the turn limit when both happen on the same End Turn.
 
-If nobody has won when End Turn finishes turn `turn_limit`, the highest score wins. Ties follow `ties.order`: more tiles, then more cities, then the human loses. The human must rank strictly first. `scenes/victory.tscn` and `scenes/defeat.tscn` show the score table from `MatchResult.latest`. Restart, from those screens or the in-game menu, starts a new game and clears that result. There is no debug key that opens the end screens. Details are in `docs/win_loss.md`.
+If nobody has won when End Turn finishes turn `turn_limit`, the highest score wins. Ties follow `ties.order`: more tiles, then more cities, then the human loses. The human must rank strictly first. `scenes/victory.tscn` and `scenes/defeat.tscn` show the score table from `MatchResult.latest`. `%LogPath` on each screen is the absolute path of that game's log. Restart, from those screens or the in-game menu, starts a new game and clears that result. There is no debug key that opens the end screens. Details are in `docs/win_loss.md`.
+
+## Game log
+
+Each New Game and Restart opens one JSON Lines file when `log.enabled` is true. The default folder is `log.directory` (`user://logs`). The file is `game_<YYYYMMDD-HHMMSS>_<seed>.jsonl`. stdout prints `game log: <absolute path>` next to the seed line. `GameLog` builds the dictionaries. `GameLog.Writer` appends them and flushes each line. A failed create or write is a `push_warning` and the match keeps going.
+
+`start` records the timestamp, seed, map size, `turn_limit`, each player (index, `You` / `Rival N`, color, human flag), and the score weights. A successful `cast_spell` records one `cast`: turn, player, spell id and name, shape, target, line direction, mana cost, and every affected tile with `from` / `to` land, skip reason, owner at cast time, a finished building removed, and a queued building dropped. Tiles come from `spell_preview`. A rejected cast writes nothing. `_finish` records one `end` whose rows are the `MatchResult` rows, then stores the absolute path on `MatchResult.log_path`. Restart or Main Menu before the match ends leaves the file without an `end` line. The schema, the macOS path, and the test seams are in `docs/game_log.md`.
 
 ## Commands
 
@@ -133,11 +139,12 @@ godot --headless --path . --script res://tests/expect_missing_key.gd
 godot --headless --path . --quit-after 120 res://scenes/main_menu.tscn
 godot --headless --path . --quit-after 120 res://scenes/game.tscn
 godot --headless --path . --script res://tests/smoke_game.gd
+godot --headless --path . --script res://tests/smoke_log.gd
 ```
 
 `expect_missing_key.gd` must exit non-zero and report `game_config.json missing key: players.count`. The others must exit 0. CI greps every log for `SCRIPT ERROR` and `ERROR:` (`set -o pipefail`) except the missing-key step, which requires that specific error.
 
-Play the game with `godot --path .`. Left-click the start tile to select the settler, and again to select the warrior. Right-click a green tile to move. Right-click a red enemy tile to attack. S skips and F fortifies. B or **Found City** founds a city. Left-click the city to open its panel, then click a build button (for a building, click a highlighted tile next). The spell bar under the top bar lists the five spells. Click one, hover a tile to see the exact area, left-click to cast, and right-click or Esc to cancel. Enter or **End Turn** ends the turn. If units still have moves, that press warns and the next one confirms. Right-click a red city to attack it. At 0 HP, right-click again with a warrior to capture it. Right-click a lone enemy settler on a green tile to capture it; a ranged shot that cannot walk there destroys it. The turn resolves growth, production, borders, then mana, then city healing, then unit healing, then volcanic damage, then spell cooldowns. A unit idling on volcanic ground is healed before the hit, so a wounded one nets 0 and a full one loses 10. The top bar shows `Mana: N (+M/turn)`, `Turn` plus `N / 50`, and each player's score. A conquest, the human's elimination, or the turn-50 ranking opens Victory or Defeat with the score table. Restart there, or from the in-game menu, starts a new game. Escape toggles the in-game menu when no spell is armed.
+Play the game with `godot --path .`. Left-click the start tile to select the settler, and again to select the warrior. Right-click a green tile to move. Right-click a red enemy tile to attack. S skips and F fortifies. B or **Found City** founds a city. Left-click the city to open its panel, then click a build button (for a building, click a highlighted tile next). The spell bar under the top bar lists the five spells. Click one, hover a tile to see the exact area, left-click to cast, and right-click or Esc to cancel. Enter or **End Turn** ends the turn. If units still have moves, that press warns and the next one confirms. Right-click a red city to attack it. At 0 HP, right-click again with a warrior to capture it. Right-click a lone enemy settler on a green tile to capture it; a ranged shot that cannot walk there destroys it. The turn resolves growth, production, borders, then mana, then city healing, then unit healing, then volcanic damage, then spell cooldowns. A unit idling on volcanic ground is healed before the hit, so a wounded one nets 0 and a full one loses 10. The top bar shows `Mana: N (+M/turn)`, `Turn` plus `N / 50`, and each player's score. A conquest, the human's elimination, or the turn-50 ranking opens Victory or Defeat with the score table and the log path. Restart there, or from the in-game menu, starts a new game and a new log file. Escape toggles the in-game menu when no spell is armed.
 
 ## Rules for agents
 

@@ -118,6 +118,11 @@ var camera_zoom_step: float
 var camera_pan_margin: float
 var camera_key_pan_speed: float
 var camera_default_zoom: float
+var log_enabled: bool
+var log_directory: String = ""
+
+## Tests point load_file() at a copy of the config. Empty uses PATH.
+static var path_override: String = ""
 
 
 class LandStats extends RefCounted:
@@ -190,7 +195,10 @@ class UnitStats extends RefCounted:
 
 
 static func load_file(path: String = PATH):
-	return from_dict(read_json(path))
+	var chosen := path
+	if path == PATH and not path_override.is_empty():
+		chosen = path_override
+	return from_dict(read_json(chosen))
 
 
 static func read_json(path: String) -> Dictionary:
@@ -346,6 +354,8 @@ static func required_paths() -> PackedStringArray:
 		"camera.pan_margin",
 		"camera.key_pan_speed",
 		"camera.default_zoom",
+		"log.enabled",
+		"log.directory",
 	]))
 	return paths
 
@@ -574,6 +584,10 @@ func to_dict() -> Dictionary:
 			"key_pan_speed": camera_key_pan_speed,
 			"default_zoom": camera_default_zoom,
 		},
+		"log": {
+			"enabled": log_enabled,
+			"directory": log_directory,
+		},
 	}
 
 
@@ -723,6 +737,8 @@ func _read(data: Dictionary) -> void:
 	camera_pan_margin = _float(data, "camera.pan_margin")
 	camera_key_pan_speed = _float(data, "camera.key_pan_speed")
 	camera_default_zoom = _float(data, "camera.default_zoom")
+	log_enabled = _bool(data, "log.enabled")
+	log_directory = _string(data, "log.directory")
 
 
 static func _leaf_paths(data: Dictionary, prefix: String = "") -> Dictionary:
