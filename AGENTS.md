@@ -10,12 +10,12 @@ Notion is the source of truth for design. Copies live in `docs/`. If the brief a
 scenes/           main_menu.tscn, game.tscn, victory.tscn, defeat.tscn
 scenes/ui/        menu_button.tscn (instanced buttons), queue_row.tscn, spell_button.tscn
 scenes/actors/    unit.tscn (instanced once per visible unit), hp_bar.tscn
-scenes/view/      move_highlight.tscn, city_marker.tscn, border_segment.tscn, building_marker.tscn
+scenes/view/      move_highlight.tscn, city_marker.tscn, border_segment.tscn, building_marker.tscn, construction_marker.tscn
 scripts/core/     RefCounted rules: hex.gd, game_config.gd, map_state.gd, map_generator.gd, player_state.gd, fog_state.gd, game_setup.gd, pathfinder.gd, map_city.gd, city_rules.gd, combat.gd, spells.gd, score.gd, match_result.gd, game_log.gd
 scripts/view/     rendering and input, including fog_overlay.gd
 config/game_config.json
 assets/art/       greybox art v0.2, bebop_tileset.tres, team_tint.gdshader
-tests/            run_tests.gd, expect_missing_key.gd, smoke_game.gd, smoke_log.gd, soak_games.gd, scene_driver.gd, soak_policy.gd, soak_invariants.gd, capture_ticket20.gd
+tests/            run_tests.gd, expect_missing_key.gd, smoke_game.gd, smoke_log.gd, soak_games.gd, scene_driver.gd, soak_policy.gd, soak_invariants.gd, capture_ticket20.gd, capture_ticket23.gd
 docs/
 ```
 
@@ -100,7 +100,7 @@ Every `city.border_turns_per_growth` turns the city claims one tile, adjacent to
 
 The queue spends stored production on its first item. Costs are `units.<type>.cost` and `buildings.costs.*`. Finishing a settler requires population at least `units.settler.min_city_size`, then subtracts `units.settler.population_cost` and spawns through `spawn_unit` (city center, otherwise the nearest free passable tile inside the borders). Other units spawn the same way with no population cost. A building is chosen onto a border tile that is not the center and has no building; the click stores that tile on the queue item. A Granary adds `buildings.granary_food`. A Lumber Mill adds `buildings.lumber_mill_production_per_adjacent_forest` for each forest on the six neighbors of its tile. Cancelling the front item discards stored production. An empty queue banks nothing.
 
-`%CityPanel` opens on a left click of the human's city and stays open while a unit is selected. A cast refreshes its yields in that same frame. If that tile also has the human's unit, the first click selects the unit and the next click selects the city. Right click still moves. Enter still ends the turn. Queue rows are `scenes/ui/queue_row.tscn`. Building markers are `scenes/view/building_marker.tscn`. The full rules and the placement reasons are in `docs/cities.md`.
+`%CityPanel` opens on a left click of the human's city and stays open while a unit is selected. A cast refreshes its yields in that same frame. If that tile also has the human's unit, the first click selects the unit and the next click selects the city. Right click still moves. Enter still ends the turn. Queue rows are `scenes/ui/queue_row.tscn`. Building markers are `scenes/view/building_marker.tscn`. A queued building is `scenes/view/construction_marker.tscn` on that tile: a placeholder outline labeled `<Kind> (building)`, drawn for the human's own cities only, and skipped on an unrevealed tile. It shows up in the enqueue refresh and leaves when the building finishes, the item is cancelled, the tile is flooded, or the city is captured. The full rules and the placement reasons are in `docs/cities.md`.
 
 No new city config keys were added. Mana reads the existing `players.starting_mana`, `city.mana_base`, `city.mana_per_population_divisor`, `buildings.mana_well_mana`, and `turn_limit` keys, along with the other `city`, `growth`, `buildings`, `units`, and `borders` keys. Spell costs and cooldowns are the existing `spells` keys, plus a display `name` on each spell.
 

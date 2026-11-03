@@ -46,6 +46,7 @@ const _BORDER_SCENE: PackedScene = preload("res://scenes/view/border_segment.tsc
 const _QUEUE_SCENE: PackedScene = preload("res://scenes/ui/queue_row.tscn")
 const _SPELL_SCENE: PackedScene = preload("res://scenes/ui/spell_button.tscn")
 const _BUILDING_SCENE: PackedScene = preload("res://scenes/view/building_marker.tscn")
+const _CONSTRUCTION_SCENE: PackedScene = preload("res://scenes/view/construction_marker.tscn")
 const _UNIT_ART := {
 	"settler": ["res://assets/art/unit_settler.png", "res://assets/art/unit_settler_mask.png"],
 	"scout": ["res://assets/art/unit_scout.png", "res://assets/art/unit_scout_mask.png"],
@@ -616,6 +617,24 @@ func _refresh_actors() -> void:
 			poly.color = tint
 			(mark.get_node("Name") as Label).text = placed.kind.capitalize()
 			_actors.add_child(mark)
+		# The human's own queued buildings only. Rivals stay unmarked, and an
+		# unrevealed tile stays unmarked.
+		if city.player != viewer:
+			continue
+		for item in city.queue:
+			if not item.is_building:
+				continue
+			if setup.fog.sight(viewer, item.cell) == FogState.Sight.UNREVEALED:
+				continue
+			var stake := _CONSTRUCTION_SCENE.instantiate() as Node2D
+			stake.name = "Construction_%d_%d_%d" % [city.id, item.cell.x, item.cell.y]
+			stake.position = _map.map_to_local(item.cell)
+			var outline := stake.get_node("Mark") as Line2D
+			var stake_tint := Color.html(setup.players[city.player].color)
+			stake_tint.a = 0.95
+			outline.default_color = stake_tint
+			(stake.get_node("Name") as Label).text = "%s (building)" % item.item_id.capitalize()
+			_actors.add_child(stake)
 	var stacked := {}
 	for player in setup.players:
 		for unit in player.units:
@@ -976,8 +995,7 @@ func _try_place(cell: Vector2i) -> void:
 	var reason := setup.enqueue(city, _placing, cell)
 	if reason.is_empty():
 		_placing = ""
-		_refresh_selection()
-		_refresh_city_panel()
+		_refresh_after_queue()
 		return
 	_refresh_city_panel(reason)
 
@@ -997,8 +1015,9 @@ func _on_queue_cancel(index: int) -> void:
 
 
 func _refresh_after_queue() -> void:
+	_refresh_actors()
+	_refresh_selection()
 	_refresh_city_panel()
-	_rebuild_move_highlights()
 
 
 func _refresh_city_panel(notice: String = "") -> void:

@@ -1,0 +1,42 @@
+[gd_scene format=3]
+
+[node name="ConstructionMarker" type="Node2D"]
+
+[node name="Mark" type="Line2D" parent="."]
+points = PackedVector2Array(-16, 6, 0, -18, 16, 6, 0, 20, -16, 6)
+width = 7.0
+default_color = Color(0.85, 0.78, 0.42, 0.95)
+joint_mode = 2
+begin_cap_mode = 2
+end_cap_mode = 2
+antialiased = true
+
+[node name="Brace" type="Line2D" parent="."]
+points = PackedVector2Array(-16, 6, 16, 6)
+width = 3.0
+default_color = Color(0.97, 0.96, 0.9, 0.92)
+begin_cap_mode = 2
+end_cap_mode = 2
+antialiased = true
+
+[node name="Post" type="Line2D" parent="."]
+points = PackedVector2Array(0, -18, 0, 20)
+width = 3.0
+default_color = Color(0.97, 0.96, 0.9, 0.92)
+begin_cap_mode = 2
+end_cap_mode = 2
+antialiased = true
+
+[node name="Name" type="Label" parent="."]
+offset_left = -130.0
+offset_top = -74.0
+offset_right = 130.0
+offset_bottom = -42.0
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.97, 0.96, 0.9, 1)
+theme_override_colors/font_outline_color = Color(0.05, 0.05, 0.06, 1)
+theme_override_constants/outline_size = 6
+theme_override_font_sizes/font_size = 16
+text = "Building (building)"
+horizontal_alignment = 1
+vertical_alignment = 1
