@@ -54,6 +54,8 @@ func _run() -> void:
 		return
 	if not _finish_mana_well(game):
 		return
+	if not await _construction_markers(game):
+		return
 	(game.get_node("%MenuButton") as Button).pressed.emit()
 	(game.get_node("%RestartButton") as Button).pressed.emit()
 	game = await _wait_for("res://scripts/view/game_view.gd")
@@ -152,6 +154,11 @@ func _assert_new_game(game: Node) -> bool:
 		print("FAIL visible sprites ", actors.get_child_count(), " expected ", shown)
 		quit(1)
 		return false
+	for child in actors.get_children():
+		if str(child.name).begins_with("Construction_"):
+			print("FAIL fresh board has ", child.name)
+			quit(1)
+			return false
 	if not _hover(game, hidden, false):
 		return false
 	if not _hover(game, human_cell, true):
@@ -1339,6 +1346,398 @@ func _finish_mana_well(game: Node) -> bool:
 		return false
 	print("PASS mana well +", setup.config.mana_well_mana, " ", (game.get_node("%ManaLabel") as Label).text, " panel ", panel_mana)
 	return true
+
+
+## Queued buildings draw a placeholder marker in the same refresh as the queue change.
+func _construction_markers(game: Node) -> bool:
+	var setup := game.get("setup") as GameSetup
+	var city := _human_city(setup)
+	if city == null:
+		print("FAIL construction has no human city")
+		quit(1)
+		return false
+	if not _select_city(game, city):
+		return false
+	(game.get_node("%BuildScout") as Button).pressed.emit()
+	if city.queue.is_empty() or city.queue[0].item_id != "scout":
+		print("FAIL scout did not queue for the marker check")
+		quit(1)
+		return false
+	if _construction_count(game) != 0:
+		print("FAIL a queued unit drew a construction marker")
+		quit(1)
+		return false
+	if not await _cancel_row(game, 0):
+		return false
+	if not city.queue.is_empty() or _construction_count(game) != 0:
+		print("FAIL scout cancel left a queue or a marker")
+		quit(1)
+		return false
+	var plot_a := _free_plot(setup, city, "granary", {})
+	var plot_b := _free_plot(setup, city, "lumber_mill", {plot_a: true})
+	if plot_a.x < 0 or plot_b.x < 0:
+		print("FAIL no pair of build tiles")
+		quit(1)
+		return false
+	if not _queue_building(game, city, "granary", plot_a):
+		return false
+	if not _queue_building(game, city, "lumber_mill", plot_b):
+		return false
+	if not _expect_construction(game, city.id, plot_a, "granary"):
+		return false
+	if not _expect_construction(game, city.id, plot_b, "lumber_mill"):
+		return false
+	if _construction_count(game) != 2:
+		print("FAIL expected two construction markers, saw ", _construction_count(game))
+		quit(1)
+		return false
+	print("PASS queued markers ", _marker_name("Construction", city.id, plot_a), " ", _marker_name("Construction", city.id, plot_b))
+	if not await _cancel_row(game, 1):
+		return false
+	if not _expect_construction(game, city.id, plot_a, "granary"):
+		return false
+	if not _expect_no_construction(game, city.id, plot_b):
+		return false
+	if not await _cancel_row(game, 0):
+		return false
+	if not _expect_no_construction(game, city.id, plot_a) or _construction_count(game) != 0:
+		print("FAIL cancel left a construction marker")
+		quit(1)
+		return false
+	print("PASS cancelled markers")
+	setup.config.granary_cost = 1
+	if not _queue_building(game, city, "granary", plot_a):
+		return false
+	if not _expect_construction(game, city.id, plot_a, "granary"):
+		return false
+	var built := false
+	for _turn in 4:
+		_spare_settlers(setup)
+		if not _confirm_end_turn(game):
+			return false
+		if _has_building(city, "granary", plot_a):
+			built = true
+			break
+	if not built:
+		print("FAIL granary did not finish")
+		quit(1)
+		return false
+	if not _expect_no_construction(game, city.id, plot_a):
+		return false
+	if not _actors_has(game, _marker_name("Building", city.id, plot_a)):
+		print("FAIL finished granary has no building marker")
+		quit(1)
+		return false
+	print("PASS finished marker ", _marker_name("Building", city.id, plot_a))
+	plot_b = _free_plot(setup, city, "lumber_mill", {plot_a: true})
+	if plot_b.x < 0:
+		print("FAIL no tile to flood")
+		quit(1)
+		return false
+	if not _queue_building(game, city, "lumber_mill", plot_b):
+		return false
+	if not _expect_construction(game, city.id, plot_b, "lumber_mill"):
+		return false
+	var human := setup.players[setup.human_index]
+	human.mana = 80
+	human.casts_this_turn = 0
+	human.spell_cooldowns.clear()
+	(game.get_node("%SpellButtons").get_node("Spell_carve_river") as Button).pressed.emit()
+	_click_cell(game, plot_b)
+	if setup.map.land_at(plot_b) != "water" or _queue_has(city, "lumber_mill", plot_b):
+		print("FAIL flood land ", setup.map.land_at(plot_b), " queued ", _queue_has(city, "lumber_mill", plot_b))
+		quit(1)
+		return false
+	if not _expect_no_construction(game, city.id, plot_b):
+		return false
+	print("PASS flooded marker")
+	var plot_c := _free_plot(setup, city, "granary", {plot_a: true, plot_b: true})
+	if plot_c.x < 0:
+		print("FAIL no tile left to queue")
+		quit(1)
+		return false
+	if not _queue_building(game, city, "granary", plot_c):
+		return false
+	if not _expect_construction(game, city.id, plot_c, "granary"):
+		return false
+	if not _rival_construction_hidden(game, setup, city, plot_c):
+		return false
+	if not _capture_clears_construction(game, setup, city, plot_c):
+		return false
+	print("PASS construction markers")
+	return true
+
+
+func _rival_construction_hidden(game: Node, setup: GameSetup, city: MapCity, human_plot: Vector2i) -> bool:
+	var rival := _living_rival(setup)
+	if rival < 0:
+		print("FAIL no living rival for construction")
+		quit(1)
+		return false
+	var founder := _player_unit(setup, rival, "settler")
+	if founder == null:
+		var born := _open_plains(setup, {})
+		founder = setup.spawn_unit(rival, "settler", born)
+	if founder == null:
+		print("FAIL no rival settler for construction")
+		quit(1)
+		return false
+	var site := _rival_site(setup, founder, city.cell)
+	if site.x < 0:
+		print("FAIL no rival city site")
+		quit(1)
+		return false
+	var rival_city := setup.found_city(founder)
+	if rival_city == null:
+		print("FAIL rival city did not found")
+		quit(1)
+		return false
+	var plot := Vector2i(-1, -1)
+	for cell in setup.placement_tiles(rival_city, "granary"):
+		if setup._unit_at(cell) != null:
+			continue
+		if setup.fog.sight(setup.human_index, cell) != FogState.Sight.UNREVEALED:
+			plot = cell
+			break
+	if plot.x < 0:
+		var tiles := setup.placement_tiles(rival_city, "granary")
+		if tiles.is_empty():
+			print("FAIL rival city has no build tile")
+			quit(1)
+			return false
+		plot = tiles[0]
+		_paint_plains(setup, plot)
+		_vacate(setup, plot, {})
+		var watcher := _human_unit(setup, "warrior")
+		if watcher == null:
+			watcher = _human_unit(setup, "scout")
+		if watcher == null:
+			print("FAIL no human unit to reveal the rival plot")
+			quit(1)
+			return false
+		watcher.cell = plot
+		setup._refresh_fog()
+	if setup.fog.sight(setup.human_index, plot) == FogState.Sight.UNREVEALED:
+		print("FAIL rival plot stayed unrevealed ", plot)
+		quit(1)
+		return false
+	var why := setup.enqueue(rival_city, "granary", plot)
+	if not why.is_empty():
+		print("FAIL rival enqueue ", why)
+		quit(1)
+		return false
+	game._refresh_board()
+	if _actors_has(game, _marker_name("Construction", rival_city.id, plot)):
+		print("FAIL rival construction marker on a revealed tile ", plot)
+		quit(1)
+		return false
+	if not _expect_construction(game, city.id, human_plot, "granary"):
+		return false
+	print("PASS rival construction hidden ", plot)
+	return true
+
+
+func _capture_clears_construction(game: Node, setup: GameSetup, city: MapCity, plot: Vector2i) -> bool:
+	var reserved := {city.cell: true, plot: true}
+	for cell in setup.territory_cells(city):
+		reserved[cell] = true
+	if not _spare_human(setup, reserved):
+		print("FAIL spare settler before capture")
+		quit(1)
+		return false
+	var rival := _living_rival(setup)
+	if rival < 0:
+		print("FAIL no living rival to capture the city")
+		quit(1)
+		return false
+	var taker := _player_unit(setup, rival, "warrior")
+	if taker == null:
+		var born := _open_plains(setup, reserved)
+		taker = setup.spawn_unit(rival, "warrior", born)
+	if taker == null:
+		print("FAIL no warrior to capture the city")
+		quit(1)
+		return false
+	var approach := _open_neighbor(setup, city.cell)
+	if approach.x < 0:
+		print("FAIL no approach for capture")
+		quit(1)
+		return false
+	_paint_plains(setup, approach)
+	_paint_plains(setup, city.cell)
+	_vacate(setup, city.cell, {})
+	_vacate(setup, approach, {city.cell: true})
+	city.hp = 0
+	taker.cell = approach
+	taker.mp = setup.config.unit("warrior").move
+	if not setup.move_unit(taker, city.cell):
+		print("FAIL capture move from ", approach, " onto ", city.cell)
+		quit(1)
+		return false
+	game._refresh_board()
+	if setup.result != null:
+		print("FAIL capture ended the game ", setup.result.ending)
+		quit(1)
+		return false
+	if not city.queue.is_empty() or _actors_has(game, _marker_name("Construction", city.id, plot)):
+		print("FAIL capture left a queue or a marker")
+		quit(1)
+		return false
+	print("PASS capture cleared markers")
+	return true
+
+
+func _queue_building(game: Node, city: MapCity, item_id: String, cell: Vector2i) -> bool:
+	if not _select_city(game, city):
+		return false
+	var button := "%BuildGranary"
+	if item_id == "lumber_mill":
+		button = "%BuildLumberMill"
+	elif item_id == "mana_well":
+		button = "%BuildManaWell"
+	(game.get_node(button) as Button).pressed.emit()
+	_click_cell(game, cell)
+	if not _queue_has(city, item_id, cell):
+		print("FAIL ", item_id, " not queued '", (game.get_node("%CityReason") as Label).text, "'")
+		quit(1)
+		return false
+	return true
+
+
+func _cancel_row(game: Node, index: int) -> bool:
+	var rows := game.get_node("%QueueList").get_children()
+	if index < 0 or index >= rows.size():
+		print("FAIL queue row ", index, " of ", rows.size())
+		quit(1)
+		return false
+	(rows[index].get_node("CancelButton") as Button).pressed.emit()
+	await process_frame
+	return true
+
+
+func _human_city(setup: GameSetup) -> MapCity:
+	for city in setup.cities:
+		if city.player == setup.human_index:
+			return city
+	return null
+
+
+func _living_rival(setup: GameSetup) -> int:
+	for player in setup.players:
+		if player.index == setup.human_index or player.eliminated:
+			continue
+		return player.index
+	return -1
+
+
+func _rival_site(setup: GameSetup, founder: PlayerState.UnitState, origin: Vector2i) -> Vector2i:
+	var axial := Hex.offset_to_axial(origin)
+	for dist in range(setup.config.city_min_distance, 14):
+		for hex in Hex.disk(axial, dist):
+			var at := hex as Vector2i
+			if Hex.distance(axial, at) != dist:
+				continue
+			var cell := Hex.axial_to_offset(at)
+			if not setup.map.in_bounds(cell):
+				continue
+			_paint_plains(setup, cell)
+			_vacate(setup, cell, {})
+			founder.cell = cell
+			if setup.can_found(founder).is_empty():
+				return cell
+	return Vector2i(-1, -1)
+
+
+func _spare_human(setup: GameSetup, reserved: Dictionary) -> bool:
+	var hold := reserved.duplicate()
+	for _try in 8:
+		var keep := _open_plains(setup, hold)
+		if keep.x < 0:
+			return false
+		if setup.spawn_unit(setup.human_index, "settler", keep) != null:
+			return true
+		hold[keep] = true
+	return false
+
+
+func _vacate(setup: GameSetup, cell: Vector2i, reserved: Dictionary) -> void:
+	var hold := reserved.duplicate()
+	hold[cell] = true
+	for player in setup.players:
+		for unit in player.units:
+			if unit.cell != cell:
+				continue
+			var park := _open_plains(setup, hold)
+			if park.x < 0:
+				return
+			unit.cell = park
+			hold[park] = true
+
+
+func _free_plot(setup: GameSetup, city: MapCity, item_id: String, used: Dictionary) -> Vector2i:
+	for cell in setup.placement_tiles(city, item_id):
+		if used.has(cell) or setup._unit_at(cell) != null:
+			continue
+		return cell
+	return Vector2i(-1, -1)
+
+
+func _has_building(city: MapCity, kind: String, cell: Vector2i) -> bool:
+	for building in city.buildings:
+		if building.kind == kind and building.cell == cell:
+			return true
+	return false
+
+
+func _queue_has(city: MapCity, item_id: String, cell: Vector2i) -> bool:
+	for item in city.queue:
+		if item.item_id == item_id and item.is_building and item.cell == cell:
+			return true
+	return false
+
+
+func _expect_construction(game: Node, city_id: int, cell: Vector2i, item_id: String) -> bool:
+	var node_name := _marker_name("Construction", city_id, cell)
+	var node := game.get_node("%Actors").get_node_or_null(node_name)
+	if node == null:
+		print("FAIL missing ", node_name)
+		quit(1)
+		return false
+	if _actors_has(game, _marker_name("Building", city_id, cell)):
+		print("FAIL building marker shares ", cell)
+		quit(1)
+		return false
+	var label := (node.get_node("Name") as Label).text
+	var expected := "%s (building)" % item_id.capitalize()
+	if label != expected:
+		print("FAIL construction label '", label, "' expected ", expected)
+		quit(1)
+		return false
+	return true
+
+
+func _expect_no_construction(game: Node, city_id: int, cell: Vector2i) -> bool:
+	if _actors_has(game, _marker_name("Construction", city_id, cell)):
+		print("FAIL construction marker stayed on ", cell)
+		quit(1)
+		return false
+	return true
+
+
+func _construction_count(game: Node) -> int:
+	var count := 0
+	for child in game.get_node("%Actors").get_children():
+		if str(child.name).begins_with("Construction_"):
+			count += 1
+	return count
+
+
+func _actors_has(game: Node, node_name: String) -> bool:
+	return game.get_node("%Actors").get_node_or_null(node_name) != null
+
+
+func _marker_name(prefix: String, city_id: int, cell: Vector2i) -> String:
+	return "%s_%d_%d_%d" % [prefix, city_id, cell.x, cell.y]
 
 
 func _confirm_end_turn(game: Node) -> bool:

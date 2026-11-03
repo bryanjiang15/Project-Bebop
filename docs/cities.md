@@ -52,7 +52,7 @@ Founding still claims the disk of `city.border_start_radius`. After that, every 
 
 Cancelling the item in front discards the stored production. Cancelling a later item does not. Moving an item keeps the stored production and applies it to whichever item is now first.
 
-A queued building remembers the tile chosen at enqueue time. If that tile becomes water, the item is dropped and nothing is refunded, even when `buildings.water_destroys_building` is false. That flag only removes a finished building. When the dropped item was the head, stored production is discarded. When it was later in the queue, the head keeps its stored production. The queue row disappears in the same refresh as the cast.
+A queued building remembers the tile chosen at enqueue time. If that tile becomes water, the item is dropped and nothing is refunded, even when `buildings.water_destroys_building` is false. That flag only removes a finished building. When the dropped item was the head, stored production is discarded. When it was later in the queue, the head keeps its stored production. The queue row and the construction marker disappear in the same refresh as the cast.
 
 A settler can be queued and can finish only when the population is at least `units.settler.min_city_size`. When `growth.settler_population_taken_when_finished` is true, finishing subtracts `units.settler.population_cost` and the result is not allowed to pass below `growth.starve_population_min`. If the city is too small, or no legal spawn tile exists, the item stays in front and stored production stops at its cost until it can finish. Cities resolve before volcanic damage, so a settler that finishes onto a volcanic city center is removed later in that same End Turn. See `docs/combat.md`.
 
@@ -72,6 +72,8 @@ The panel button starts placement. The next left click on a legal tile enqueues 
 
 `buildings.water_destroys_building` removes the finished building when a spell turns its tile into water. Water is not a legal placement tile after that, so the slot is free and unusable. A building on a neighbor tile is left alone. With the flag off, the finished building stays and the tile remains occupied. A queued building on the new water is dropped either way.
 
+While the building is queued, its tile shows `scenes/view/construction_marker.tscn`: a hollow diamond in the owner's color, a pale cross, and a label `<Kind> (building)`. The diamond is placeholder art. The Asset Artist replaces that scene later through the Producer. Every queued building gets a marker from the moment it is queued, not only the item in front, and a queued unit gets none. The marker appears in the same refresh as the enqueue. It is replaced by `scenes/view/building_marker.tscn` when the building finishes, and it is removed in the same refresh as a cancel, a flood that drops the item, or a capture that clears the queue. Only the human player's own construction is drawn. A rival's queued building never gets a marker, even on a tile the human has already revealed. An unrevealed tile is skipped.
+
 ## HP, healing, and capture
 
 Founding sets HP to `city.hp`. The city panel line is `HP current / max`. The map marker draws the same pair under the name, in red at 0. Combat, the capture move, and the heal rule are in `docs/combat.md`.
@@ -80,7 +82,7 @@ End Turn heals `city.heal` after mana is paid and before unit healing, unless `c
 
 ## Panel
 
-`%CityPanel` in `scenes/game.tscn` opens when the human left-clicks their city. It stays open while a unit is selected, and a cast or a capture refreshes its HP, food, production, mana, growth surplus, and queue from core in that same refresh. Build buttons enable only while the city is the selection. Clicking empty ground closes the panel. Food, production, mana, the growth bar, the border line, and the queue are filled from core. The build buttons are instances of `scenes/ui/menu_button.tscn`. Each queue row is an instance of `scenes/ui/queue_row.tscn`. A finished building is an instance of `scenes/view/building_marker.tscn` on `Actors`, drawn once its tile has been explored.
+`%CityPanel` in `scenes/game.tscn` opens when the human left-clicks their city. It stays open while a unit is selected, and a cast or a capture refreshes its HP, food, production, mana, growth surplus, and queue from core in that same refresh. Build buttons enable only while the city is the selection. Clicking empty ground closes the panel. Food, production, mana, the growth bar, the border line, and the queue are filled from core. The build buttons are instances of `scenes/ui/menu_button.tscn`. Each queue row is an instance of `scenes/ui/queue_row.tscn`. A finished building is an instance of `scenes/view/building_marker.tscn` on `Actors`, drawn once its tile has been explored. A queued building is an instance of `scenes/view/construction_marker.tscn` on that same node, for the human owner only.
 
 A left click still selects a human unit, and a right click still moves it or attacks a visible enemy. If the tile has the human's unit and the human's city, the first click selects the unit and the next click selects the city. Enter still ends the turn, and it does nothing while the in-game menu is open. City actions also do nothing while that menu is open.
 
