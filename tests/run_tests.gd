@@ -29,6 +29,7 @@ func _init() -> void:
 	_test_end_turn_key()
 	_test_win_loss()
 	_test_game_log()
+	_test_soak_invariants()
 	print("\nPassed: %d  Failed: %d" % [_passed, _failed])
 	quit(1 if _failed > 0 else 0)
 
@@ -2597,3 +2598,22 @@ func _rows_equal(got: Array, result: MatchResult) -> bool:
 		if bool(row["eliminated"]) != want.eliminated or str(row["reason"]) != want.reason:
 			return false
 	return true
+
+
+func _test_soak_invariants() -> void:
+	print("[soak invariants]")
+	var cfg: GameConfig = GameConfig.load_file()
+	cfg.log_enabled = false
+	var game := GameSetup.start_with_seed(cfg, 12345)
+	_ok(game != null and SoakInvariants.check(game).is_empty(), "a fresh game passes the soak invariants")
+	var unit := game.players[0].units[0]
+	var land := game.map.land_at(unit.cell)
+	game.map.set_land(unit.cell, "water")
+	var water := SoakInvariants.check(game)
+	_ok(water.contains("water"), "a land unit on water fails the soak invariants")
+	game.map.set_land(unit.cell, land)
+	game.players[0].mana = -1
+	var mana := SoakInvariants.check(game)
+	_ok(mana.contains("mana"), "negative mana fails the soak invariants")
+	game.players[0].mana = 0
+	_ok(SoakInvariants.check(game).is_empty(), "restoring the tile and the pool clears the invariants")

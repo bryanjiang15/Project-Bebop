@@ -6,6 +6,7 @@ var _pool_before_well := -1
 var _income_before_well := -1
 
 const _RivalFixture = preload("res://tests/rival_fixture.gd")
+const _SceneDriver = preload("res://tests/scene_driver.gd")
 
 const _LAND_COLUMN := {
 	"plains": 0,
@@ -1168,21 +1169,11 @@ func _spell_target(setup: GameSetup, origin: Vector2i) -> Vector2i:
 
 
 func _hover_cell(game: Node, cell: Vector2i) -> void:
-	var map := game.get_node("%Map") as TileMapLayer
-	var local: Vector2 = map.map_to_local(cell)
-	var world: Vector2 = map.to_global(local)
-	var screen: Vector2 = game.get_viewport().get_canvas_transform() * world
-	var motion := InputEventMouseMotion.new()
-	motion.position = screen
-	motion.global_position = screen
-	game._unhandled_input(motion)
+	_SceneDriver.hover_cell(game, cell)
 
 
 func _press_action(game: Node, action: String) -> void:
-	var event := InputEventAction.new()
-	event.action = action
-	event.pressed = true
-	game._unhandled_input(event)
+	_SceneDriver.press_action(game, action)
 
 
 func _found_city(game: Node) -> bool:
@@ -1393,21 +1384,7 @@ func _mana_matches(game: Node) -> bool:
 
 
 func _click_cell(game: Node, cell: Vector2i, button_index: int = MOUSE_BUTTON_LEFT) -> void:
-	var map := game.get_node("%Map") as TileMapLayer
-	var world: Vector2 = map.to_global(map.map_to_local(cell))
-	var screen: Vector2 = game.get_viewport().get_canvas_transform() * world
-	var press := InputEventMouseButton.new()
-	press.button_index = button_index
-	press.pressed = true
-	press.position = screen
-	press.global_position = screen
-	game._unhandled_input(press)
-	var release := InputEventMouseButton.new()
-	release.button_index = button_index
-	release.pressed = false
-	release.position = screen
-	release.global_position = screen
-	game._unhandled_input(release)
+	_SceneDriver.click_cell(game, cell, button_index)
 
 
 func _assert_unrevealed_atlas(game: Node, setup: GameSetup) -> bool:
@@ -1761,24 +1738,12 @@ func _paint_plains(setup: GameSetup, cell: Vector2i) -> void:
 		setup.map.set_land(cell, "plains")
 
 
-## Settlers have no HP, so volcanic ground removes them at End Turn.
-## That can eliminate a player who has not founded a city yet.
+## Ticket 30: a settler with no HP on volcanic ground is removed at End Turn.
+## Smoke paints every such settler so the scripted turn can advance. The soak
+## uses the same helper and limits the paint to players who have no city.
 func _spare_settlers(setup: GameSetup) -> void:
-	for player in setup.players:
-		for unit in player.units:
-			if unit.unit_type != "settler":
-				continue
-			if setup.map.land_at(unit.cell) == "volcanic":
-				setup.map.set_land(unit.cell, "plains")
+	_SceneDriver.spare_settlers(setup, false)
 
 
 func _wait_for(script_path: String) -> Node:
-	for _i in 30:
-		await process_frame
-		var scene := current_scene
-		if scene != null and scene.get_script() != null and scene.get_script().resource_path == script_path:
-			await process_frame
-			return scene
-	print("FAIL scene did not load: ", script_path)
-	quit(1)
-	return null
+	return await _SceneDriver.wait_for(self, script_path, 30)

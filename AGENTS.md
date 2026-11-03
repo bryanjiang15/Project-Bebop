@@ -15,7 +15,7 @@ scripts/core/     RefCounted rules: hex.gd, game_config.gd, map_state.gd, map_ge
 scripts/view/     rendering and input, including fog_overlay.gd
 config/game_config.json
 assets/art/       greybox art v0.2, bebop_tileset.tres, team_tint.gdshader
-tests/            unit tests, missing-key check, smoke test
+tests/            run_tests.gd, expect_missing_key.gd, smoke_game.gd, smoke_log.gd, soak_games.gd, scene_driver.gd, soak_policy.gd, soak_invariants.gd, capture_ticket20.gd
 docs/
 ```
 
@@ -140,9 +140,10 @@ godot --headless --path . --quit-after 120 res://scenes/main_menu.tscn
 godot --headless --path . --quit-after 120 res://scenes/game.tscn
 godot --headless --path . --script res://tests/smoke_game.gd
 godot --headless --path . --script res://tests/smoke_log.gd
+godot --headless --path . --script res://tests/soak_games.gd
 ```
 
-`expect_missing_key.gd` must exit non-zero and report `game_config.json missing key: players.count`. The others must exit 0. CI greps every log for `SCRIPT ERROR` and `ERROR:` (`set -o pipefail`) except the missing-key step, which requires that specific error.
+`expect_missing_key.gd` must exit non-zero and report `game_config.json missing key: players.count`. The others must exit 0. `soak_games.gd` plays five fixed seeds through the real scenes and prints `SOAK OK`. CI greps every log for `SCRIPT ERROR` and `ERROR:` (`set -o pipefail`) except the missing-key step, which requires that specific error. What the soak checks is in `docs/stability.md`.
 
 Play the game with `godot --path .`. Left-click the start tile to select the settler, and again to select the warrior. Right-click a green tile to move. Right-click a red enemy tile to attack. S skips and F fortifies. B or **Found City** founds a city. Left-click the city to open its panel, then click a build button (for a building, click a highlighted tile next). The spell bar under the top bar lists the five spells. Click one, hover a tile to see the exact area, left-click to cast, and right-click or Esc to cancel. Enter or **End Turn** ends the turn. If units still have moves, that press warns and the next one confirms. Right-click a red city to attack it. At 0 HP, right-click again with a warrior to capture it. Right-click a lone enemy settler on a green tile to capture it; a ranged shot that cannot walk there destroys it. The turn resolves growth, production, borders, then mana, then city healing, then unit healing, then volcanic damage, then spell cooldowns. A unit idling on volcanic ground is healed before the hit, so a wounded one nets 0 and a full one loses 10. The top bar shows `Mana: N (+M/turn)`, `Turn` plus `N / 50`, and each player's score. A conquest, the human's elimination, or the turn-50 ranking opens Victory or Defeat with the score table and the log path. Restart there, or from the in-game menu, starts a new game and a new log file. Escape toggles the in-game menu when no spell is armed.
 

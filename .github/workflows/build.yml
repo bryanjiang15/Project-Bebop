@@ -122,6 +122,19 @@ jobs:
             exit 1
           fi
 
+      - name: Run stability soak
+        run: |
+          set -o pipefail
+          godot --headless --path . --script res://tests/soak_games.gd 2>&1 | tee test_soak.log
+          if grep -E "SCRIPT ERROR|^ERROR:" test_soak.log; then
+            echo "Stability soak produced errors"
+            exit 1
+          fi
+          if ! grep -q "SOAK OK" test_soak.log; then
+            echo "Stability soak did not finish"
+            exit 1
+          fi
+
       - name: Export macOS build
         run: |
           set -o pipefail
