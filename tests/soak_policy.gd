@@ -132,7 +132,7 @@ func _act(game: Node, setup: GameSetup, unit: PlayerState.UnitState) -> String:
 		var step := _step_toward(setup, unit, false)
 		if step != _NO_CELL:
 			return _right_click(game, setup, unit, step, "move")
-	elif unit.unit_type == "settler" and unit.mp > 0:
+	elif unit.unit_type == "settler" and unit.ap > 0:
 		var step := _step_toward(setup, unit, false)
 		if step != _NO_CELL and setup.turn % 5 == 0:
 			return _right_click(game, setup, unit, step, "move")
@@ -188,7 +188,7 @@ func _right_click(game: Node, setup: GameSetup, unit: PlayerState.UnitState, cel
 
 
 func _order_if_idle(game: Node, setup: GameSetup, unit: PlayerState.UnitState, do_order: bool) -> String:
-	if not do_order or unit.mp <= 0 or not unit.order.is_empty():
+	if not do_order or unit.ap <= 0 or not unit.order.is_empty():
 		return ""
 	if not _select_unit(game, unit):
 		return ""
@@ -607,7 +607,7 @@ func _arrange_conquest(game: Node, setup: GameSetup) -> String:
 
 
 func _attack_cell(setup: GameSetup, unit: PlayerState.UnitState) -> Vector2i:
-	if unit.mp <= 0:
+	if unit.ap <= 0:
 		return _NO_CELL
 	var cells: Array[Vector2i] = setup.attackable_cells(unit)
 	cells.sort_custom(func(a: Vector2i, b: Vector2i) -> bool: return _axial_less(a, b))
@@ -638,7 +638,7 @@ func _capture_cell(setup: GameSetup, unit: PlayerState.UnitState) -> Vector2i:
 
 
 func _step_toward(setup: GameSetup, unit: PlayerState.UnitState, allow_capture: bool) -> Vector2i:
-	if unit.mp <= 0:
+	if unit.ap <= 0:
 		return _NO_CELL
 	var goal := _nearest_goal(setup, unit.cell, allow_capture)
 	if goal == _NO_CELL:

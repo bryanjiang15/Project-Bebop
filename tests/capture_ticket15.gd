@@ -78,8 +78,8 @@ func _run() -> void:
 	_hover(game, city.cell, Vector2(1680, 420))
 	var preview := (game.get_node("%CombatPreview") as Label).text
 	var tip := (game.get_node("%Tooltip") as Label).text
-	var dealt := int(setup.preview_city(warrior, city)["damage"])
-	var counter := int(setup.preview_city(warrior, city)["counter"])
+	var dealt := int(setup.ability_preview(warrior, setup.primary_ability(warrior), city.cell)["damage"])
+	var counter := int(setup.ability_preview(warrior, setup.primary_ability(warrior), city.cell)["counter"])
 	var line := "Damage %d   Counter %d" % [dealt, counter]
 	if preview != line or not tip.contains(line) or not _has_attack_highlight(game):
 		print("FAIL preview '", preview, "' tip '", tip, "'")
@@ -118,8 +118,8 @@ func _run() -> void:
 	if (game.get_node("%SelectionTitle") as Label).text != "Warrior":
 		_click(game, warrior.cell)
 	_click(game, city.cell, MOUSE_BUTTON_RIGHT)
-	if city.player != setup.human_index or warrior.cell != city.cell or warrior.mp != 0:
-		print("FAIL capture ", city.player, " ", warrior.cell, " mp ", warrior.mp)
+	if city.player != setup.human_index or warrior.cell != city.cell or warrior.ap != 0:
+		print("FAIL capture ", city.player, " ", warrior.cell, " mp ", warrior.ap)
 		quit(1)
 		return
 	game._clear_hover()
@@ -171,8 +171,8 @@ func _run() -> void:
 		quit(1)
 		return
 	_click(game, settler_cell, MOUSE_BUTTON_RIGHT)
-	if settler.owner != setup.human_index or settler.cell != warrior.cell or warrior.mp != 0:
-		print("FAIL settler ", settler.owner, " ", settler.cell, " mp ", warrior.mp)
+	if settler.owner != setup.human_index or settler.cell != warrior.cell or warrior.ap != 0:
+		print("FAIL settler ", settler.owner, " ", settler.cell, " mp ", warrior.ap)
 		quit(1)
 		return
 	game._clear_hover()

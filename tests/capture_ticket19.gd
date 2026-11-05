@@ -121,7 +121,7 @@ func _defeat(game: Node) -> bool:
 	setup.map.set_land(beside, "plains")
 	human_settler.cell = spot
 	rival_warrior.cell = beside
-	rival_warrior.mp = setup.config.unit("warrior").move
+	rival_warrior.ap = setup.config.unit("warrior").ap
 	setup._refresh_fog()
 	if not setup.move_unit(rival_warrior, spot) or setup.result == null or setup.result.human_won:
 		print("FAIL defeat fixture")

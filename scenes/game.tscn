@@ -177,7 +177,7 @@ anchors_preset = 2
 anchor_top = 1.0
 anchor_bottom = 1.0
 offset_left = 16.0
-offset_top = -700.0
+offset_top = -780.0
 offset_right = 904.0
 offset_bottom = -16.0
 grow_vertical = 0
@@ -247,6 +247,15 @@ unique_name_in_owner = true
 layout_mode = 2
 disabled = true
 text = "Fortify (F)"
+
+[node name="OrderReason" type="Label" parent="UI/SelectionPanel/Column"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.62, 0.48, 1)
+theme_override_font_sizes/font_size = 32
+text = ""
+autowrap_mode = 3
 
 [node name="TooltipPanel" type="PanelContainer" parent="UI"]
 unique_name_in_owner = true

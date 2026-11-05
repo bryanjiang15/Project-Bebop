@@ -19,7 +19,10 @@ const REASON_OCCUPIED := "Tile already has a building"
 const REASON_WATER_BUILD := "Cannot build on water"
 const REASON_BUILD_OFF_MAP := "Cannot build off the map"
 const REASON_SELECT_COMBAT := "Select a combat unit"
-const REASON_NO_MOVES := "No moves left"
+const REASON_AP := "Needs at least 1 AP"
+const REASON_COOLDOWN := "On cooldown"
+const REASON_NOT_YET := "Not available yet"
+const REASON_UNKNOWN_ABILITY := "Unknown ability"
 const REASON_OWN_UNIT := "Cannot attack your own unit"
 const REASON_ATTACK_SETTLER := "Cannot attack a settler"
 const REASON_RANGE := "Out of range"
@@ -217,7 +220,7 @@ func spawn_unit(player: int, type: String, pos: Vector2i) -> PlayerState.UnitSta
 	unit.owner = player
 	unit.hp = stats.hp
 	unit.max_hp = stats.hp
-	unit.mp = stats.move
+	unit.ap = stats.ap
 	if not _can_enter(unit, pos):
 		return null
 	unit.id = _next_unit_id
@@ -228,13 +231,13 @@ func spawn_unit(player: int, type: String, pos: Vector2i) -> PlayerState.UnitSta
 
 
 func reachable_tiles(unit: PlayerState.UnitState) -> Dictionary:
-	if unit == null or unit.mp <= 0 or config == null:
+	if unit == null or unit.ap <= 0 or config == null:
 		return {}
 	_moving = unit
 	_entering_for_move = true
 	var axial_tiles := Pathfinder.reachable(
 		Hex.offset_to_axial(unit.cell),
-		unit.mp,
+		unit.ap,
 		map.width,
 		map.height,
 		Callable(self, "_enter_cost_axial"),
@@ -268,9 +271,9 @@ func move_unit(unit: PlayerState.UnitState, dest: Vector2i) -> bool:
 		city_owner = city.player
 	unit.cell = dest
 	if settler != null or city != null:
-		unit.mp = 0
+		unit.ap = 0
 	else:
-		unit.mp = int(tiles[dest])
+		unit.ap = int(tiles[dest])
 	unit.acted = true
 	unit.fortified = false
 	unit.order = ""
@@ -287,61 +290,188 @@ func move_unit(unit: PlayerState.UnitState, dest: Vector2i) -> bool:
 	return true
 
 
-## Empty string means the attack is legal.
-## A melee strike still rejects a settler. A ranged strike destroys a lone settler.
-func can_attack(attacker: PlayerState.UnitState, defender: PlayerState.UnitState) -> String:
-	if attacker == null or config == null or not config.unit(attacker.unit_type).combatant:
-		return REASON_SELECT_COMBAT
-	if defender == null:
-		return REASON_RANGE
-	if defender.owner == attacker.owner:
-		return REASON_OWN_UNIT
-	if fog == null or not fog.unit_visible(attacker.owner, defender.cell):
-		return REASON_UNSEEN
-	if not config.unit(defender.unit_type).combatant:
-		if _uses_melee(attacker) or _military_on(defender.cell) != null:
-			return REASON_ATTACK_SETTLER
-	if attacker.mp <= 0:
-		return REASON_NO_MOVES
-	var dist := Hex.distance(Hex.offset_to_axial(attacker.cell), Hex.offset_to_axial(defender.cell))
-	var reach := config.unit(attacker.unit_type).range
-	if reach > 0:
-		if dist < 1 or dist > reach:
-			return REASON_RANGE
-	elif dist != 1:
-		return REASON_RANGE
+## Ability ids on this unit, in bar order. Empty for a settler: Found is an order.
+func unit_abilities(unit: PlayerState.UnitState) -> Array[String]:
+	var out: Array[String] = []
+	if unit == null or config == null or not config.units.has(unit.unit_type):
+		return out
+	for ability_id in config.unit(unit.unit_type).abilities:
+		out.append(ability_id)
+	return out
+
+
+## The first ability. Right-click uses this until the ability bar exists.
+func primary_ability(unit: PlayerState.UnitState) -> String:
+	var ids := unit_abilities(unit)
+	if ids.is_empty():
+		return ""
+	return ids[0]
+
+
+func ability_cooldown_left(unit: PlayerState.UnitState, ability_id: String) -> int:
+	if unit == null:
+		return 0
+	return int(unit.ability_cooldowns.get(ability_id, 0))
+
+
+## Empty string means the ability can be used on `cell`.
+## A melee damage ability still rejects a settler. A ranged one destroys a lone settler.
+## Status, move, and terraform are hooks: they return REASON_NOT_YET and change nothing.
+func can_use_ability(unit: PlayerState.UnitState, ability_id: String, cell: Vector2i) -> String:
+	return str(_ability_plan(unit, ability_id, cell)["reason"])
+
+
+## Same shape as the old attack preview: ok, reason, damage, counter.
+func ability_preview(unit: PlayerState.UnitState, ability_id: String, cell: Vector2i) -> Dictionary:
+	var plan := _ability_plan(unit, ability_id, cell)
+	var reason := str(plan["reason"])
+	if not reason.is_empty():
+		return {"ok": false, "reason": reason, "damage": 0, "counter": 0}
+	return {"ok": true, "reason": "", "damage": int(plan["damage"]), "counter": int(plan["counter"])}
+
+
+## Resolves a damage ability, then ends the unit's turn: AP is 0 and acted is set.
+## ap_cost is the minimum AP required. The turn ends even when ap_cost is 1 and AP remains.
+## The attacker does not step onto a tile this emptied. Returns the reject reason.
+func use_ability(unit: PlayerState.UnitState, ability_id: String, cell: Vector2i) -> String:
+	if result != null:
+		return REASON_OVER
+	var plan := _ability_plan(unit, ability_id, cell)
+	var reason := str(plan["reason"])
+	if not reason.is_empty():
+		return reason
+	var ability := config.ability(ability_id)
+	var preview := {"damage": int(plan["damage"]), "counter": int(plan["counter"])}
+	if str(plan["kind"]) == "unit":
+		_apply_unit_hit(unit, plan["unit"] as PlayerState.UnitState, preview)
+	else:
+		_apply_city_hit(unit, ability, plan["city"] as MapCity, preview)
+	_finish_ability(unit, ability)
 	return ""
 
 
-## `ok` is false when `can_attack` has a reason. Damage numbers are the prediction.
-func preview_attack(attacker: PlayerState.UnitState, defender: PlayerState.UnitState) -> Dictionary:
-	var reason := can_attack(attacker, defender)
-	if not reason.is_empty():
-		return {"ok": false, "reason": reason, "damage": 0, "counter": 0}
-	var dealt := _blow(attacker, defender)
+func _ability_plan(unit: PlayerState.UnitState, ability_id: String, cell: Vector2i) -> Dictionary:
+	var empty := {"reason": "", "kind": "", "unit": null, "city": null, "damage": 0, "counter": 0}
+	var gate := _ability_gate(unit, ability_id)
+	if not gate.is_empty():
+		empty["reason"] = gate
+		return empty
+	var ability := config.ability(ability_id)
+	var picked := _pick_hostile(unit, ability, cell)
+	var picked_reason := str(picked["reason"])
+	if not picked_reason.is_empty():
+		empty["reason"] = picked_reason
+		return empty
+	if ability_cooldown_left(unit, ability_id) > 0:
+		empty["reason"] = REASON_COOLDOWN
+		return empty
+	if unit.ap < ability.ap_cost:
+		empty["reason"] = REASON_AP
+		return empty
+	var dist := Hex.distance(Hex.offset_to_axial(unit.cell), Hex.offset_to_axial(cell))
+	if dist < 1 or dist > ability.range:
+		empty["reason"] = REASON_RANGE
+		return empty
+	var damage := 0
 	var counter := 0
-	if _uses_melee(attacker) or not config.ranged_takes_no_counter:
-		counter = _counter(defender, attacker)
-	return {"ok": true, "reason": "", "damage": dealt, "counter": counter}
+	if str(picked["kind"]) == "unit":
+		var defender := picked["unit"] as PlayerState.UnitState
+		damage = _blow(unit, ability, defender)
+		if ability.melee or not config.ranged_takes_no_counter:
+			counter = _counter(defender, unit, ability)
+	else:
+		var city := picked["city"] as MapCity
+		damage = _city_blow(unit, ability, city)
+		if ability.melee or not config.ranged_takes_no_counter:
+			counter = _city_counter(city, unit, ability)
+	return {
+		"reason": "",
+		"kind": picked["kind"],
+		"unit": picked["unit"],
+		"city": picked["city"],
+		"damage": damage,
+		"counter": counter,
+	}
 
 
-## Applies damage, sets the attacker's movement to 0, and removes units at 0 HP.
-## The attacker does not step onto a tile this emptied. Returns the reject reason.
-func attack_unit(attacker: PlayerState.UnitState, defender: PlayerState.UnitState) -> String:
-	if result != null:
-		return REASON_OVER
-	var preview := preview_attack(attacker, defender)
-	if not bool(preview["ok"]):
-		return str(preview["reason"])
+func _ability_gate(unit: PlayerState.UnitState, ability_id: String) -> String:
+	if unit == null or config == null or not config.units.has(unit.unit_type):
+		return REASON_SELECT_COMBAT
+	if not config.abilities.has(ability_id):
+		return REASON_UNKNOWN_ABILITY
+	var listed := false
+	for id in unit_abilities(unit):
+		if id == ability_id:
+			listed = true
+			break
+	if not listed:
+		return REASON_UNKNOWN_ABILITY
+	var ability := config.ability(ability_id)
+	if ability.effect == "status" or ability.effect == "move" or ability.effect == "terraform":
+		return REASON_NOT_YET
+	if not config.unit(unit.unit_type).combatant:
+		return REASON_SELECT_COMBAT
+	if ability.effect != "damage":
+		return REASON_NOT_YET
+	return ""
+
+
+## Hostile combatant, else an enemy city, else a lone settler.
+## A friendly unit on an enemy city makes the city the target and then CITY_HELD.
+func _pick_hostile(unit: PlayerState.UnitState, ability: GameConfig.AbilityStats, cell: Vector2i) -> Dictionary:
+	var none := {"reason": "", "kind": "", "unit": null, "city": null}
+	var enemy := enemy_at(unit, cell)
+	var city := city_at_cell(cell)
+	var hostile_city := city != null and city.player != unit.owner
+	if enemy != null and config.unit(enemy.unit_type).combatant:
+		none["reason"] = _unit_target_reason(unit, ability, enemy)
+		none["kind"] = "unit"
+		none["unit"] = enemy
+		return none
+	if hostile_city:
+		none["reason"] = _city_target_reason(unit, city)
+		none["kind"] = "city"
+		none["city"] = city
+		return none
+	if enemy != null:
+		none["reason"] = _unit_target_reason(unit, ability, enemy)
+		none["kind"] = "unit"
+		none["unit"] = enemy
+		return none
+	if _friendly_at(unit, cell) != null:
+		none["reason"] = REASON_OWN_UNIT
+		return none
+	if city != null and city.player == unit.owner:
+		none["reason"] = REASON_OWN_CITY
+		return none
+	none["reason"] = REASON_RANGE
+	return none
+
+
+func _unit_target_reason(attacker: PlayerState.UnitState, ability: GameConfig.AbilityStats, defender: PlayerState.UnitState) -> String:
+	if fog == null or not fog.unit_visible(attacker.owner, defender.cell):
+		return REASON_UNSEEN
+	if not config.unit(defender.unit_type).combatant:
+		if ability.melee or _military_on(defender.cell) != null:
+			return REASON_ATTACK_SETTLER
+	return ""
+
+
+func _city_target_reason(attacker: PlayerState.UnitState, city: MapCity) -> String:
+	if fog == null or not fog.unit_visible(attacker.owner, city.cell):
+		return REASON_UNSEEN_CITY
+	if _military_on(city.cell) != null:
+		return REASON_CITY_HELD
+	return ""
+
+
+func _apply_unit_hit(attacker: PlayerState.UnitState, defender: PlayerState.UnitState, preview: Dictionary) -> void:
 	var defender_owner := defender.owner
 	var attacker_owner := attacker.owner
 	var civilian := not config.unit(defender.unit_type).combatant
 	if not civilian:
 		defender.hp = maxi(0, defender.hp - int(preview["damage"]))
 	attacker.hp = maxi(0, attacker.hp - int(preview["counter"]))
-	attacker.mp = 0
-	attacker.acted = true
-	attacker.order = ORDER_FORTIFY if attacker.fortified else ""
 	var defender_removed := civilian or defender.hp <= 0
 	var attacker_removed := attacker.hp <= 0
 	if civilian:
@@ -355,70 +485,32 @@ func attack_unit(attacker: PlayerState.UnitState, defender: PlayerState.UnitStat
 	if attacker_removed:
 		_eliminate_if_out(attacker_owner)
 	_finish_elimination_check()
-	return ""
 
 
-## Empty string means the city attack is legal. A military unit on the tile is the target instead.
-func can_attack_city(attacker: PlayerState.UnitState, city: MapCity) -> String:
-	if attacker == null or config == null or not config.unit(attacker.unit_type).combatant:
-		return REASON_SELECT_COMBAT
-	if city == null:
-		return REASON_RANGE
-	if city.player == attacker.owner:
-		return REASON_OWN_CITY
-	if fog == null or not fog.unit_visible(attacker.owner, city.cell):
-		return REASON_UNSEEN_CITY
-	if _military_on(city.cell) != null:
-		return REASON_CITY_HELD
-	if attacker.mp <= 0:
-		return REASON_NO_MOVES
-	var dist := Hex.distance(Hex.offset_to_axial(attacker.cell), Hex.offset_to_axial(city.cell))
-	var reach := config.unit(attacker.unit_type).range
-	if reach > 0:
-		if dist < 1 or dist > reach:
-			return REASON_RANGE
-	elif dist != 1:
-		return REASON_RANGE
-	return ""
-
-
-## Same shape as `preview_attack`. Hills on the city tile modify the city's strength.
-func preview_city(attacker: PlayerState.UnitState, city: MapCity) -> Dictionary:
-	var reason := can_attack_city(attacker, city)
-	if not reason.is_empty():
-		return {"ok": false, "reason": reason, "damage": 0, "counter": 0}
-	var dealt := _city_blow(attacker, city)
-	var counter := 0
-	if _uses_melee(attacker) or not config.ranged_takes_no_counter:
-		counter = _city_counter(city, attacker)
-	return {"ok": true, "reason": "", "damage": dealt, "counter": counter}
-
-
-## Damages the city down to 0 and does not remove it. The attacker does not step in.
-## Melee takes counter-damage. A ranged hit takes none while `ranged_takes_no_counter` is set.
-func attack_city(attacker: PlayerState.UnitState, city: MapCity) -> String:
-	if result != null:
-		return REASON_OVER
-	var preview := preview_city(attacker, city)
-	if not bool(preview["ok"]):
-		return str(preview["reason"])
+func _apply_city_hit(attacker: PlayerState.UnitState, ability: GameConfig.AbilityStats, city: MapCity, preview: Dictionary) -> void:
 	var next := maxi(0, city.hp - int(preview["damage"]))
-	if not _uses_melee(attacker) and not config.archers_can_zero_city_hp and city.hp > 0:
+	if not ability.melee and not config.archers_can_zero_city_hp and city.hp > 0:
 		next = maxi(1, next)
 	city.hp = next
 	city.attacked = true
 	var attacker_owner := attacker.owner
 	attacker.hp = maxi(0, attacker.hp - int(preview["counter"]))
-	attacker.mp = 0
-	attacker.acted = true
-	attacker.order = ORDER_FORTIFY if attacker.fortified else ""
 	var attacker_removed := attacker.hp <= 0
 	_remove_if_dead(attacker)
 	_refresh_fog()
 	if attacker_removed:
 		_eliminate_if_out(attacker_owner)
 		_finish_elimination_check()
-	return ""
+
+
+## ap_cost was already checked. Using the ability spends the rest of the turn.
+func _finish_ability(unit: PlayerState.UnitState, ability: GameConfig.AbilityStats) -> void:
+	unit.ap = 0
+	unit.acted = true
+	unit.used_ability = true
+	unit.order = ORDER_FORTIFY if unit.fortified else ""
+	if ability.cooldown > 0:
+		unit.ability_cooldowns[ability.id] = ability.cooldown
 
 
 ## True when moving onto `cell` would capture a city, a lone settler, or both.
@@ -447,6 +539,9 @@ func attackable_cells(unit: PlayerState.UnitState) -> Array[Vector2i]:
 	var cells: Array[Vector2i] = []
 	if unit == null:
 		return cells
+	var ability_id := primary_ability(unit)
+	if ability_id.is_empty():
+		return cells
 	var capturing := {}
 	for key in reachable_tiles(unit).keys():
 		var cell := key as Vector2i
@@ -458,38 +553,62 @@ func attackable_cells(unit: PlayerState.UnitState) -> Array[Vector2i]:
 		for other in player.units:
 			if capturing.has(other.cell):
 				continue
-			if can_attack(unit, other).is_empty() and not cells.has(other.cell):
+			if can_use_ability(unit, ability_id, other.cell).is_empty() and not cells.has(other.cell):
 				cells.append(other.cell)
 	for city in cities:
 		if capturing.has(city.cell) or cells.has(city.cell):
 			continue
-		if can_attack_city(unit, city).is_empty():
+		if can_use_ability(unit, ability_id, city.cell).is_empty():
 			cells.append(city.cell)
 	return cells
 
 
+## Empty when Skip is legal. Skip needs no AP.
+func skip_reason(unit: PlayerState.UnitState) -> String:
+	if result != null:
+		return REASON_OVER
+	if unit == null or config == null or not config.skip_enabled:
+		return REASON_SELECT_COMBAT
+	return ""
+
+
 func skip_unit(unit: PlayerState.UnitState) -> bool:
-	if result != null or unit == null or config == null or not config.skip_enabled:
+	if not skip_reason(unit).is_empty():
 		return false
 	unit.order = ORDER_SKIP
+	unit.ap = 0
 	return true
+
+
+## Empty when Fortify is legal. Fortify needs at least 1 AP, then ends the turn.
+func fortify_reason(unit: PlayerState.UnitState) -> String:
+	if result != null:
+		return REASON_OVER
+	if unit == null or config == null or not config.fortify_enabled:
+		return REASON_SELECT_COMBAT
+	if unit.ap < 1:
+		return REASON_AP
+	return ""
 
 
 func fortify_unit(unit: PlayerState.UnitState) -> bool:
-	if result != null or unit == null or config == null or not config.fortify_enabled:
+	if not fortify_reason(unit).is_empty():
 		return false
 	unit.fortified = true
 	unit.order = ORDER_FORTIFY
+	unit.ap = 0
 	return true
 
 
+## True when a unit still has AP and no order. Skip and Fortify set AP to 0,
+## so they clear the warning without counting as acted.
 func has_unordered_moves(player: int) -> bool:
 	if config == null or not config.end_turn_warns_if_unordered:
 		return false
 	if player < 0 or player >= players.size():
 		return false
 	for unit in players[player].units:
-		if unit.mp > 0 and unit.order.is_empty():
+		if unit.ap > 0 and unit.order.is_empty():
 			return true
 	return false
 
@@ -510,7 +629,7 @@ func end_turn() -> void:
 	# Spell cooldowns then tick once for every player — this End Turn is each
 	# player's turn until turns are sequential. When this turn is `turn_limit`,
 	# the match ends after that resolution and the counter does not advance.
-	# Otherwise the turn counter advances and movement refills.
+	# Otherwise the turn counter advances and AP refills.
 	# A spell with cooldown C cast on turn N is castable again on turn N+C.
 	var income: Array[int] = []
 	income.resize(players.size())
@@ -525,6 +644,7 @@ func end_turn() -> void:
 	_heal_idle_units()
 	_apply_volcanic_damage()
 	_tick_spells()
+	_tick_ability_cooldowns()
 	if result != null:
 		return
 	if turn >= config.turn_limit:
@@ -536,7 +656,8 @@ func end_turn() -> void:
 			if unit.order == ORDER_SKIP:
 				unit.order = ORDER_FORTIFY if unit.fortified else ""
 			unit.acted = false
-			unit.mp = config.unit(unit.unit_type).move
+			unit.used_ability = false
+			unit.ap = config.unit(unit.unit_type).ap
 	_refresh_fog()
 
 
@@ -550,6 +671,8 @@ func can_found(unit: PlayerState.UnitState) -> String:
 	var owner := owner_at(unit.cell)
 	if owner != -1 and owner != unit.owner:
 		return REASON_OWNED
+	if unit.ap < 1:
+		return REASON_AP
 	var axial := Hex.offset_to_axial(unit.cell)
 	for city in cities:
 		if Hex.distance(axial, Hex.offset_to_axial(city.cell)) < config.city_min_distance:
@@ -996,20 +1119,18 @@ func move_queue(city: MapCity, index: int, delta: int) -> void:
 	city.queue.insert(next, item)
 
 
-func _uses_melee(unit: PlayerState.UnitState) -> bool:
-	return config.unit(unit.unit_type).range <= 0
+func _strike_strength(unit: PlayerState.UnitState, ability: GameConfig.AbilityStats) -> float:
+	return float(config.unit(unit.unit_type).attack) * ability.damage_multiplier
 
 
-func _blow(attacker: PlayerState.UnitState, defender: PlayerState.UnitState) -> int:
-	var attack := float(config.unit(attacker.unit_type).attack)
-	return Combat.damage(config, attack, _defense_strength(defender))
+func _blow(attacker: PlayerState.UnitState, ability: GameConfig.AbilityStats, defender: PlayerState.UnitState) -> int:
+	return Combat.damage(config, _strike_strength(attacker, ability), _defense_strength(defender))
 
 
-## Counter uses the defender's modified strength against the attacker's attack.
+## Counter uses the defender's modified strength against the strike's attack strength.
 ## The attacker's tile and Fortify do not change that number.
-func _counter(defender: PlayerState.UnitState, attacker: PlayerState.UnitState) -> int:
-	var attack := float(config.unit(attacker.unit_type).attack)
-	return Combat.damage(config, _defense_strength(defender), attack)
+func _counter(defender: PlayerState.UnitState, attacker: PlayerState.UnitState, ability: GameConfig.AbilityStats) -> int:
+	return Combat.damage(config, _defense_strength(defender), _strike_strength(attacker, ability))
 
 
 func _defense_strength(unit: PlayerState.UnitState) -> float:
@@ -1039,6 +1160,17 @@ func _tick_spells() -> void:
 			if left > 0:
 				next[key] = left
 		player.spell_cooldowns = next
+
+
+func _tick_ability_cooldowns() -> void:
+	for player in players:
+		for unit in player.units:
+			var next := {}
+			for key in unit.ability_cooldowns.keys():
+				var left := int(unit.ability_cooldowns[key]) - 1
+				if left > 0:
+					next[key] = left
+			unit.ability_cooldowns = next
 
 
 func _owned_by(player_index: int) -> Array[Vector2i]:
@@ -1262,6 +1394,15 @@ func _lone_enemy_settler(unit: PlayerState.UnitState, cell: Vector2i) -> PlayerS
 	return found
 
 
+func _friendly_at(unit: PlayerState.UnitState, cell: Vector2i) -> PlayerState.UnitState:
+	if unit == null or unit.owner < 0 or unit.owner >= players.size():
+		return null
+	for other in players[unit.owner].units:
+		if other.cell == cell:
+			return other
+	return null
+
+
 func _military_on(cell: Vector2i) -> PlayerState.UnitState:
 	if config == null:
 		return null
@@ -1300,12 +1441,12 @@ func _heal_cities() -> void:
 		city.attacked = false
 
 
-func _city_blow(attacker: PlayerState.UnitState, city: MapCity) -> int:
-	return Combat.damage(config, float(config.unit(attacker.unit_type).attack), _city_defense_strength(city))
+func _city_blow(attacker: PlayerState.UnitState, ability: GameConfig.AbilityStats, city: MapCity) -> int:
+	return Combat.damage(config, _strike_strength(attacker, ability), _city_defense_strength(city))
 
 
-func _city_counter(city: MapCity, attacker: PlayerState.UnitState) -> int:
-	return Combat.damage(config, _city_defense_strength(city), float(config.unit(attacker.unit_type).attack))
+func _city_counter(city: MapCity, attacker: PlayerState.UnitState, ability: GameConfig.AbilityStats) -> int:
+	return Combat.damage(config, _city_defense_strength(city), _strike_strength(attacker, ability))
 
 
 func _city_defense_strength(city: MapCity) -> float:

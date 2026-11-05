@@ -6,11 +6,17 @@ class UnitState extends RefCounted:
 	var unit_type: String = ""
 	var cell: Vector2i = Vector2i.ZERO
 	var owner: int = 0
-	var mp: int = 0
+	## Action points left this turn. Land movement spends them. An ability sets this to 0.
+	var ap: int = 0
 	var hp: int = 0
 	var max_hp: int = 0
-	## True after a move or an attack this turn. Skip and Fortify leave it false.
+	## True after a move or an ability this turn. Skip and Fortify leave it false.
 	var acted: bool = false
+	## True after an ability resolved this turn. End Turn clears it. AP is 0 while this is set.
+	var used_ability: bool = false
+	## Ability id to turns remaining. Missing or 0 means the ability is ready.
+	## End Turn subtracts 1, the same tick as PlayerState.spell_cooldowns.
+	var ability_cooldowns: Dictionary = {}
 	## Persists until the unit moves. An attack does not clear it.
 	var fortified: bool = false
 	## "" , "skip", or "fortify". Skip lasts one turn. Fortify stays until a move.

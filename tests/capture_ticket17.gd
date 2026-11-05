@@ -119,7 +119,7 @@ func _conquest(game: Node) -> bool:
 	setup.map.set_land(beside, "plains")
 	settler_b.cell = spot
 	warrior.cell = beside
-	warrior.mp = setup.config.unit("warrior").move
+	warrior.ap = setup.config.unit("warrior").ap
 	setup._refresh_fog()
 	if not setup.move_unit(warrior, spot) or setup.result != null:
 		print("FAIL conquest fixture")
@@ -141,7 +141,7 @@ func _conquest(game: Node) -> bool:
 	var approach := Hex.axial_to_offset(Hex.neighbor(Hex.offset_to_axial(city_cell), Hex.EAST))
 	setup.map.set_land(approach, "plains")
 	warrior.cell = approach
-	warrior.mp = setup.config.unit("warrior").move
+	warrior.ap = setup.config.unit("warrior").ap
 	setup._refresh_fog()
 	game._refresh_board()
 	_click(game, approach)

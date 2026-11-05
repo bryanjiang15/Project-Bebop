@@ -4,7 +4,7 @@ Engineering record for ticket 9. Design still lives in `design_doc.md` and `prot
 
 ## When a city resolves
 
-End Turn and the Enter key are still one global clock. Rivals do not take a turn of their own, so **every city resolves on that End Turn**, before the turn counter increments and before movement points refill. For each city, in id order:
+End Turn and the Enter key are still one global clock. Rivals do not take a turn of their own, so **every city resolves on that End Turn**, before the turn counter increments and before AP refills. For each city, in id order:
 
 1. Snapshot food, production, and mana from the current population, territory, and buildings.
 2. Growth uses that food.
