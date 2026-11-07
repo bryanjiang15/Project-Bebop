@@ -39,6 +39,11 @@ static func check(setup: GameSetup) -> String:
 			bag[unit.cell] = unit.id
 			if unit.max_hp > 0 and (unit.hp < 0 or unit.hp > unit.max_hp):
 				return "unit %d hp %d / %d" % [unit.id, unit.hp, unit.max_hp]
+			var max_ap := setup.config.unit(unit.unit_type).ap
+			if unit.ap < 0 or unit.ap > max_ap:
+				return "unit %d ap %d is outside 0..%d" % [unit.id, unit.ap, max_ap]
+			if unit.used_ability and unit.ap != 0:
+				return "unit %d used an ability and still has %d AP" % [unit.id, unit.ap]
 	for city in setup.cities:
 		if city.player < 0 or city.player >= setup.players.size():
 			return "city %d has player %d" % [city.id, city.player]
@@ -63,7 +68,7 @@ static func fingerprint(setup: GameSetup) -> Dictionary:
 				"type": unit.unit_type,
 				"cell": unit.cell,
 				"hp": unit.hp,
-				"mp": unit.mp,
+				"ap": unit.ap,
 				"order": unit.order,
 			})
 	units.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:

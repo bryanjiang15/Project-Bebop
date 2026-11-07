@@ -22,6 +22,7 @@ func _init() -> void:
 	_test_city_economy()
 	_test_mana_pool()
 	_test_combat()
+	_test_ap_and_abilities()
 	_test_city_capture()
 	_test_spells()
 	_test_rival_land_updates()
@@ -83,9 +84,16 @@ func _test_config() -> void:
 	_ok(cfg.spell("ignite").mana == 35 and cfg.spell("ignite").range == 2 and cfg.spell("ignite").cooldown == 5, "ignite")
 	_ok(cfg.spell("restore_plains").mana == 10 and cfg.spell("restore_plains").land == "plains", "restore plains")
 	_ok(cfg.casts_per_turn == 1 and cfg.spell_range_from == "owned_tile", "one cast from owned tiles")
-	_ok(cfg.unit("scout").hp == 50 and cfg.unit("scout").attack == 5 and cfg.unit("scout").move == 3, "scout")
+	_ok(cfg.unit("scout").hp == 50 and cfg.unit("scout").attack == 5 and cfg.unit("scout").ap == 3, "scout")
 	_ok(cfg.unit("warrior").hp == 100 and cfg.unit("warrior").attack == 20 and cfg.unit("warrior").defense == 20, "warrior")
-	_ok(cfg.unit("archer").attack == 25 and cfg.unit("archer").defense == 12 and cfg.unit("archer").range == 2, "archer")
+	_ok(cfg.unit("archer").attack == 25 and cfg.unit("archer").defense == 12 and cfg.unit("archer").ap == 2, "archer")
+	_ok(cfg.unit("warrior").ap == 2 and cfg.unit("settler").ap == 2 and cfg.unit("scout").ap == 3, "AP is scout 3 and 2 for every other unit")
+	_ok(cfg.unit("settler").abilities.is_empty(), "the settler has no abilities")
+	_ok(cfg.unit("warrior").abilities.size() == 1 and cfg.unit("warrior").abilities[0] == "strike" and cfg.unit("scout").abilities[0] == "strike", "warrior and scout open with Strike")
+	_ok(cfg.unit("archer").abilities.size() == 1 and cfg.unit("archer").abilities[0] == "shoot", "archer opens with Shoot")
+	_ok(cfg.ability("strike").ability_name == "Strike" and cfg.ability("strike").target == "enemy" and cfg.ability("strike").area == "single" and cfg.ability("strike").melee and cfg.ability("strike").range == 1 and cfg.ability("strike").ap_cost == 1 and cfg.ability("strike").cooldown == 0 and cfg.ability("strike").effect == "damage" and is_equal_approx(cfg.ability("strike").damage_multiplier, 1.0), "strike")
+	_ok(not cfg.ability("shoot").melee and cfg.ability("shoot").range == 2 and cfg.ability("shoot").ability_name == "Shoot" and cfg.ability("shoot").ap_cost == 1, "shoot")
+	_ok(GameConfig.ability_errors(raw).is_empty(), "the shipped ability table validates")
 	_ok(not cfg.unit("settler").combatant and cfg.unit("settler").population_cost == 1 and cfg.unit("settler").min_city_size == 2, "settler")
 	_ok(cfg.combat_base_damage == 30 and is_equal_approx(cfg.strength_exponent_base, 1.04), "damage formula")
 	_ok(cfg.min_damage == 5 and cfg.max_damage == 60, "damage clamp")
@@ -144,6 +152,48 @@ func _test_config() -> void:
 	var missing_dir: Dictionary = raw.duplicate(true)
 	(missing_dir["log"] as Dictionary).erase("directory")
 	_ok(GameConfig.missing_paths(missing_dir).has("log.directory"), "missing log.directory is reported")
+	var ability_keys: PackedStringArray = [
+		"abilities.strike.name",
+		"abilities.strike.target",
+		"abilities.strike.range",
+		"abilities.strike.area",
+		"abilities.strike.ap_cost",
+		"abilities.strike.cooldown",
+		"abilities.strike.effect",
+		"abilities.strike.damage_multiplier",
+		"abilities.strike.melee",
+		"abilities.shoot.name",
+		"abilities.shoot.target",
+		"abilities.shoot.range",
+		"abilities.shoot.area",
+		"abilities.shoot.ap_cost",
+		"abilities.shoot.cooldown",
+		"abilities.shoot.effect",
+		"abilities.shoot.damage_multiplier",
+		"abilities.shoot.melee",
+		"units.scout.ap",
+		"units.scout.abilities",
+		"units.warrior.ap",
+		"units.warrior.abilities",
+		"units.archer.ap",
+		"units.archer.abilities",
+		"units.settler.ap",
+		"units.settler.abilities",
+	]
+	for path in ability_keys:
+		_ok(GameConfig.missing_paths(_without_key(raw, path)).has(path), "missing %s is reported" % path)
+	var unknown_effect := _without_key(raw, "abilities.strike.effect")
+	(unknown_effect["abilities"]["strike"] as Dictionary)["effect"] = "explode"
+	_ok(_error_has(GameConfig.ability_errors(unknown_effect), "effect"), "an unknown effect fails loudly")
+	var unknown_target: Dictionary = raw.duplicate(true)
+	(unknown_target["abilities"]["strike"] as Dictionary)["target"] = "ally"
+	_ok(_error_has(GameConfig.ability_errors(unknown_target), "target"), "an unknown target fails loudly")
+	var unknown_area: Dictionary = raw.duplicate(true)
+	(unknown_area["abilities"]["strike"] as Dictionary)["area"] = "radius"
+	_ok(_error_has(GameConfig.ability_errors(unknown_area), "area"), "an unknown area fails loudly")
+	var unknown_id: Dictionary = raw.duplicate(true)
+	(unknown_id["units"]["warrior"] as Dictionary)["abilities"] = ["nope"]
+	_ok(_error_has(GameConfig.ability_errors(unknown_id), "unknown id"), "an ability id that does not exist fails loudly")
 
 
 func _test_hex_neighbors() -> void:
@@ -328,7 +378,7 @@ func _test_map_and_fog() -> void:
 		var target := float(cfg.land_mix[land_id])
 		_ok(absf(share - target) <= LAND_MIX_TOLERANCE, "%s mix %.3f within %.2f of %.2f" % [land_id, share, LAND_MIX_TOLERANCE, target])
 	_ok(first.players.size() == 3 and first.unit_total() == cfg.player_count * cfg.starting_units.size(), "3 players each spawn the starting roster")
-	_ok(first.players[0].units[0].mp == cfg.unit(first.players[0].units[0].unit_type).move, "starting units begin with full movement")
+	_ok(first.players[0].units[0].ap == cfg.unit(first.players[0].units[0].unit_type).ap, "starting units begin with full movement")
 	for player in first.players:
 		_ok(player.units.size() == cfg.starting_units.size(), "player %d spawned the starting unit list" % player.index)
 		var occupied := {}
@@ -407,8 +457,26 @@ func _test_fog_memory() -> void:
 	_ok(fog.unit_visible(0, far) and not fog.unit_visible(0, origin), "a rival is visible only while in vision")
 
 
-func _blank_setup(fill: String = "plains") -> GameSetup:
-	var cfg: GameConfig = GameConfig.load_file()
+func _without_key(data: Dictionary, path: String) -> Dictionary:
+	var copy: Dictionary = data.duplicate(true)
+	var parts := path.split(".")
+	var current: Variant = copy
+	for index in parts.size() - 1:
+		current = (current as Dictionary)[parts[index]]
+	(current as Dictionary).erase(parts[parts.size() - 1])
+	return copy
+
+
+func _error_has(errors: PackedStringArray, needle: String) -> bool:
+	for line in errors:
+		if line.contains(needle):
+			return true
+	return false
+
+
+func _blank_setup(fill: String = "plains", cfg: GameConfig = null) -> GameSetup:
+	if cfg == null:
+		cfg = GameConfig.load_file()
 	var map := MapState.create(cfg.map_width, cfg.map_height)
 	for row in map.height:
 		for col in map.width:
@@ -464,13 +532,13 @@ func _test_pathfinding() -> void:
 	var game := _blank_setup("forest")
 	var settler := game.spawn_unit(0, "settler", origin)
 	var reach := game.reachable_tiles(settler)
-	_ok(game.config.land("forest").move_cost * 2 > settler.mp, "two forests exceed settler movement")
-	_ok(reach.has(neighbor) and int(reach[neighbor]) == settler.mp - game.config.land("forest").move_cost, "forest spends its move cost")
+	_ok(game.config.land("forest").move_cost * 2 > settler.ap, "two forests exceed settler movement")
+	_ok(reach.has(neighbor) and int(reach[neighbor]) == settler.ap - game.config.land("forest").move_cost, "forest spends its move cost")
 	_ok(not reach.has(two), "cannot walk two forests when no points remain")
 	game = _blank_setup("plains")
 	settler = game.spawn_unit(0, "settler", origin)
 	reach = game.reachable_tiles(settler)
-	_ok(reach.has(two) and int(reach[two]) == settler.mp - game.config.land("plains").move_cost * 2, "two plains fit in settler movement")
+	_ok(reach.has(two) and int(reach[two]) == settler.ap - game.config.land("plains").move_cost * 2, "two plains fit in settler movement")
 	_ok(not reach.has(three), "three plains do not fit in settler movement")
 	game.map.set_land(neighbor, "water")
 	reach = game.reachable_tiles(settler)
@@ -480,7 +548,7 @@ func _test_pathfinding() -> void:
 	game.map.set_land(origin, "plains")
 	settler = game.spawn_unit(0, "settler", origin)
 	_ok(game.config.land("forest").move_cost > 1, "forest costs more than one point")
-	settler.mp = 1
+	settler.ap = 1
 	reach = game.reachable_tiles(settler)
 	_ok(reach.has(neighbor) and int(reach[neighbor]) == 0, "over-budget forest entry ends the move")
 	_ok(not reach.has(two), "no step after an over-budget entry")
@@ -489,8 +557,8 @@ func _test_pathfinding() -> void:
 	_ok(not reach.has(neighbor), "over-budget entry follows the config flag")
 	game = _blank_setup()
 	var scout := game.spawn_unit(0, "scout", origin)
-	var far := _step(origin, Hex.EAST, game.config.unit("scout").move)
-	var too_far := _step(origin, Hex.EAST, game.config.unit("scout").move + 1)
+	var far := _step(origin, Hex.EAST, game.config.unit("scout").ap)
+	var too_far := _step(origin, Hex.EAST, game.config.unit("scout").ap + 1)
 	reach = game.reachable_tiles(scout)
 	_ok(reach.has(far) and not reach.has(too_far), "scout walks its own movement points")
 	var civilian := game.spawn_unit(0, "settler", _step(origin, Hex.NORTHEAST, 1))
@@ -518,13 +586,13 @@ func _test_movement_and_fog() -> void:
 	var dest := _step(origin, Hex.EAST, 1)
 	_ok(game.move_unit(unit, dest), "moves east")
 	_ok(unit.cell == dest, "unit arrives")
-	_ok(unit.mp == game.config.unit("settler").move - game.config.land("plains").move_cost, "plains cost is spent")
+	_ok(unit.ap == game.config.unit("settler").ap - game.config.land("plains").move_cost, "plains cost is spent")
 	_ok(game.fog.sight(0, seen) == FogState.Sight.REVEALED, "left-behind tiles stay revealed and leave vision")
 	var ahead := _step(dest, Hex.EAST, game.config.unit_vision)
 	_ok(game.fog.sight(0, ahead) == FogState.Sight.VISIBLE, "the move reveals new tiles")
 	game.end_turn()
 	_ok(game.turn == 2, "end turn advances the turn")
-	_ok(unit.mp == game.config.unit("settler").move, "end turn resets movement")
+	_ok(unit.ap == game.config.unit("settler").ap, "end turn resets movement")
 
 
 func _test_found_city() -> void:
@@ -977,85 +1045,85 @@ func _test_combat() -> void:
 	var neighbor := _step(origin, Hex.EAST, 1)
 	var attacker := game.spawn_unit(0, "warrior", origin)
 	var defender := game.spawn_unit(1, "warrior", neighbor)
-	var even := game.preview_attack(attacker, defender)
+	var even := game.ability_preview(attacker, game.primary_ability(attacker), defender.cell)
 	_ok(bool(even["ok"]) and int(even["damage"]) == 30 and int(even["counter"]) == 30, "melee mirror is 30 and 30")
 	attacker.hp = 10
-	var wounded := game.preview_attack(attacker, defender)
+	var wounded := game.ability_preview(attacker, game.primary_ability(attacker), defender.cell)
 	_ok(int(wounded["damage"]) == 30 and int(wounded["counter"]) == 30, "HP does not change strength")
 	attacker.hp = 100
 	game.map.set_land(neighbor, "hills")
-	var hills := game.preview_attack(attacker, defender)
+	var hills := game.ability_preview(attacker, game.primary_ability(attacker), defender.cell)
 	_ok(int(hills["damage"]) == 25 and int(hills["counter"]) == 36, "hills multiply defender strength by 1.25")
 	game.config.hills_defense_multiplier = 1.0
-	var flat_hills := game.preview_attack(attacker, defender)
+	var flat_hills := game.ability_preview(attacker, game.primary_ability(attacker), defender.cell)
 	_ok(int(flat_hills["damage"]) == 30 and int(flat_hills["counter"]) == 30, "hills bonus follows the config multiplier")
 	game.config.hills_defense_multiplier = 1.25
 	game.map.set_land(neighbor, "plains")
 	defender.fortified = true
-	var fort := game.preview_attack(attacker, defender)
+	var fort := game.ability_preview(attacker, game.primary_ability(attacker), defender.cell)
 	_ok(int(fort["damage"]) == 25 and int(fort["counter"]) == 36, "fortify adds 25 percent defense")
 	game.map.set_land(neighbor, "hills")
-	var both := game.preview_attack(attacker, defender)
+	var both := game.ability_preview(attacker, game.primary_ability(attacker), defender.cell)
 	_ok(int(both["damage"]) == 19 and int(both["counter"]) == 47, "hills and fortify stack")
 	game.config.fortify_defense_bonus = 0.0
-	var no_fort := game.preview_attack(attacker, defender)
+	var no_fort := game.ability_preview(attacker, game.primary_ability(attacker), defender.cell)
 	_ok(int(no_fort["damage"]) == 25 and int(no_fort["counter"]) == 36, "fortify bonus follows the config")
 	game.config.fortify_defense_bonus = 0.25
 	defender.fortified = false
 	game.map.set_land(neighbor, "plains")
 	var archer := game.spawn_unit(0, "archer", _step(origin, Hex.WEST, 2))
-	var shot := game.preview_attack(archer, defender)
+	var shot := game.ability_preview(archer, game.primary_ability(archer), defender.cell)
 	_ok(not bool(shot["ok"]) and str(shot["reason"]) == GameSetup.REASON_RANGE, "archer at distance 3 is out of range")
 	var range_tile := _step(neighbor, Hex.EAST, 2)
 	archer.cell = range_tile
 	game._refresh_fog()
-	shot = game.preview_attack(archer, defender)
+	shot = game.ability_preview(archer, game.primary_ability(archer), defender.cell)
 	_ok(Hex.distance(Hex.offset_to_axial(archer.cell), Hex.offset_to_axial(defender.cell)) == 2, "archer stands at distance 2")
 	_ok(bool(shot["ok"]) and int(shot["damage"]) == 36 and int(shot["counter"]) == 0, "archer at range 2 deals 36 and takes no counter")
 	var beside := _step(neighbor, Hex.NORTHEAST, 1)
 	archer.cell = beside
 	game._refresh_fog()
-	var adjacent_shot := game.preview_attack(archer, defender)
+	var adjacent_shot := game.ability_preview(archer, game.primary_ability(archer), defender.cell)
 	_ok(Hex.distance(Hex.offset_to_axial(archer.cell), Hex.offset_to_axial(defender.cell)) == 1, "archer stands next to the defender")
 	_ok(bool(adjacent_shot["ok"]) and int(adjacent_shot["counter"]) == 0, "an adjacent archer shot is still ranged")
 	var before_archer := archer.hp
-	_ok(game.attack_unit(archer, defender).is_empty(), "ranged attack resolves")
-	_ok(archer.hp == before_archer and defender.hp == 100 - 36 and archer.mp == 0, "ranged attack spends movement and skips counter")
+	_ok(game.use_ability(archer, game.primary_ability(archer), defender.cell).is_empty(), "ranged attack resolves")
+	_ok(archer.hp == before_archer and defender.hp == 100 - 36 and archer.ap == 0, "ranged attack spends movement and skips counter")
 	_ok(archer.cell == beside, "a ranged attacker stays on its tile")
-	_ok(game.attack_unit(archer, defender) == GameSetup.REASON_NO_MOVES, "a unit with no moves cannot attack")
+	_ok(game.use_ability(archer, game.primary_ability(archer), defender.cell) == GameSetup.REASON_AP, "a unit with no moves cannot attack")
 	defender.hp = 100
 	var foe := game.spawn_unit(1, "archer", _step(origin, Hex.NORTHWEST, 1))
-	var melee_archer := game.preview_attack(attacker, foe)
+	var melee_archer := game.ability_preview(attacker, game.primary_ability(attacker), foe.cell)
 	_ok(int(melee_archer["damage"]) == 41 and int(melee_archer["counter"]) == 22, "a melee hit uses the archer's defense of 12")
 	var scout := game.spawn_unit(1, "scout", _step(origin, Hex.WEST, 2))
-	var two := game.preview_attack(attacker, scout)
+	var two := game.ability_preview(attacker, game.primary_ability(attacker), scout.cell)
 	_ok(not bool(two["ok"]), "a warrior cannot melee at distance 2")
 	var own := game.spawn_unit(0, "scout", _step(origin, Hex.SOUTHEAST, 1))
-	_ok(game.can_attack(attacker, own) == GameSetup.REASON_OWN_UNIT, "cannot attack your own unit")
+	_ok(game.can_use_ability(attacker, game.primary_ability(attacker), own.cell) == GameSetup.REASON_OWN_UNIT, "cannot attack your own unit")
 	var hidden := game.spawn_unit(1, "warrior", _step(origin, Hex.SOUTHEAST, 8))
-	_ok(game.can_attack(attacker, hidden) == GameSetup.REASON_UNSEEN, "cannot attack a unit outside vision")
+	_ok(game.can_use_ability(attacker, game.primary_ability(attacker), hidden.cell) == GameSetup.REASON_UNSEEN, "cannot attack a unit outside vision")
 	var settler := game.spawn_unit(1, "settler", _step(origin, Hex.NORTHEAST, 1))
-	var settler_mp := attacker.mp
-	_ok(game.can_attack(attacker, settler) == GameSetup.REASON_ATTACK_SETTLER, "cannot attack a settler")
-	_ok(game.attack_unit(attacker, settler) == GameSetup.REASON_ATTACK_SETTLER and attacker.mp == settler_mp, "a rejected settler attack spends nothing")
+	var settler_mp := attacker.ap
+	_ok(game.can_use_ability(attacker, game.primary_ability(attacker), settler.cell) == GameSetup.REASON_ATTACK_SETTLER, "cannot attack a settler")
+	_ok(game.use_ability(attacker, game.primary_ability(attacker), settler.cell) == GameSetup.REASON_ATTACK_SETTLER and attacker.ap == settler_mp, "a rejected settler attack spends nothing")
 	_ok(game.players[1].units.has(settler), "the settler stays on the map")
 	defender.hp = 5
 	var defender_cell := defender.cell
 	var attacker_cell := attacker.cell
-	_ok(game.attack_unit(attacker, defender).is_empty(), "a killing melee attack resolves")
+	_ok(game.use_ability(attacker, game.primary_ability(attacker), defender.cell).is_empty(), "a killing melee attack resolves")
 	_ok(not game.players[1].units.has(defender), "a unit at 0 HP is removed")
 	_ok(attacker.cell == attacker_cell and attacker.cell != defender_cell, "a melee attacker does not advance")
-	_ok(attacker.hp == 70 and attacker.mp == 0 and attacker.acted, "counter damage lands and the attack spends the turn")
+	_ok(attacker.hp == 70 and attacker.ap == 0 and attacker.acted, "counter damage lands and the attack spends the turn")
 	attacker.hp = 5
-	attacker.mp = 2
+	attacker.ap = 2
 	var rival := game.spawn_unit(1, "warrior", defender_cell)
 	rival.hp = 5
-	_ok(game.attack_unit(attacker, rival).is_empty(), "mutual kill resolves")
+	_ok(game.use_ability(attacker, game.primary_ability(attacker), rival.cell).is_empty(), "mutual kill resolves")
 	_ok(not game.players[0].units.has(attacker) and not game.players[1].units.has(rival), "both units at 0 HP are removed")
 	game.config.ranged_takes_no_counter = false
 	var shooter := game.spawn_unit(0, "archer", origin)
 	var target := game.spawn_unit(1, "warrior", neighbor)
-	var answered := game.preview_attack(shooter, target)
+	var answered := game.ability_preview(shooter, game.primary_ability(shooter), target.cell)
 	_ok(int(answered["counter"]) == 25, "ranged counter follows the config flag")
 	print("[orders and healing]")
 	game = _blank_setup("plains")
@@ -1069,7 +1137,7 @@ func _test_combat() -> void:
 	idle.hp = 40
 	idle.acted = true
 	game.end_turn()
-	_ok(idle.hp == 40 and not idle.acted and idle.mp == cfg.unit("warrior").move, "a unit that acted does not heal, and movement refills")
+	_ok(idle.hp == 40 and not idle.acted and idle.ap == cfg.unit("warrior").ap, "a unit that acted does not heal, and movement refills")
 	idle.hp = 40
 	_ok(game.skip_unit(idle) and idle.order == GameSetup.ORDER_SKIP and not idle.acted, "skip is an order and does not count as acting")
 	_ok(not game.has_unordered_moves(0), "skip satisfies the end-turn warning")
@@ -1106,9 +1174,110 @@ func _test_combat() -> void:
 	idle.order = GameSetup.ORDER_FORTIFY
 	idle.fortified = true
 	_ok(game.move_unit(partial, _step(partial.cell, Hex.EAST, 1)), "settler steps once")
-	_ok(partial.mp > 0 and game.has_unordered_moves(0), "moves left after a step still need an order")
-	partial.mp = 0
+	_ok(partial.ap > 0 and game.has_unordered_moves(0), "moves left after a step still need an order")
+	partial.ap = 0
 	_ok(not game.has_unordered_moves(0), "a unit with no moves left does not warn")
+
+
+func _test_ap_and_abilities() -> void:
+	print("[ap and abilities]")
+	var game := _blank_setup("plains")
+	var origin := Vector2i(8, 8)
+	var step := _step(origin, Hex.EAST, 1)
+	var foe_cell := _step(step, Hex.EAST, 1)
+	var warrior := game.spawn_unit(0, "warrior", origin)
+	var enemy := game.spawn_unit(1, "warrior", foe_cell)
+	_ok(warrior.ap == 2 and game.move_unit(warrior, step) and warrior.ap == 1, "a plains step spends 1 AP")
+	var strike := game.ability_preview(warrior, "strike", foe_cell)
+	_ok(bool(strike["ok"]) and int(strike["damage"]) == 30 and int(strike["counter"]) == 30, "Strike after a step still deals 30 and 30")
+	_ok(game.use_ability(warrior, "strike", foe_cell).is_empty(), "Strike resolves")
+	_ok(warrior.ap == 0 and warrior.acted and warrior.used_ability and warrior.hp == 70 and enemy.hp == 70, "Strike sets AP to 0 and both sides take 30")
+	var held_hp := enemy.hp
+	_ok(game.use_ability(warrior, "strike", foe_cell) == GameSetup.REASON_AP and enemy.hp == held_hp and warrior.ap == 0, "a unit at 0 AP is refused with the AP reason")
+	var scout := game.spawn_unit(0, "scout", _step(foe_cell, Hex.NORTHEAST, 1))
+	var scout_hit := game.ability_preview(scout, "strike", enemy.cell)
+	_ok(bool(scout_hit["ok"]) and int(scout_hit["damage"]) == 17 and int(scout_hit["counter"]) == 54, "scout Strike into a warrior is 17 and 54")
+	var archer := game.spawn_unit(0, "archer", _step(enemy.cell, Hex.EAST, 2))
+	game._refresh_fog()
+	var shot := game.ability_preview(archer, "shoot", enemy.cell)
+	_ok(bool(shot["ok"]) and int(shot["damage"]) == 36 and int(shot["counter"]) == 0, "Shoot at range 2 is 36 and no counter")
+	var city := game.found_city(game.spawn_unit(1, "settler", _step(origin, Hex.SOUTHEAST, 4)))
+	var city_side := _step(city.cell, Hex.EAST, 1)
+	var sieger := game.spawn_unit(0, "warrior", city_side)
+	var city_hit := game.ability_preview(sieger, "strike", city.cell)
+	var defense := Combat.defender_strength(game.config, float(game.config.city_defense), false, false)
+	_ok(bool(city_hit["ok"]) and int(city_hit["damage"]) == Combat.damage(game.config, 20.0, defense) and int(city_hit["counter"]) > 0, "melee Strike on a city keeps counter-damage")
+	var city_archer := game.spawn_unit(0, "archer", _step(city.cell, Hex.WEST, 2))
+	game._refresh_fog()
+	var city_shot := game.ability_preview(city_archer, "shoot", city.cell)
+	_ok(bool(city_shot["ok"]) and int(city_shot["counter"]) == 0, "Shoot on a city takes no counter")
+	game.config.archers_can_zero_city_hp = false
+	city.hp = 10
+	_ok(game.use_ability(city_archer, "shoot", city.cell).is_empty() and city.hp == 1, "Shoot cannot zero a city when the flag is off")
+	var tired := game.spawn_unit(0, "warrior", Vector2i(2, 2))
+	tired.ap = 0
+	tired.hp = 40
+	var tired_step := _step(tired.cell, Hex.EAST, 1)
+	_ok(game.skip_unit(tired) and tired.order == GameSetup.ORDER_SKIP and tired.ap == 0 and not tired.acted, "Skip at 0 AP works and does not count as acting")
+	_ok(not game.move_unit(tired, tired_step), "Skip ends the turn, so the unit cannot move")
+	game.end_turn()
+	_ok(tired.hp == 50, "a unit that skipped still heals")
+	var guard := game.spawn_unit(0, "warrior", Vector2i(4, 12))
+	guard.ap = 0
+	_ok(not game.fortify_unit(guard) and game.fortify_reason(guard) == GameSetup.REASON_AP and not guard.fortified, "Fortify at 0 AP is refused")
+	guard.ap = 1
+	guard.hp = 40
+	_ok(game.fortify_unit(guard) and guard.fortified and guard.ap == 0 and not guard.acted, "Fortify at 1 AP ends the turn")
+	_ok(not game.move_unit(guard, _step(guard.cell, Hex.EAST, 1)), "Fortify ends the turn, so the unit cannot move")
+	game.end_turn()
+	_ok(guard.hp == 50 and guard.fortified, "a unit that fortified still heals and stays fortified")
+	var founder := game.spawn_unit(0, "settler", Vector2i(14, 12))
+	founder.ap = 0
+	_ok(game.can_found(founder) == GameSetup.REASON_AP and game.found_city(founder) == null and game.players[0].units.has(founder), "Found at 0 AP is refused")
+	var held := game.found_city(game.spawn_unit(1, "settler", Vector2i(20, 4)))
+	var blocked := game.spawn_unit(0, "warrior", _step(held.cell, Hex.EAST, 1))
+	var friend := game.spawn_unit(0, "scout", _step(held.cell, Hex.WEST, 2))
+	friend.cell = held.cell
+	game._refresh_fog()
+	_ok(game.can_use_ability(blocked, "strike", held.cell) == GameSetup.REASON_CITY_HELD, "a friendly military unit on a city blocks the city strike")
+	var slow_data := GameConfig.read_json(GameConfig.PATH).duplicate(true)
+	var slow: Dictionary = (slow_data["abilities"]["strike"] as Dictionary).duplicate(true)
+	slow["name"] = "Slow Strike"
+	slow["cooldown"] = 2
+	slow_data["abilities"]["slow_strike"] = slow
+	var listed: Array = (slow_data["units"]["warrior"] as Dictionary)["abilities"]
+	listed.append("slow_strike")
+	var slow_cfg: GameConfig = GameConfig.from_dict(slow_data)
+	var cooled := _blank_setup("plains", slow_cfg)
+	var caster := cooled.spawn_unit(0, "warrior", Vector2i(6, 6))
+	var dummy := cooled.spawn_unit(1, "warrior", _step(Vector2i(6, 6), Hex.EAST, 1))
+	_ok(cooled.use_ability(caster, "slow_strike", dummy.cell).is_empty() and cooled.ability_cooldown_left(caster, "slow_strike") == 2, "a cooldown is stored on the unit")
+	caster.ap = 2
+	_ok(cooled.can_use_ability(caster, "slow_strike", dummy.cell) == GameSetup.REASON_COOLDOWN, "a cooling ability is refused")
+	cooled.end_turn()
+	_ok(cooled.ability_cooldown_left(caster, "slow_strike") == 1, "End Turn ticks the ability cooldown once")
+	cooled.end_turn()
+	_ok(cooled.ability_cooldown_left(caster, "slow_strike") == 0 and cooled.can_use_ability(caster, "slow_strike", dummy.cell).is_empty(), "cooldown 2 is ready after two ticks")
+	for effect in ["status", "move", "terraform"]:
+		var hook_data := GameConfig.read_json(GameConfig.PATH).duplicate(true)
+		hook_data["abilities"]["hook"] = {
+			"name": "Hook",
+			"target": "enemy",
+			"range": 1,
+			"area": "single",
+			"ap_cost": 1,
+			"cooldown": 0,
+			"effect": effect,
+		}
+		var hooks: Array = (hook_data["units"]["warrior"] as Dictionary)["abilities"]
+		hooks.append("hook")
+		var hook_cfg: GameConfig = GameConfig.from_dict(hook_data)
+		var hooked := _blank_setup("plains", hook_cfg)
+		var user := hooked.spawn_unit(0, "warrior", Vector2i(8, 2))
+		var other := hooked.spawn_unit(1, "warrior", _step(Vector2i(8, 2), Hex.EAST, 1))
+		var before_ap := user.ap
+		var before_hp := other.hp
+		_ok(hooked.use_ability(user, "hook", other.cell) == GameSetup.REASON_NOT_YET and user.ap == before_ap and not user.acted and other.hp == before_hp, "%s is refused and changes nothing" % effect)
 
 
 func _test_city_capture() -> void:
@@ -1123,42 +1292,42 @@ func _test_city_capture() -> void:
 	var defense := Combat.defender_strength(cfg, float(cfg.city_defense), false, false)
 	var dealt := Combat.damage(cfg, float(cfg.unit("warrior").attack), defense)
 	var counter := Combat.damage(cfg, defense, float(cfg.unit("warrior").attack))
-	var preview := game.preview_city(warrior, city)
+	var preview := game.ability_preview(warrior, game.primary_ability(warrior), city.cell)
 	_ok(bool(preview["ok"]) and int(preview["damage"]) == dealt and int(preview["counter"]) == counter, "warrior preview uses city defense")
 	_ok(dealt > 0 and counter > 0, "melee takes counter-damage from a city")
 	game.map.set_land(origin, "hills")
 	var hill_defense := Combat.defender_strength(cfg, float(cfg.city_defense), true, false)
-	var hill_hit := game.preview_city(warrior, city)
+	var hill_hit := game.ability_preview(warrior, game.primary_ability(warrior), city.cell)
 	_ok(int(hill_hit["damage"]) == Combat.damage(cfg, float(cfg.unit("warrior").attack), hill_defense), "hills modify the city like any defender")
 	game.map.set_land(origin, "plains")
 	var before_hp := warrior.hp
-	_ok(game.attack_city(warrior, city).is_empty(), "warrior attack on a city resolves")
+	_ok(game.use_ability(warrior, game.primary_ability(warrior), city.cell).is_empty(), "warrior attack on a city resolves")
 	_ok(city.hp == cfg.city_hp - dealt and city.attacked and warrior.hp == before_hp - counter, "city and warrior both lose HP")
-	_ok(warrior.cell == beside and warrior.mp == 0, "a city attack does not advance the attacker")
+	_ok(warrior.cell == beside and warrior.ap == 0, "a city attack does not advance the attacker")
 	var archer := game.spawn_unit(0, "archer", _step(origin, Hex.EAST, 2))
-	var shot := game.preview_city(archer, city)
+	var shot := game.ability_preview(archer, game.primary_ability(archer), city.cell)
 	_ok(bool(shot["ok"]) and int(shot["counter"]) == 0, "an archer takes no counter from a city")
 	var archer_hp := archer.hp
 	var city_before := city.hp
-	_ok(game.attack_city(archer, city).is_empty(), "archer attack on a city resolves")
+	_ok(game.use_ability(archer, game.primary_ability(archer), city.cell).is_empty(), "archer attack on a city resolves")
 	_ok(archer.hp == archer_hp and archer.cell == _step(origin, Hex.EAST, 2) and city.hp == city_before - int(shot["damage"]), "archer damage lands and the archer stays put")
 	var scout := game.spawn_unit(0, "scout", _step(origin, Hex.NORTHEAST, 1))
-	var scout_preview := game.preview_city(scout, city)
+	var scout_preview := game.ability_preview(scout, game.primary_ability(scout), city.cell)
 	_ok(bool(scout_preview["ok"]) and int(scout_preview["damage"]) > 0 and int(scout_preview["counter"]) > 0, "a scout attacks a city with the same formula")
-	_ok(game.attack_city(scout, city).is_empty() and scout.hp < cfg.unit("scout").hp, "a scout takes the city's counter")
-	warrior.mp = cfg.unit("warrior").move
+	_ok(game.use_ability(scout, game.primary_ability(scout), city.cell).is_empty() and scout.hp < cfg.unit("scout").hp, "a scout takes the city's counter")
+	warrior.ap = cfg.unit("warrior").ap
 	var guard := 0
 	while city.hp > 0 and guard < 8:
 		guard += 1
-		warrior.mp = cfg.unit("warrior").move
-		_ok(game.attack_city(warrior, city).is_empty(), "follow-up city attack resolves")
+		warrior.ap = cfg.unit("warrior").ap
+		_ok(game.use_ability(warrior, game.primary_ability(warrior), city.cell).is_empty(), "follow-up city attack resolves")
 	_ok(city.hp == 0 and game.cities.has(city), "city HP floors at 0 and the city stays")
-	warrior.mp = cfg.unit("warrior").move
-	_ok(game.attack_city(warrior, city).is_empty() and city.hp == 0, "another hit does not destroy the city")
+	warrior.ap = cfg.unit("warrior").ap
+	_ok(game.use_ability(warrior, game.primary_ability(warrior), city.cell).is_empty() and city.hp == 0, "another hit does not destroy the city")
 	game.config.archers_can_zero_city_hp = false
 	city.hp = 10
-	archer.mp = cfg.unit("archer").move
-	_ok(game.attack_city(archer, city).is_empty() and city.hp == 1, "a ranged hit cannot zero a city when the flag is off")
+	archer.ap = cfg.unit("archer").ap
+	_ok(game.use_ability(archer, game.primary_ability(archer), city.cell).is_empty() and city.hp == 1, "a ranged hit cannot zero a city when the flag is off")
 	game.config.archers_can_zero_city_hp = true
 	city.hp = 40
 	city.attacked = false
@@ -1217,18 +1386,18 @@ func _test_city_capture() -> void:
 	game.config.unit("warrior").can_capture = true
 	var garrison := game.spawn_unit(1, "scout", _step(origin, Hex.WEST, 4))
 	garrison.cell = origin
-	_ok(game.can_attack_city(warrior, city) == GameSetup.REASON_CITY_HELD, "a military unit on the tile is the target")
+	_ok(game.enemy_at(warrior, city.cell) == garrison and game.can_use_ability(warrior, game.primary_ability(warrior), city.cell).is_empty(), "a military unit on the tile is the target")
 	_ok(not game.move_unit(warrior, origin), "capture is blocked while a military unit stands on the city")
 	garrison.hp = 5
-	_ok(game.attack_unit(warrior, garrison).is_empty() and not game.players[1].units.has(garrison), "the garrison dies and the attacker does not step in")
+	_ok(game.use_ability(warrior, game.primary_ability(warrior), garrison.cell).is_empty() and not game.players[1].units.has(garrison), "the garrison dies and the attacker does not step in")
 	_ok(warrior.cell == beside and city.player == 1, "the city is still the rival's after the garrison dies")
-	warrior.mp = game.config.unit("warrior").move
+	warrior.ap = game.config.unit("warrior").ap
 	var far := _step(origin, Hex.WEST, city.radius + game.config.city_vision_beyond_border)
 	_ok(game.fog.sight(1, far) == FogState.Sight.VISIBLE, "the owner sees the city vision ring")
 	_ok(game.fog.sight(0, far) != FogState.Sight.VISIBLE, "the attacker does not see that ring yet")
 	var pop_before := city.population
 	_ok(game.move_unit(warrior, origin), "the warrior moves in and captures")
-	_ok(city.player == 0 and warrior.cell == origin and warrior.mp == 0, "the capturer owns the city and ends with no movement")
+	_ok(city.player == 0 and warrior.cell == origin and warrior.ap == 0, "the capturer owns the city and ends with no movement")
 	_ok(city.population == maxi(game.config.capture_population_min, pop_before - game.config.capture_population_loss), "population drops by the config, not below the minimum")
 	_ok(city.hp == roundi(float(city.max_hp) * game.config.capture_hp_fraction), "HP resets to the config fraction")
 	_ok(city.queue.is_empty() and city.production_stored == 0 and city.buildings.size() == 1 and city.buildings[0].kind == "mana_well", "the queue clears and the buildings stay")
@@ -1268,31 +1437,31 @@ func _test_city_capture() -> void:
 	var captor := game.spawn_unit(0, "warrior", origin)
 	var settler := game.spawn_unit(1, "settler", _step(origin, Hex.EAST, 1))
 	var past := _step(origin, Hex.EAST, 2)
-	captor.mp = 1
+	captor.ap = 1
 	var reach := game.reachable_tiles(captor)
 	_ok(reach.has(settler.cell) and int(reach[settler.cell]) == 0 and not reach.has(past), "a capture tile ends the move")
-	captor.mp = 2
+	captor.ap = 2
 	_ok(game.move_unit(captor, settler.cell), "a warrior moves onto a lone settler")
-	_ok(settler.owner == 0 and settler.cell == captor.cell and captor.mp == 0, "the settler changes owner and the mover stops")
+	_ok(settler.owner == 0 and settler.cell == captor.cell and captor.ap == 0, "the settler changes owner and the mover stops")
 	_ok(game.players[0].units.has(settler) and not game.players[1].units.has(settler), "the settler joins the captor's roster")
 	var scout_taker := game.spawn_unit(0, "scout", _step(origin, Hex.WEST, 2))
 	var second := game.spawn_unit(1, "settler", _step(scout_taker.cell, Hex.WEST, 1))
 	_ok(game.move_unit(scout_taker, second.cell) and second.owner == 0, "a scout captures a settler without can_capture")
 	var shooter := game.spawn_unit(0, "archer", Vector2i(14, 8))
 	var victim := game.spawn_unit(1, "settler", _step(shooter.cell, Hex.EAST, 2))
-	shooter.mp = 1
+	shooter.ap = 1
 	_ok(not game.reachable_tiles(shooter).has(victim.cell), "the archer cannot walk onto the settler")
-	_ok(game.attack_unit(shooter, victim).is_empty() and not game.players[1].units.has(victim), "a ranged attack destroys a lone settler")
+	_ok(game.use_ability(shooter, game.primary_ability(shooter), victim.cell).is_empty() and not game.players[1].units.has(victim), "a ranged attack destroys a lone settler")
 	_ok(shooter.cell == Vector2i(14, 8), "the ranged attacker does not step onto the settler")
 	var shield := game.spawn_unit(1, "warrior", Vector2i(18, 8))
 	var hidden_settler := game.spawn_unit(1, "settler", _step(shield.cell, Hex.EAST, 1))
 	hidden_settler.cell = shield.cell
 	var hunter := game.spawn_unit(0, "warrior", _step(shield.cell, Hex.WEST, 1))
-	_ok(game.can_attack(hunter, hidden_settler) == GameSetup.REASON_ATTACK_SETTLER, "a settler stacked with a military unit is protected")
+	_ok(game.enemy_at(hunter, hidden_settler.cell) == shield and game.can_use_ability(hunter, game.primary_ability(hunter), hidden_settler.cell).is_empty(), "a settler stacked with a military unit is not the target")
 	_ok(not game.reachable_tiles(hunter).has(shield.cell), "the stacked tile cannot be entered")
 	shield.hp = 5
-	_ok(game.attack_unit(hunter, shield).is_empty() and game.players[1].units.has(hidden_settler), "killing the guard leaves the settler")
-	hunter.mp = game.config.unit("warrior").move
+	_ok(game.use_ability(hunter, game.primary_ability(hunter), shield.cell).is_empty() and game.players[1].units.has(hidden_settler), "killing the guard leaves the settler")
+	hunter.ap = game.config.unit("warrior").ap
 	_ok(game.move_unit(hunter, hidden_settler.cell) and hidden_settler.owner == 0, "the settler can be captured once the guard is dead")
 	game.config.capture_lone_settler = false
 	var walker := game.spawn_unit(0, "warrior", Vector2i(4, 4))
@@ -1376,7 +1545,7 @@ func _test_spells() -> void:
 	_ok(int(after["production"]) == int(before["production"]) + cfg.land("forest").production, "production updates from the live land")
 	_ok(int(after["food"]) == int(before["food"]) - 1, "food updates from the live land")
 	var walker := game.spawn_unit(0, "settler", city.cell)
-	walker.mp = 1
+	walker.ap = 1
 	_ok(int(game.reachable_tiles(walker)[worked]) == 0, "the new forest move cost applies immediately")
 	_ok(game.cast_spell(0, "grow_forest", worked, Hex.EAST) == SpellRules.REASON_COOLDOWN, "cooldown blocks the next cast")
 	var turn_cast: int = game.turn
@@ -1466,11 +1635,11 @@ func _test_spells() -> void:
 	var defender_cell := _step(hills.cities[0].cell, Hex.EAST, 1)
 	var attacker := hills.spawn_unit(0, "warrior", hills.cities[0].cell)
 	var defender := hills.spawn_unit(1, "warrior", defender_cell)
-	var plain_damage := int(hills.preview_attack(attacker, defender)["damage"])
+	var plain_damage := int(hills.ability_preview(attacker, hills.primary_ability(attacker), defender.cell)["damage"])
 	hills.players[0].mana = 40
 	_ok(hills.cast_spell(0, "raise_hills", defender_cell, Hex.EAST).is_empty(), "raise hills casts under the defender")
 	_ok(hills.map.land_at(defender_cell) == "hills", "the defender stands on hills")
-	_ok(int(hills.preview_attack(attacker, defender)["damage"]) < plain_damage, "hills defense uses the live land")
+	_ok(int(hills.ability_preview(attacker, hills.primary_ability(attacker), defender.cell)["damage"]) < plain_damage, "hills defense uses the live land")
 
 
 func _test_rival_land_updates() -> void:
@@ -1564,19 +1733,19 @@ func _test_rival_land_updates() -> void:
 	var attacker := game.spawn_unit(0, "warrior", home.cell)
 	var defender := game.spawn_unit(1, "warrior", _step(home.cell, Hex.WEST, 1))
 	_ok(attacker != null and defender != null, "combatants stand on plains")
-	var plain_hit: Dictionary = game.preview_attack(attacker, defender)
+	var plain_hit: Dictionary = game.ability_preview(attacker, game.primary_ability(attacker), defender.cell)
 	_ok(bool(plain_hit["ok"]) and game.map.land_at(defender.cell) == "plains", "the preview is legal on plains")
 	_allow_another_cast(game, 0)
 	game.config.spell("raise_hills").radius = 0
 	var defender_owner := game.owner_at(defender.cell)
 	_ok(game.cast_spell(0, "raise_hills", defender.cell, Hex.EAST).is_empty(), "raise hills under the defender")
 	_ok(game.map.land_at(defender.cell) == "hills" and game.owner_at(defender.cell) == defender_owner and game.turn == turn_before, "hills land is live and ownership stays")
-	var hill_hit: Dictionary = game.preview_attack(attacker, defender)
+	var hill_hit: Dictionary = game.ability_preview(attacker, game.primary_ability(attacker), defender.cell)
 	_ok(int(hill_hit["damage"]) < int(plain_hit["damage"]), "hills defense lowers damage immediately")
 	_ok(int(hill_hit["counter"]) > int(plain_hit["counter"]), "hills defense raises the counter immediately")
 	_allow_another_cast(game, 0)
 	_ok(game.cast_spell(0, "restore_plains", defender.cell, Hex.EAST).is_empty(), "restore plains under the defender")
-	var back: Dictionary = game.preview_attack(attacker, defender)
+	var back: Dictionary = game.ability_preview(attacker, game.primary_ability(attacker), defender.cell)
 	_ok(game.map.land_at(defender.cell) == "plains", "the hill is gone")
 	_ok(int(back["damage"]) == int(plain_hit["damage"]) and int(back["counter"]) == int(plain_hit["counter"]), "removing the hill restores both damage numbers")
 
@@ -2087,7 +2256,7 @@ func _test_win_loss() -> void:
 	var beside := _step(hunter.cell, Hex.EAST, 1)
 	second.cell = beside
 	conquest._refresh_fog()
-	hunter.mp = conquest.config.unit("warrior").move
+	hunter.ap = conquest.config.unit("warrior").ap
 	_ok(conquest.move_unit(hunter, beside), "the warrior captures the last rival settler")
 	_ok(conquest.players[2].eliminated and not conquest.players[2].units.has(army), "the last rival's military is removed")
 	_ok(conquest.result != null and conquest.result.human_won and conquest.result.ending == MatchResult.REASON_CONQUEST, "conquest wins immediately, before turn 50")
@@ -2416,7 +2585,7 @@ func _assert_end_log(name: String, ending: String, human_won: bool) -> void:
 		var beside := _step(hunter.cell, Hex.EAST, 1)
 		second.cell = beside
 		game._refresh_fog()
-		hunter.mp = game.config.unit("warrior").move
+		hunter.ap = game.config.unit("warrior").ap
 		_ok(game.move_unit(hunter, beside), "conquest removes the last rival")
 	elif ending == MatchResult.REASON_ELIMINATED:
 		var human_settler := game.spawn_unit(0, "settler", Vector2i(8, 8))
@@ -2616,4 +2785,11 @@ func _test_soak_invariants() -> void:
 	var mana := SoakInvariants.check(game)
 	_ok(mana.contains("mana"), "negative mana fails the soak invariants")
 	game.players[0].mana = 0
+	unit.ap = -1
+	_ok(SoakInvariants.check(game).contains("ap"), "negative AP fails the soak invariants")
+	unit.ap = 1
+	unit.used_ability = true
+	_ok(SoakInvariants.check(game).contains("ability"), "an ability with AP left fails the soak invariants")
+	unit.used_ability = false
+	unit.ap = cfg.unit(unit.unit_type).ap
 	_ok(SoakInvariants.check(game).is_empty(), "restoring the tile and the pool clears the invariants")

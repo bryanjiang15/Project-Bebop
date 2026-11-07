@@ -223,6 +223,9 @@ func _end_turn_with_enter(game: Node) -> bool:
 	var before := setup.turn
 	(game.get_node("%MenuButton") as Button).pressed.emit()
 	_press_action(game, "end_turn")
+	# The warrior moved and struck, so End Turn refilled AP and the first press warns.
+	if (game.get_node("%EndTurnButton") as Button).text == "End anyway (Enter)":
+		_press_action(game, "end_turn")
 	turn = (game.get_node("%TurnLabel") as Label).text
 	if setup.turn != before + 1 or turn != "%d / 50" % setup.turn:
 		print("FAIL enter turn: '", turn, "' core ", setup.turn, " before ", before)
@@ -244,35 +247,54 @@ func _warrior_orders(game: Node) -> bool:
 		print("FAIL selected ", (game.get_node("%SelectionTitle") as Label).text)
 		quit(1)
 		return false
-	var dest := _other_reachable(setup, warrior, setup.human_settler_cell())
-	if dest.x < 0:
-		var anywhere: Dictionary = setup.reachable_tiles(warrior)
-		if anywhere.is_empty():
-			print("FAIL warrior has no move")
-			quit(1)
-			return false
-		dest = anywhere.keys()[0]
-	_click_cell(game, dest, MOUSE_BUTTON_RIGHT)
-	if warrior.cell != dest:
-		print("FAIL warrior did not move ", warrior.cell)
+	var detail := (game.get_node("%SelectionDetail") as Label).text
+	if not detail.contains("AP %d / %d" % [warrior.ap, setup.config.unit("warrior").ap]):
+		print("FAIL ap panel '", detail, "'")
 		quit(1)
 		return false
-	(game.get_node("%SkipButton") as Button).pressed.emit()
-	var detail := (game.get_node("%SelectionDetail") as Label).text
-	if not detail.contains("Order Skip") or not detail.contains("HP %d / %d" % [warrior.hp, warrior.max_hp]):
-		print("FAIL skip panel '", detail, "'")
+	if not _hover(game, warrior.cell, true):
+		return false
+	var tip := (game.get_node("%Tooltip") as Label).text
+	if not tip.contains("AP %d / %d" % [warrior.ap, setup.config.unit("warrior").ap]):
+		print("FAIL ap tooltip '", tip, "'")
+		quit(1)
+		return false
+	var dest := _open_neighbor(setup, warrior.cell)
+	if dest.x < 0:
+		print("FAIL warrior has no move")
+		quit(1)
+		return false
+	setup.map.set_land(warrior.cell, "plains")
+	setup.map.set_land(dest, "plains")
+	game._refresh_board()
+	_click_cell(game, dest, MOUSE_BUTTON_RIGHT)
+	if warrior.cell != dest or warrior.ap != 1:
+		print("FAIL warrior move ap ", warrior.ap, " cell ", warrior.cell)
 		quit(1)
 		return false
 	_press_action(game, "fortify_unit")
 	detail = (game.get_node("%SelectionDetail") as Label).text
-	if not detail.contains("Order Fortify") or not warrior.fortified:
-		print("FAIL fortify panel '", detail, "'")
+	if not detail.contains("Order Fortify") or not warrior.fortified or warrior.ap != 0:
+		print("FAIL fortify panel '", detail, "' ap ", warrior.ap)
+		quit(1)
+		return false
+	_press_action(game, "fortify_unit")
+	var order_reason := (game.get_node("%OrderReason") as Label).text
+	if order_reason != GameSetup.REASON_AP or warrior.ap != 0 or not (game.get_node("%FortifyButton") as Button).disabled:
+		print("FAIL fortify at 0 AP '", order_reason, "'")
+		quit(1)
+		return false
+	(game.get_node("%SkipButton") as Button).pressed.emit()
+	detail = (game.get_node("%SelectionDetail") as Label).text
+	# The step already set acted. Skip zeros AP and does not clear that flag.
+	if not detail.contains("Skip") or not detail.contains("HP %d / %d" % [warrior.hp, warrior.max_hp]) or warrior.ap != 0 or not warrior.acted:
+		print("FAIL skip at 0 AP '", detail, "'")
 		quit(1)
 		return false
 	print("PASS skip and fortify")
 	var settler := _human_unit(setup, "settler")
-	if settler != null and settler.mp <= 0 and not setup.has_unordered_moves(setup.human_index):
-		settler.mp = 1
+	if settler != null and settler.ap <= 0 and not setup.has_unordered_moves(setup.human_index):
+		settler.ap = 1
 		settler.order = ""
 	# A settler has no HP. Volcanic ground removes them on End Turn, and with
 	# no city yet that eliminates the player. This check needs the turn to advance.
@@ -294,8 +316,8 @@ func _warrior_orders(game: Node) -> bool:
 		print("FAIL confirm turn='", turn, "' warning='", warning, "' button='", button, "'")
 		quit(1)
 		return false
-	if not warrior.fortified or warrior.mp != setup.config.unit("warrior").move:
-		print("FAIL fortify did not persist mp ", warrior.mp)
+	if not warrior.fortified or warrior.ap != setup.config.unit("warrior").ap:
+		print("FAIL fortify did not persist ap ", warrior.ap)
 		quit(1)
 		return false
 	print("PASS end turn confirmed")
@@ -361,7 +383,7 @@ func _capture_city_and_settler(game: Node) -> bool:
 		print("FAIL city preview '", preview, "' tip '", tip, "'")
 		quit(1)
 		return false
-	var dealt := int(setup.preview_city(warrior, city)["damage"])
+	var dealt := int(setup.ability_preview(warrior, setup.primary_ability(warrior), city.cell)["damage"])
 	if dealt <= 0 or not preview.contains(str(dealt)):
 		print("FAIL city damage ", dealt, " preview ", preview)
 		quit(1)
@@ -371,7 +393,7 @@ func _capture_city_and_settler(game: Node) -> bool:
 	game._refresh_board()
 	var home := warrior.cell
 	_click_cell(game, city_cell, MOUSE_BUTTON_RIGHT)
-	if city.hp != 0 or city.player != rival or warrior.cell != home or warrior.mp != 0:
+	if city.hp != 0 or city.player != rival or warrior.cell != home or warrior.ap != 0:
 		print("FAIL city attack hp ", city.hp, " owner ", city.player, " cell ", warrior.cell)
 		quit(1)
 		return false
@@ -400,8 +422,8 @@ func _capture_city_and_settler(game: Node) -> bool:
 	var pop_before := city.population
 	var income_before := setup.mana_per_turn(setup.human_index)
 	_click_cell(game, city_cell, MOUSE_BUTTON_RIGHT)
-	if city.player != setup.human_index or warrior.cell != city_cell or warrior.mp != 0:
-		print("FAIL capture owner ", city.player, " cell ", warrior.cell, " mp ", warrior.mp)
+	if city.player != setup.human_index or warrior.cell != city_cell or warrior.ap != 0:
+		print("FAIL capture owner ", city.player, " cell ", warrior.cell, " mp ", warrior.ap)
 		quit(1)
 		return false
 	if city.population != maxi(setup.config.capture_population_min, pop_before - setup.config.capture_population_loss):
@@ -462,8 +484,8 @@ func _capture_city_and_settler(game: Node) -> bool:
 	if (game.get_node("%SelectionTitle") as Label).text != "Warrior":
 		_click_cell(game, warrior.cell)
 	_click_cell(game, settler_cell, MOUSE_BUTTON_RIGHT)
-	if settler.owner != setup.human_index or settler.cell != warrior.cell or warrior.mp != 0:
-		print("FAIL settler capture owner ", settler.owner, " cell ", settler.cell, " mp ", warrior.mp)
+	if settler.owner != setup.human_index or settler.cell != warrior.cell or warrior.ap != 0:
+		print("FAIL settler capture owner ", settler.owner, " cell ", settler.cell, " mp ", warrior.ap)
 		quit(1)
 		return false
 	if not setup.players[setup.human_index].units.has(settler):
@@ -491,7 +513,7 @@ func _capture_city_and_settler(game: Node) -> bool:
 	setup.map.set_land(approach, "plains")
 	setup.map.set_land(city.cell, "plains")
 	rival_warrior.cell = approach
-	rival_warrior.mp = setup.config.unit("warrior").move
+	rival_warrior.ap = setup.config.unit("warrior").ap
 	if not setup.move_unit(rival_warrior, city.cell):
 		print("FAIL rival could not take the city back")
 		quit(1)
@@ -510,13 +532,29 @@ func _capture_city_and_settler(game: Node) -> bool:
 func _scripted_combat(game: Node) -> bool:
 	var setup := game.get("setup") as GameSetup
 	var warrior := _human_unit(setup, "warrior")
-	if warrior == null or warrior.mp <= 0:
+	if warrior == null or warrior.ap <= 0:
 		print("FAIL warrior cannot attack")
+		quit(1)
+		return false
+	var step := _open_neighbor(setup, warrior.cell)
+	if step.x < 0:
+		print("FAIL no adjacent tile")
+		quit(1)
+		return false
+	setup.map.set_land(warrior.cell, "plains")
+	setup.map.set_land(step, "plains")
+	game._refresh_board()
+	_click_cell(game, warrior.cell)
+	if (game.get_node("%SelectionTitle") as Label).text != "Warrior":
+		_click_cell(game, warrior.cell)
+	_click_cell(game, step, MOUSE_BUTTON_RIGHT)
+	if warrior.cell != step or warrior.ap != setup.config.unit("warrior").ap - 1:
+		print("FAIL combat step ap ", warrior.ap, " cell ", warrior.cell)
 		quit(1)
 		return false
 	var dest := _open_neighbor(setup, warrior.cell)
 	if dest.x < 0:
-		print("FAIL no adjacent tile")
+		print("FAIL no tile for the enemy")
 		quit(1)
 		return false
 	setup.map.set_land(dest, "plains")
@@ -559,8 +597,13 @@ func _scripted_combat(game: Node) -> bool:
 		print("FAIL attacker advanced to ", warrior.cell)
 		quit(1)
 		return false
-	if warrior.hp >= attacker_hp or rival.hp >= defender_hp or warrior.mp != 0:
-		print("FAIL hp ", warrior.hp, " ", rival.hp, " mp ", warrior.mp)
+	if warrior.hp >= attacker_hp or rival.hp >= defender_hp or warrior.ap != 0:
+		print("FAIL hp ", warrior.hp, " ", rival.hp, " ap ", warrior.ap)
+		quit(1)
+		return false
+	var after := (game.get_node("%SelectionDetail") as Label).text
+	if not after.contains("AP 0 / %d" % setup.config.unit("warrior").ap):
+		print("FAIL ap after strike '", after, "'")
 		quit(1)
 		return false
 	if not setup.players[1].units.has(rival):
@@ -842,7 +885,7 @@ func _rival_land_cast(game: Node) -> bool:
 		quit(1)
 		return false
 	_hover_cell(game, target)
-	var plain_hit: Dictionary = setup.preview_attack(warrior, defender)
+	var plain_hit: Dictionary = setup.ability_preview(warrior, setup.primary_ability(warrior), defender.cell)
 	var preview := game.get_node("%CombatPreview") as Label
 	var plain_text := "Damage %d   Counter %d" % [int(plain_hit["damage"]), int(plain_hit["counter"])]
 	if not bool(plain_hit["ok"]) or preview.text != plain_text:
@@ -892,7 +935,7 @@ func _rival_land_cast(game: Node) -> bool:
 		print("FAIL panel text did not change")
 		quit(1)
 		return false
-	var hill_hit: Dictionary = setup.preview_attack(warrior, defender)
+	var hill_hit: Dictionary = setup.ability_preview(warrior, setup.primary_ability(warrior), defender.cell)
 	var hill_text := "Damage %d   Counter %d" % [int(hill_hit["damage"]), int(hill_hit["counter"])]
 	if int(hill_hit["damage"]) >= int(plain_hit["damage"]) or preview.text != hill_text:
 		print("FAIL combat preview after '", preview.text, "' expected ", hill_text)
@@ -1186,6 +1229,24 @@ func _press_action(game: Node, action: String) -> void:
 func _found_city(game: Node) -> bool:
 	var setup := game.get("setup") as GameSetup
 	var cell := setup.human_settler_cell()
+	var settler := _human_unit(setup, "settler")
+	if settler == null:
+		print("FAIL no settler to found")
+		quit(1)
+		return false
+	var saved_ap := settler.ap
+	settler.ap = 0
+	game._refresh_board()
+	_click_cell(game, cell)
+	_press_action(game, "found_city")
+	var refused := (game.get_node("%FoundCityReason") as Label).text
+	if setup.cities.size() != 0 or refused != GameSetup.REASON_AP or not (game.get_node("%FoundCityButton") as Button).disabled:
+		print("FAIL found at 0 AP '", refused, "' cities ", setup.cities.size())
+		quit(1)
+		return false
+	print("PASS found refused without AP")
+	settler.ap = saved_ap
+	game._refresh_board()
 	_click_cell(game, cell)
 	var found := game.get_node("%FoundCityButton") as Button
 	var reason := (game.get_node("%FoundCityReason") as Label).text
@@ -1569,7 +1630,7 @@ func _capture_clears_construction(game: Node, setup: GameSetup, city: MapCity, p
 	_vacate(setup, approach, {city.cell: true})
 	city.hp = 0
 	taker.cell = approach
-	taker.mp = setup.config.unit("warrior").move
+	taker.ap = setup.config.unit("warrior").ap
 	if not setup.move_unit(taker, city.cell):
 		print("FAIL capture move from ", approach, " onto ", city.cell)
 		quit(1)
@@ -1977,7 +2038,7 @@ func _conquest_ending(game: Node) -> bool:
 	_paint_plains(setup, beside)
 	settler_b.cell = spot
 	warrior.cell = beside
-	warrior.mp = setup.config.unit("warrior").move
+	warrior.ap = setup.config.unit("warrior").ap
 	setup._refresh_fog()
 	if not setup.move_unit(warrior, spot) or not setup.players[rival_b].eliminated or setup.result != null:
 		print("FAIL fixture did not remove the other rival")
@@ -2001,7 +2062,7 @@ func _conquest_ending(game: Node) -> bool:
 	var approach := Hex.axial_to_offset(Hex.neighbor(Hex.offset_to_axial(city_cell), Hex.EAST))
 	_paint_plains(setup, approach)
 	warrior.cell = approach
-	warrior.mp = setup.config.unit("warrior").move
+	warrior.ap = setup.config.unit("warrior").ap
 	setup._refresh_fog()
 	game._refresh_board()
 	if setup.result != null:

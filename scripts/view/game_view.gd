@@ -101,6 +101,7 @@ var _leaving: bool = false
 @onready var _combat_preview: Label = %CombatPreview
 @onready var _skip_button: Button = %SkipButton
 @onready var _fortify_button: Button = %FortifyButton
+@onready var _order_reason: Label = %OrderReason
 @onready var _end_button: Button = %EndTurnButton
 @onready var _end_warning: Label = %EndTurnWarning
 @onready var _city_panel: PanelContainer = %CityPanel
@@ -244,6 +245,7 @@ func _on_skip_pressed() -> void:
 		return
 	var unit := _selected_unit()
 	if unit == null or not setup.skip_unit(unit):
+		_refresh_selection()
 		return
 	_cancel_end_confirm()
 	_refresh_selection()
@@ -254,6 +256,7 @@ func _on_fortify_pressed() -> void:
 		return
 	var unit := _selected_unit()
 	if unit == null or not setup.fortify_unit(unit):
+		_refresh_selection()
 		return
 	_cancel_end_confirm()
 	_refresh_selection()
@@ -346,8 +349,9 @@ func _move_at_screen(screen: Vector2) -> void:
 	_refresh_board()
 
 
-## Capture-move first, then a military unit, then the city, then a lone settler.
-## Returns true when the click was an attack or a capture, so it does not also move.
+## Capture-move first, then ability #1 on an enemy unit or city.
+## Returns true when the click was an ability or a capture, so it does not also move.
+## Right-click stays the trigger until the ability bar in ticket 26.
 func _engage(unit: PlayerState.UnitState, cell: Vector2i) -> bool:
 	if setup.capture_destination(unit, cell) and setup.reachable_tiles(unit).has(cell):
 		setup.move_unit(unit, cell)
@@ -355,14 +359,12 @@ func _engage(unit: PlayerState.UnitState, cell: Vector2i) -> bool:
 		_refresh_board()
 		return true
 	var enemy := setup.enemy_at(unit, cell)
-	if enemy != null and _config.unit(enemy.unit_type).combatant and setup.can_attack(unit, enemy).is_empty():
-		return _resolve_strike(setup.attack_unit(unit, enemy))
 	var city := setup.city_at_cell(cell)
-	if city != null and city.player != unit.owner and setup.can_attack_city(unit, city).is_empty():
-		return _resolve_strike(setup.attack_city(unit, city))
-	if enemy != null and setup.can_attack(unit, enemy).is_empty():
-		return _resolve_strike(setup.attack_unit(unit, enemy))
-	if enemy != null or (city != null and city.player != unit.owner):
+	var hostile_city := city != null and city.player != unit.owner
+	var ability_id := setup.primary_ability(unit)
+	if not ability_id.is_empty() and setup.can_use_ability(unit, ability_id, cell).is_empty():
+		return _resolve_strike(setup.use_ability(unit, ability_id, cell))
+	if enemy != null or hostile_city:
 		_cancel_end_confirm()
 		_refresh_selection()
 		return true
@@ -443,6 +445,7 @@ func _refresh_selection() -> void:
 		_found_reason.text = GameSetup.REASON_SETTLER
 		_skip_button.disabled = true
 		_fortify_button.disabled = true
+		_order_reason.text = ""
 	else:
 		var stats := _config.unit(unit.unit_type)
 		_selection_title.text = unit.unit_type.capitalize()
@@ -451,8 +454,11 @@ func _refresh_selection() -> void:
 		var reason := setup.can_found(unit)
 		_found_button.disabled = not reason.is_empty()
 		_found_reason.text = reason
-		_skip_button.disabled = not _config.skip_enabled
-		_fortify_button.disabled = not _config.fortify_enabled
+		var skip_reason := setup.skip_reason(unit)
+		var fortify_reason := setup.fortify_reason(unit)
+		_skip_button.disabled = not skip_reason.is_empty()
+		_fortify_button.disabled = not fortify_reason.is_empty()
+		_order_reason.text = fortify_reason if fortify_reason == GameSetup.REASON_AP else ""
 	_apply_combat_preview()
 	_refresh_end_warning()
 	_rebuild_move_highlights()
@@ -521,7 +527,7 @@ func _unit_summary(unit: PlayerState.UnitState, stats: GameConfig.UnitStats) -> 
 			strength = "Strength %d" % stats.attack
 		else:
 			strength = "Ranged %d    Defense %d" % [stats.attack, stats.defense]
-	return "%s\n%s\nMoves %d / %d\nOrder %s" % [hp_line, strength, unit.mp, stats.move, _order_label(unit)]
+	return "%s\n%s\nAP %d / %d\nOrder %s" % [hp_line, strength, unit.ap, stats.ap, _order_label(unit)]
 
 
 func _volcanic_warning(unit: PlayerState.UnitState) -> String:
@@ -554,7 +560,7 @@ func _order_label(unit: PlayerState.UnitState) -> String:
 func _refresh_end_warning() -> void:
 	if _end_confirm:
 		_end_button.text = "End anyway (Enter)"
-		_end_warning.text = "Units still have moves. End Turn again to continue."
+		_end_warning.text = "Units still have AP. End Turn again to continue."
 	else:
 		_end_button.text = "End Turn (Enter)"
 		_end_warning.text = ""
@@ -829,6 +835,9 @@ func _tip_for(cell: Vector2i, axial: Vector2i) -> String:
 	var base := "%d, %d Unexplored" % [axial.x, axial.y]
 	if setup.fog.sight(_config.human_index, cell) != FogState.Sight.UNREVEALED:
 		base = "%d, %d %s" % [axial.x, axial.y, setup.map.land_at(cell)]
+		var ap_line := _ap_tip(cell)
+		if not ap_line.is_empty():
+			base = "%s\n%s" % [base, ap_line]
 	var spell := _spell_tip()
 	if not spell.is_empty():
 		return "%s\n%s" % [base, spell]
@@ -836,6 +845,19 @@ func _tip_for(cell: Vector2i, axial: Vector2i) -> String:
 	if extra.is_empty():
 		return base
 	return "%s\n%s" % [base, extra]
+
+
+func _ap_tip(cell: Vector2i) -> String:
+	if setup == null or not setup.fog.unit_visible(setup.human_index, cell):
+		return ""
+	var lines: PackedStringArray = []
+	for player in setup.players:
+		for unit in player.units:
+			if unit.cell != cell:
+				continue
+			var stats := _config.unit(unit.unit_type)
+			lines.append("AP %d / %d" % [unit.ap, stats.ap])
+	return "\n".join(lines)
 
 
 func _combat_hover_text() -> String:
@@ -846,15 +868,15 @@ func _combat_hover_text() -> String:
 		return ""
 	if setup.capture_destination(unit, _hovered) and setup.reachable_tiles(unit).has(_hovered):
 		return "Capture"
+	var ability_id := setup.primary_ability(unit)
+	if ability_id.is_empty():
+		return ""
 	var enemy := setup.enemy_at(unit, _hovered)
-	if enemy != null and _config.unit(enemy.unit_type).combatant:
-		return _preview_line(setup.preview_attack(unit, enemy))
 	var city := setup.city_at_cell(_hovered)
-	if city != null and city.player != unit.owner:
-		return _preview_line(setup.preview_city(unit, city))
-	if enemy != null:
-		return _preview_line(setup.preview_attack(unit, enemy))
-	return ""
+	var hostile_city := city != null and city.player != unit.owner
+	if enemy == null and not hostile_city:
+		return ""
+	return _preview_line(setup.ability_preview(unit, ability_id, _hovered))
 
 
 func _preview_line(preview: Dictionary) -> String:

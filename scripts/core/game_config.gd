@@ -11,7 +11,15 @@ const LAND_FIELDS: PackedStringArray = ["food", "production", "move_cost", "defe
 const SPELL_IDS: PackedStringArray = ["grow_forest", "raise_hills", "carve_river", "ignite", "restore_plains"]
 const SPELL_FIELDS: PackedStringArray = ["name", "shape", "radius", "length", "mana", "range", "cooldown", "land"]
 const UNIT_IDS: PackedStringArray = ["scout", "warrior", "archer", "settler"]
-const UNIT_FIELDS: PackedStringArray = ["hp", "attack", "defense", "move", "cost", "range", "combatant", "population_cost", "min_city_size", "can_capture"]
+const UNIT_FIELDS: PackedStringArray = ["hp", "attack", "defense", "ap", "cost", "combatant", "population_cost", "min_city_size", "can_capture", "abilities"]
+## Shipped abilities. The loader also accepts extra ids in a test config.
+const ABILITY_IDS: PackedStringArray = ["strike", "shoot"]
+const ABILITY_FIELDS: PackedStringArray = ["name", "target", "range", "area", "ap_cost", "cooldown", "effect", "damage_multiplier", "melee"]
+## target "enemy" is one enemy unit or city. area "single" is that tile.
+## effect "status", "move", and "terraform" parse and refuse until a later ticket.
+const ABILITY_EFFECTS: PackedStringArray = ["damage", "status", "move", "terraform"]
+const ABILITY_TARGETS: PackedStringArray = ["enemy"]
+const ABILITY_AREAS: PackedStringArray = ["single"]
 
 var turn_limit: int
 var player_count: int
@@ -71,6 +79,7 @@ var spells_change_tile_ownership: bool
 var skip_water_if_land_unit_present: bool
 var cooldown_uses_caster_turns: bool
 var spells: Dictionary = {}
+var abilities: Dictionary = {}
 var one_unit_per_tile: bool
 var capture_lone_settler: bool
 var spawn_on_city_center: bool
@@ -167,30 +176,61 @@ class SpellStats extends RefCounted:
 		}
 
 
+class AbilityStats extends RefCounted:
+	var id: String
+	var ability_name: String
+	var target: String
+	var range: int
+	var area: String
+	var ap_cost: int
+	var cooldown: int
+	var effect: String
+	var damage_multiplier: float
+	var melee: bool
+
+	func to_dict() -> Dictionary:
+		var body := {
+			"name": ability_name,
+			"target": target,
+			"range": range,
+			"area": area,
+			"ap_cost": ap_cost,
+			"cooldown": cooldown,
+			"effect": effect,
+		}
+		if effect == "damage":
+			body["damage_multiplier"] = damage_multiplier
+			body["melee"] = melee
+		return body
+
+
 class UnitStats extends RefCounted:
 	var hp: int
 	var attack: int
 	var defense: int
-	var move: int
+	var ap: int
 	var cost: int
-	var range: int
 	var combatant: bool
 	var population_cost: int
 	var min_city_size: int
 	var can_capture: bool
+	var abilities: PackedStringArray = PackedStringArray()
 
 	func to_dict() -> Dictionary:
+		var listed: Array = []
+		for ability_id in abilities:
+			listed.append(ability_id)
 		return {
 			"hp": hp,
 			"attack": attack,
 			"defense": defense,
-			"move": move,
+			"ap": ap,
 			"cost": cost,
-			"range": range,
 			"combatant": combatant,
 			"population_cost": population_cost,
 			"min_city_size": min_city_size,
 			"can_capture": can_capture,
+			"abilities": listed,
 		}
 
 
@@ -314,6 +354,9 @@ static func required_paths() -> PackedStringArray:
 		"units.fortify_defense_bonus",
 		"units.end_turn_warns_if_unordered",
 	]))
+	for ability_id in ABILITY_IDS:
+		for field in ABILITY_FIELDS:
+			paths.append("abilities.%s.%s" % [ability_id, field])
 	for unit_id in UNIT_IDS:
 		for field in UNIT_FIELDS:
 			paths.append("units.%s.%s" % [unit_id, field])
@@ -430,8 +473,82 @@ func spell(id: String) -> SpellStats:
 	return spells[id]
 
 
+func ability(id: String) -> AbilityStats:
+	return abilities[id]
+
+
 func unit(id: String) -> UnitStats:
 	return units[id]
+
+
+## Loud problems that are not a missing shipped key: unknown effect, target, or
+## area, a damage ability missing its effect fields, or a unit ability id that
+## is not in the table. from_dict push_errors and quits on a non-empty result.
+static func ability_errors(data: Dictionary) -> PackedStringArray:
+	var errors := PackedStringArray()
+	if not data.has("abilities") or not (data["abilities"] is Dictionary):
+		errors.append("game_config.json abilities is not an object")
+		return errors
+	var table: Dictionary = data["abilities"]
+	for key in table.keys():
+		var ability_id := str(key)
+		var prefix := "abilities." + ability_id
+		var entry: Variant = table[key]
+		if not (entry is Dictionary):
+			errors.append("game_config.json %s is not an object" % prefix)
+			continue
+		var body: Dictionary = entry
+		for field in ["name", "target", "range", "area", "ap_cost", "cooldown", "effect"]:
+			if not body.has(field):
+				errors.append("game_config.json missing key: %s.%s" % [prefix, field])
+		if body.has("name") and body["name"] is String and str(body["name"]).is_empty():
+			errors.append("game_config.json %s.name is empty" % prefix)
+		var effect := ""
+		if body.has("effect"):
+			if body["effect"] is String and ABILITY_EFFECTS.has(str(body["effect"])):
+				effect = str(body["effect"])
+			else:
+				errors.append("game_config.json %s.effect is unknown" % prefix)
+		if body.has("target") and not (body["target"] is String and ABILITY_TARGETS.has(str(body["target"]))):
+			errors.append("game_config.json %s.target is unknown" % prefix)
+		if body.has("area") and not (body["area"] is String and ABILITY_AREAS.has(str(body["area"]))):
+			errors.append("game_config.json %s.area is unknown" % prefix)
+		if effect == "damage":
+			if not body.has("damage_multiplier"):
+				errors.append("game_config.json missing key: %s.damage_multiplier" % prefix)
+			elif not (body["damage_multiplier"] is float or body["damage_multiplier"] is int):
+				errors.append("game_config.json %s.damage_multiplier expected float" % prefix)
+			if not body.has("melee"):
+				errors.append("game_config.json missing key: %s.melee" % prefix)
+			elif not (body["melee"] is bool):
+				errors.append("game_config.json %s.melee expected bool" % prefix)
+		for field in ["range", "ap_cost", "cooldown"]:
+			if not body.has(field):
+				continue
+			var number: Variant = body[field]
+			var whole := number is int or (number is float and is_equal_approx(float(number), round(float(number))))
+			if not whole:
+				errors.append("game_config.json %s.%s expected int" % [prefix, field])
+	if not data.has("units") or not (data["units"] is Dictionary):
+		return errors
+	var unit_table: Dictionary = data["units"]
+	for unit_id in UNIT_IDS:
+		if not unit_table.has(unit_id) or not (unit_table[unit_id] is Dictionary):
+			continue
+		var stats: Dictionary = unit_table[unit_id]
+		if not stats.has("abilities"):
+			continue
+		var listed: Variant = stats["abilities"]
+		if not (listed is Array):
+			errors.append("game_config.json units.%s.abilities expected string array" % unit_id)
+			continue
+		for item in listed:
+			if not (item is String):
+				errors.append("game_config.json units.%s.abilities expected string array" % unit_id)
+				break
+			if not table.has(item):
+				errors.append("game_config.json units.%s.abilities lists unknown id: %s" % [unit_id, str(item)])
+	return errors
 
 
 func to_dict() -> Dictionary:
@@ -454,6 +571,9 @@ func to_dict() -> Dictionary:
 	}
 	for spell_id in SPELL_IDS:
 		spell_out[spell_id] = (spells[spell_id] as SpellStats).to_dict()
+	var ability_out := {}
+	for ability_id in abilities.keys():
+		ability_out[ability_id] = (abilities[ability_id] as AbilityStats).to_dict()
 	var unit_out := {
 		"one_unit_per_tile": one_unit_per_tile,
 		"capture_lone_settler": capture_lone_settler,
@@ -531,6 +651,7 @@ func to_dict() -> Dictionary:
 			},
 		},
 		"spells": spell_out,
+		"abilities": ability_out,
 		"units": unit_out,
 		"combat": {
 			"base_damage": combat_base_damage,
@@ -675,6 +796,33 @@ func _read(data: Dictionary) -> void:
 		spell_stats.land = _string(data, prefix + ".land")
 		spells[spell_id] = spell_stats
 	_check_spells()
+	var problems := ability_errors(data)
+	for problem in problems:
+		_fail(problem)
+	if not problems.is_empty():
+		_abort()
+		return
+	abilities = {}
+	var ability_table: Dictionary = data["abilities"]
+	for key in ability_table.keys():
+		var ability_id := str(key)
+		var ability_stats := AbilityStats.new()
+		var ability_prefix := "abilities." + ability_id
+		ability_stats.id = ability_id
+		ability_stats.ability_name = _string(data, ability_prefix + ".name")
+		ability_stats.target = _string(data, ability_prefix + ".target")
+		ability_stats.range = _int(data, ability_prefix + ".range")
+		ability_stats.area = _string(data, ability_prefix + ".area")
+		ability_stats.ap_cost = _int(data, ability_prefix + ".ap_cost")
+		ability_stats.cooldown = _int(data, ability_prefix + ".cooldown")
+		ability_stats.effect = _string(data, ability_prefix + ".effect")
+		if ability_stats.effect == "damage":
+			ability_stats.damage_multiplier = _float(data, ability_prefix + ".damage_multiplier")
+			ability_stats.melee = _bool(data, ability_prefix + ".melee")
+		else:
+			ability_stats.damage_multiplier = 1.0
+			ability_stats.melee = false
+		abilities[ability_id] = ability_stats
 	one_unit_per_tile = _bool(data, "units.one_unit_per_tile")
 	capture_lone_settler = _bool(data, "units.capture_lone_settler")
 	spawn_on_city_center = _bool(data, "units.spawn_on_city_center")
@@ -692,13 +840,13 @@ func _read(data: Dictionary) -> void:
 		unit_stats.hp = _int(data, prefix + ".hp")
 		unit_stats.attack = _int(data, prefix + ".attack")
 		unit_stats.defense = _int(data, prefix + ".defense")
-		unit_stats.move = _int(data, prefix + ".move")
+		unit_stats.ap = _int(data, prefix + ".ap")
 		unit_stats.cost = _int(data, prefix + ".cost")
-		unit_stats.range = _int(data, prefix + ".range")
 		unit_stats.combatant = _bool(data, prefix + ".combatant")
 		unit_stats.population_cost = _int(data, prefix + ".population_cost")
 		unit_stats.min_city_size = _int(data, prefix + ".min_city_size")
 		unit_stats.can_capture = _bool(data, prefix + ".can_capture")
+		unit_stats.abilities = _strings(data, prefix + ".abilities")
 		units[unit_id] = unit_stats
 	combat_base_damage = _int(data, "combat.base_damage")
 	strength_exponent_base = _float(data, "combat.strength_exponent_base")
