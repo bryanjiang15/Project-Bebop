@@ -23,6 +23,14 @@ static func click_cell(game: Node, cell: Vector2i, button_index: int = MOUSE_BUT
 	game._unhandled_input(release)
 
 
+static func ability_button(game: Node, ability_id: String) -> Button:
+	return game.get_node("%AbilityButtons").get_node("Ability_%s" % ability_id) as Button
+
+
+static func order_button(game: Node, order_id: String) -> Button:
+	return game.get_node("%AbilityButtons").get_node("Order_%s" % order_id) as Button
+
+
 static func press_action(game: Node, action: String) -> void:
 	var event := InputEventAction.new()
 	event.action = action

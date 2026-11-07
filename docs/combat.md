@@ -30,7 +30,7 @@ Allowed `effect` values are `damage`, `status`, `move`, and `terraform`. Allowed
 
 `ap_cost` is the AP that must remain before the ability is legal. Using it still sets AP to 0. `UnitState.ability_cooldowns` stores turns left. End Turn decrements each entry and drops it at 0, in the same gap as spell cooldowns. Strike and Shoot ship at cooldown 0.
 
-`GameSetup.unit_abilities`, `can_use_ability`, `ability_preview`, and `use_ability` are the only attack path. `ability_preview` returns `{ok, reason, damage, counter}`. An empty reason means the cell is legal. Right-click uses ability #1 until the ability bar in ticket 26.
+`GameSetup.unit_abilities`, `can_use_ability`, `ability_preview`, and `use_ability` are the only attack path. `ability_preview` returns `{ok, reason, damage, counter}`. An empty reason means the cell is legal. `ability_block_reason` is the gate, then the cooldown, then AP, with no cell, and that string is the bar tooltip. `ability_targets` lists every cell where `can_use_ability` is empty. `ability_area` is the tiles a targeted cell would affect. `single` returns that one cell. A radius is ticket 28.
 
 ## Damage
 
@@ -82,7 +82,7 @@ On capture the city changes owner. Buildings stay. Every tile that city owns cha
 
 `units.capture_lone_settler` lets any military unit, including a scout, move onto a tile that holds only an enemy settler. The settler becomes the mover's unit and stays a civilian. The mover ends with 0 AP. The two share the tile. Spawn and ordinary movement still reject a second unit, so this stack is the capture exception, not a general stack rule.
 
-Right-click prefers that move when the tile is reachable. When it is not, and the attacker is ranged and in range, the click is an attack and the settler is removed. A settler on an enemy city is not walked onto unless the city itself is being captured in that same move. Right-click on a living enemy city attacks the city.
+A right click takes that capture when the tile is reachable. A ranged unit that cannot walk there destroys the settler by using Shoot from the ability bar. A settler on an enemy city is not walked onto unless the city itself is being captured in that same move. A right click on a living enemy city does nothing. Arm the city's ability and left-click the city to attack it.
 
 ## Healing
 
@@ -110,7 +110,11 @@ Skip (`skip_unit`, S), Fortify (`fortify_unit`, F), and Found are orders, not ab
 
 ## View
 
-`%SkipButton` and `%FortifyButton` sit in the unit panel with the HP, strength, AP, and order lines. `%OrderReason` shows `Needs at least 1 AP` when Fortify is refused for AP. `%VolcanicWarning` is the amber hazard line under that summary. `%CombatPreview` and the hover tooltip show `Damage N   Counter N` from `ability_preview` of ability #1. A reachable capture shows `Capture`. Attackable tiles use the move-highlight scene tinted red. A tile that would capture a city or a settler stays green. A right click captures when that move is legal, otherwise uses ability #1 on a visible enemy unit or city, and does not also step. That right-click is the stopgap until the ticket 26 ability bar. A right click on an empty reachable tile still moves. A left click still selects.
+`%AbilityBar` sits at the bottom center while one of the human's units is selected, and it hides otherwise. `%AbilityApLabel` reads `AP current / max`. `%AbilityButtons` instances `scenes/ui/ability_button.tscn` for each ability in config order, then Skip, Fortify, and Found after the authored `OrderGap`. Found appears only when the unit is a settler. An ability button shows the name, the AP cost, the cooldown, and `Ready`, `Targeting`, or the reason from `ability_block_reason`. An order shows the name, `No AP` or `1 AP`, an en dash instead of a cooldown, and the order reason. A disabled button is grey and its tooltip is that reason. S, F, and B still call the same order handlers.
+
+Clicking a ready ability sets the target. Spell targeting and ability targeting cancel each other. Legal cells use the attack tint. Hovering paints `ability_area` with the shared spell preview: the hovered tile is red when `can_use_ability` returns a reason, and a skipped tile is grey. `%CombatPreview` shows `Damage N   Counter N` from `ability_preview` only while an ability is targeted, including the reason when the hovered tile is illegal. With nothing targeted, a reachable capture still shows `Capture`, and the map shows the selected tile and the green reachable tiles only. Left-click a legal tile to call `use_ability`, then leave targeting. The unit stays selected. At 0 AP the ability and the AP orders are grey. Right-click or Esc cancels targeting and does not move. A right click with nothing targeted moves onto a highlighted tile, including a capture, and does not attack. A left click still selects.
+
+`%VolcanicWarning` is the amber hazard line under the unit summary. HP, strength, AP, and the order stay on `%SelectionDetail`.
 
 A left click selects the unit on that tile. If the tile also has the human's city, the next click selects the city.
 

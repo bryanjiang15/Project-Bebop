@@ -40,9 +40,9 @@ func _run() -> void:
 		return
 	var settler := setup.human_settler_cell()
 	_SceneDriver.click_cell(game, settler)
-	var found := game.get_node("%FoundCityButton") as Button
+	var found := _SceneDriver.order_button(game, "found")
 	if found.disabled:
-		print("FAIL found city ", (game.get_node("%FoundCityReason") as Label).text)
+		print("FAIL found city ", found.tooltip_text)
 		quit(1)
 		return
 	found.pressed.emit()

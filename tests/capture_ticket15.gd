@@ -78,8 +78,8 @@ func _run() -> void:
 	_hover(game, city.cell, Vector2(1680, 420))
 	var preview := (game.get_node("%CombatPreview") as Label).text
 	var tip := (game.get_node("%Tooltip") as Label).text
-	var dealt := int(setup.ability_preview(warrior, setup.primary_ability(warrior), city.cell)["damage"])
-	var counter := int(setup.ability_preview(warrior, setup.primary_ability(warrior), city.cell)["counter"])
+	var dealt := int(setup.ability_preview(warrior, setup.unit_abilities(warrior)[0], city.cell)["damage"])
+	var counter := int(setup.ability_preview(warrior, setup.unit_abilities(warrior)[0], city.cell)["counter"])
 	var line := "Damage %d   Counter %d" % [dealt, counter]
 	if preview != line or not tip.contains(line) or not _has_attack_highlight(game):
 		print("FAIL preview '", preview, "' tip '", tip, "'")

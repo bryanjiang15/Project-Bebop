@@ -128,7 +128,7 @@ func _act(game: Node, setup: GameSetup, unit: PlayerState.UnitState) -> String:
 		var attack := _attack_cell(setup, unit)
 		if attack != _NO_CELL:
 			attacks += 1
-			return _right_click(game, setup, unit, attack, "attack")
+			return _use_ability(game, setup, unit, attack)
 		var step := _step_toward(setup, unit, false)
 		if step != _NO_CELL:
 			return _right_click(game, setup, unit, step, "move")
@@ -157,7 +157,7 @@ func _try_found(game: Node, setup: GameSetup, unit: PlayerState.UnitState) -> St
 		return ""
 	if not _select_unit(game, unit):
 		return _fail(setup, "could not select the settler")
-	var button := game.get_node("%FoundCityButton") as Button
+	var button := SceneDriver.order_button(game, "found")
 	if button.disabled:
 		return ""
 	last_action = "found city"
@@ -197,7 +197,7 @@ func _order_if_idle(game: Node, setup: GameSetup, unit: PlayerState.UnitState, d
 		SceneDriver.press_action(game, "fortify_unit")
 	else:
 		last_action = "skip %d" % unit.id
-		(game.get_node("%SkipButton") as Button).pressed.emit()
+		SceneDriver.order_button(game, "skip").pressed.emit()
 	return _after_action(game, setup)
 
 
@@ -440,13 +440,13 @@ func _reset_modes(game: Node) -> String:
 			game._on_cancel_place_pressed()
 		if str(game.get("_placing")) != "":
 			return _fail(setup, "SOFT-LOCK placement stayed armed")
-	if str(game.get("_spell_id")) != "":
-		last_action = "cancel spell"
+	if str(game.get("_spell_id")) != "" or str(game.get("_ability_id")) != "":
+		last_action = "cancel targeting"
 		SceneDriver.press_action(game, "toggle_menu")
-		if str(game.get("_spell_id")) != "":
-			return _fail(setup, "SOFT-LOCK spell targeting stayed armed")
+		if str(game.get("_spell_id")) != "" or str(game.get("_ability_id")) != "":
+			return _fail(setup, "SOFT-LOCK targeting stayed armed")
 		if menu.visible:
-			return _fail(setup, "SOFT-LOCK canceling a spell opened the menu")
+			return _fail(setup, "SOFT-LOCK canceling targeting opened the menu")
 	return ""
 
 
@@ -606,10 +606,36 @@ func _arrange_conquest(game: Node, setup: GameSetup) -> String:
 	return _after_action(game, setup)
 
 
+func _use_ability(game: Node, setup: GameSetup, unit: PlayerState.UnitState, cell: Vector2i) -> String:
+	if not _select_unit(game, unit):
+		return _fail(setup, "could not select %s %d" % [unit.unit_type, unit.id])
+	var ids := setup.unit_abilities(unit)
+	if ids.is_empty():
+		return _fail(setup, "%s has no ability" % unit.unit_type)
+	var ability_id := ids[0]
+	var button := SceneDriver.ability_button(game, ability_id)
+	if button == null or button.disabled:
+		return _fail(setup, "ability %s is not ready" % ability_id)
+	last_action = "ability %s %s %d -> %s" % [ability_id, unit.unit_type, unit.id, cell]
+	button.pressed.emit()
+	SceneDriver.click_cell(game, cell, MOUSE_BUTTON_LEFT)
+	if setup.result == null and unit.ap != 0:
+		return _fail(setup, "ability %s did not resolve" % ability_id)
+	var problem := _after_action(game, setup)
+	if not problem.is_empty():
+		return problem
+	if setup.result != null:
+		return _finish_ended(game, setup)
+	return ""
+
+
 func _attack_cell(setup: GameSetup, unit: PlayerState.UnitState) -> Vector2i:
 	if unit.ap <= 0:
 		return _NO_CELL
-	var cells: Array[Vector2i] = setup.attackable_cells(unit)
+	var ids := setup.unit_abilities(unit)
+	if ids.is_empty():
+		return _NO_CELL
+	var cells: Array[Vector2i] = setup.ability_targets(unit, ids[0])
 	cells.sort_custom(func(a: Vector2i, b: Vector2i) -> bool: return _axial_less(a, b))
 	for cell in cells:
 		if setup.capture_destination(unit, cell):

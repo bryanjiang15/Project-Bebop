@@ -300,14 +300,6 @@ func unit_abilities(unit: PlayerState.UnitState) -> Array[String]:
 	return out
 
 
-## The first ability. Right-click uses this until the ability bar exists.
-func primary_ability(unit: PlayerState.UnitState) -> String:
-	var ids := unit_abilities(unit)
-	if ids.is_empty():
-		return ""
-	return ids[0]
-
-
 func ability_cooldown_left(unit: PlayerState.UnitState, ability_id: String) -> int:
 	if unit == null:
 		return 0
@@ -414,6 +406,52 @@ func _ability_gate(unit: PlayerState.UnitState, ability_id: String) -> String:
 	if ability.effect != "damage":
 		return REASON_NOT_YET
 	return ""
+
+
+## Why the ability button is grey before a tile is chosen. Empty means it can be aimed.
+## Cooldown and AP sit here so the bar reads one reason. Target checks stay on the cell.
+func ability_block_reason(unit: PlayerState.UnitState, ability_id: String) -> String:
+	var gate := _ability_gate(unit, ability_id)
+	if not gate.is_empty():
+		return gate
+	if ability_cooldown_left(unit, ability_id) > 0:
+		return REASON_COOLDOWN
+	if unit.ap < config.ability(ability_id).ap_cost:
+		return REASON_AP
+	return ""
+
+
+## Cells where this ability can be used. Capture tiles are included when the ability
+## itself is legal there; the move highlight is a separate path.
+func ability_targets(unit: PlayerState.UnitState, ability_id: String) -> Array[Vector2i]:
+	var cells: Array[Vector2i] = []
+	if unit == null or not ability_block_reason(unit, ability_id).is_empty():
+		return cells
+	for player in players:
+		if player.index == unit.owner:
+			continue
+		for other in player.units:
+			if can_use_ability(unit, ability_id, other.cell).is_empty() and not cells.has(other.cell):
+				cells.append(other.cell)
+	for city in cities:
+		if cells.has(city.cell):
+			continue
+		if can_use_ability(unit, ability_id, city.cell).is_empty():
+			cells.append(city.cell)
+	return cells
+
+
+## Tiles the ability would affect on `cell`. `single` is that one tile.
+## A radius area is ticket 28. Off-map cells are dropped.
+func ability_area(unit: PlayerState.UnitState, ability_id: String, cell: Vector2i) -> Array[Vector2i]:
+	var tiles: Array[Vector2i] = []
+	if unit == null or config == null or not config.abilities.has(ability_id):
+		return tiles
+	if map == null or not map.in_bounds(cell):
+		return tiles
+	if config.ability(ability_id).area == "single":
+		tiles.append(cell)
+	return tiles
 
 
 ## Hostile combatant, else an enemy city, else a lone settler.
@@ -533,34 +571,6 @@ func enemy_at(attacker: PlayerState.UnitState, cell: Vector2i) -> PlayerState.Un
 				return other
 			civilian = other
 	return civilian
-
-
-func attackable_cells(unit: PlayerState.UnitState) -> Array[Vector2i]:
-	var cells: Array[Vector2i] = []
-	if unit == null:
-		return cells
-	var ability_id := primary_ability(unit)
-	if ability_id.is_empty():
-		return cells
-	var capturing := {}
-	for key in reachable_tiles(unit).keys():
-		var cell := key as Vector2i
-		if capture_destination(unit, cell):
-			capturing[cell] = true
-	for player in players:
-		if player.index == unit.owner:
-			continue
-		for other in player.units:
-			if capturing.has(other.cell):
-				continue
-			if can_use_ability(unit, ability_id, other.cell).is_empty() and not cells.has(other.cell):
-				cells.append(other.cell)
-	for city in cities:
-		if capturing.has(city.cell) or cells.has(city.cell):
-			continue
-		if can_use_ability(unit, ability_id, city.cell).is_empty():
-			cells.append(city.cell)
-	return cells
 
 
 ## Empty when Skip is legal. Skip needs no AP.
