@@ -20,11 +20,11 @@ A tile holds one unit when `units.one_unit_per_tile` is true. Another player's u
 
 The cost is the land of the tile being entered. Water (`passable` false, `move_cost` -1) is impassable for the settler, scout, warrior, and archer. They cannot enter it, path through it, or see it in the move highlights. A spell that would turn their tile into water skips that tile, so the unit is not stranded. Forest, hills, volcanic ground, and plains still change under a unit, and the unit stays on that tile. When `movement.allow_enter_over_budget_if_mp_left` is true and the unit still has AP, it may enter a more expensive tile, arrives with 0, and does not keep searching from there. The flag name is unchanged.
 
-A move sets the unit as having acted and clears Fortify. A left click selects the human unit on that cell, or clears the selection when the cell is empty. The city on that cell comes after the unit. Highlight sprites mark the selected cell and every reachable cell. A right click on a reachable cell moves. A right click on a visible enemy uses ability #1 instead; see `docs/combat.md`. A left click does not move. A left drag farther than 8 px pans, as do middle drag and the arrow keys. Founding does not spend AP, because the settler is consumed, but 0 AP is rejected. Fog recomputes after every move.
+A move sets the unit as having acted and clears Fortify. A left click selects the human unit on that cell, or clears the selection when the cell is empty. The city on that cell comes after the unit. Highlight sprites mark the selected cell and every reachable cell. A right click on a reachable cell moves, including a capture. It does not use an ability. Attacks come from the ability bar; see `docs/combat.md`. A left click does not move. A left drag farther than 8 px pans, as do middle drag and the arrow keys. Found needs at least 1 AP. The settler is then removed, so a settler at 0 AP is refused before the distance check. Fog recomputes after every move.
 
 ## Founding
 
-The button and the B key call `GameSetup.found_city` for the selected unit. An empty reason means the action is legal. Otherwise the reason is one of:
+Found sits on `%AbilityBar` with Skip and Fortify. The button and the B key call `GameSetup.found_city` for the selected unit. The button tooltip is the reason while it is disabled. An empty reason means the action is legal. Otherwise the reason is one of:
 
 - `Select a settler`
 - `Cannot found on water`

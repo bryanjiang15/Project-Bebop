@@ -45,6 +45,7 @@ const _HIGHLIGHT_SCENE: PackedScene = preload("res://scenes/view/move_highlight.
 const _BORDER_SCENE: PackedScene = preload("res://scenes/view/border_segment.tscn")
 const _QUEUE_SCENE: PackedScene = preload("res://scenes/ui/queue_row.tscn")
 const _SPELL_SCENE: PackedScene = preload("res://scenes/ui/spell_button.tscn")
+const _ABILITY_SCENE: PackedScene = preload("res://scenes/ui/ability_button.tscn")
 const _BUILDING_SCENE: PackedScene = preload("res://scenes/view/building_marker.tscn")
 const _CONSTRUCTION_SCENE: PackedScene = preload("res://scenes/view/construction_marker.tscn")
 const _UNIT_ART := {
@@ -72,6 +73,7 @@ var _panel_city_id: int = -1
 var _placing: String = ""
 var _end_confirm: bool = false
 var _spell_id: String = ""
+var _ability_id: String = ""
 var _spell_direction: int = Hex.EAST
 var _hover_local: Vector2 = Vector2.ZERO
 var _spell_buttons: Dictionary = {}
@@ -90,18 +92,16 @@ var _leaving: bool = false
 @onready var _score_1: Label = %Score1
 @onready var _score_2: Label = %Score2
 @onready var _spell_row: HBoxContainer = %SpellButtons
+@onready var _ability_bar: PanelContainer = %AbilityBar
+@onready var _ability_ap: Label = %AbilityApLabel
+@onready var _ability_row: HBoxContainer = %AbilityButtons
 @onready var _tooltip: Label = %Tooltip
 @onready var _tooltip_panel: PanelContainer = %TooltipPanel
 @onready var _menu: PanelContainer = %InGameMenu
 @onready var _selection_title: Label = %SelectionTitle
 @onready var _selection_detail: Label = %SelectionDetail
 @onready var _volcanic_label: Label = %VolcanicWarning
-@onready var _found_button: Button = %FoundCityButton
-@onready var _found_reason: Label = %FoundCityReason
 @onready var _combat_preview: Label = %CombatPreview
-@onready var _skip_button: Button = %SkipButton
-@onready var _fortify_button: Button = %FortifyButton
-@onready var _order_reason: Label = %OrderReason
 @onready var _end_button: Button = %EndTurnButton
 @onready var _end_warning: Label = %EndTurnWarning
 @onready var _city_panel: PanelContainer = %CityPanel
@@ -148,7 +148,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if _config == null or setup == null or _leaving or setup.result != null:
 		return
 	if event.is_action_pressed("toggle_menu"):
-		if not _spell_id.is_empty():
+		if _armed():
 			_cancel_targeting()
 			return
 		_menu.visible = not _menu.visible
@@ -182,10 +182,12 @@ func _unhandled_input(event: InputEvent) -> void:
 				_left_down = false
 				_dragging = false
 				if clicked:
-					if _spell_id.is_empty():
-						_select_at_screen(button.position)
-					else:
+					if not _spell_id.is_empty():
 						_cast_at_screen(button.position)
+					elif not _ability_id.is_empty():
+						_use_ability_at_screen(button.position)
+					else:
+						_select_at_screen(button.position)
 		elif button.button_index == MOUSE_BUTTON_RIGHT:
 			if button.pressed:
 				_right_down = true
@@ -194,10 +196,10 @@ func _unhandled_input(event: InputEvent) -> void:
 				var clicked := _right_down and _right_press.distance_to(button.position) <= _CLICK_SLOP
 				_right_down = false
 				if clicked:
-					if _spell_id.is_empty():
-						_move_at_screen(button.position)
-					else:
+					if _armed():
 						_cancel_targeting()
+					else:
+						_move_at_screen(button.position)
 		elif button.button_index == MOUSE_BUTTON_MIDDLE:
 			_dragging = button.pressed
 	elif event is InputEventMouseMotion:
@@ -230,12 +232,19 @@ func _process(delta: float) -> void:
 func _on_end_turn_pressed() -> void:
 	if setup == null or _leaving or setup.result != null:
 		return
+	var armed := _armed()
+	_spell_id = ""
+	_ability_id = ""
 	if _config.end_turn_warns_if_unordered and setup.has_unordered_moves(setup.human_index) and not _end_confirm:
 		_end_confirm = true
 		_refresh_end_warning()
+		if armed:
+			_refresh_spells()
+			_refresh_abilities()
+			_rebuild_move_highlights()
+			_apply_combat_preview()
 		return
 	_end_confirm = false
-	_spell_id = ""
 	setup.end_turn()
 	_refresh_board()
 
@@ -247,7 +256,10 @@ func _on_skip_pressed() -> void:
 	if unit == null or not setup.skip_unit(unit):
 		_refresh_selection()
 		return
+	_spell_id = ""
+	_ability_id = ""
 	_cancel_end_confirm()
+	_refresh_spells()
 	_refresh_selection()
 
 
@@ -258,7 +270,10 @@ func _on_fortify_pressed() -> void:
 	if unit == null or not setup.fortify_unit(unit):
 		_refresh_selection()
 		return
+	_spell_id = ""
+	_ability_id = ""
 	_cancel_end_confirm()
+	_refresh_spells()
 	_refresh_selection()
 
 
@@ -275,6 +290,7 @@ func _on_found_city_pressed() -> void:
 	_panel_city_id = -1
 	_placing = ""
 	_spell_id = ""
+	_ability_id = ""
 	_cancel_end_confirm()
 	_refresh_board()
 
@@ -309,6 +325,7 @@ func _select_at_screen(screen: Vector2) -> void:
 		_selected_city_id = -1
 		_panel_city_id = -1
 		_placing = ""
+		_ability_id = ""
 		_cancel_end_confirm()
 		_refresh_selection()
 		_refresh_city_panel()
@@ -320,7 +337,10 @@ func _select_at_screen(screen: Vector2) -> void:
 	var units := _own_units_at(cell)
 	var city := setup.city_at_cell(cell)
 	var own_city := city != null and city.player == setup.human_index
+	var previous_id := _selected_id
 	_choose_on_tile(units, city if own_city else null)
+	if _selected_id != previous_id:
+		_ability_id = ""
 	if _selected_city() != null:
 		_panel_city_id = _selected_city_id
 	elif units.is_empty():
@@ -340,44 +360,11 @@ func _move_at_screen(screen: Vector2) -> void:
 	var cell := _cell_at_screen(screen)
 	if not Hex.in_map(Hex.offset_to_axial(cell), _config.map_width, _config.map_height):
 		return
-	if setup.fog.unit_visible(unit.owner, cell) and _engage(unit, cell):
-		return
 	if not setup.reachable_tiles(unit).has(cell):
 		return
 	setup.move_unit(unit, cell)
 	_cancel_end_confirm()
 	_refresh_board()
-
-
-## Capture-move first, then ability #1 on an enemy unit or city.
-## Returns true when the click was an ability or a capture, so it does not also move.
-## Right-click stays the trigger until the ability bar in ticket 26.
-func _engage(unit: PlayerState.UnitState, cell: Vector2i) -> bool:
-	if setup.capture_destination(unit, cell) and setup.reachable_tiles(unit).has(cell):
-		setup.move_unit(unit, cell)
-		_cancel_end_confirm()
-		_refresh_board()
-		return true
-	var enemy := setup.enemy_at(unit, cell)
-	var city := setup.city_at_cell(cell)
-	var hostile_city := city != null and city.player != unit.owner
-	var ability_id := setup.primary_ability(unit)
-	if not ability_id.is_empty() and setup.can_use_ability(unit, ability_id, cell).is_empty():
-		return _resolve_strike(setup.use_ability(unit, ability_id, cell))
-	if enemy != null or hostile_city:
-		_cancel_end_confirm()
-		_refresh_selection()
-		return true
-	return false
-
-
-func _resolve_strike(reason: String) -> bool:
-	_cancel_end_confirm()
-	if reason.is_empty():
-		_refresh_board()
-	else:
-		_refresh_selection()
-	return true
 
 
 func _refresh_board() -> void:
@@ -441,24 +428,12 @@ func _refresh_selection() -> void:
 		_selection_title.text = "No unit selected"
 		_selection_detail.text = ""
 		_set_volcanic_warning("")
-		_found_button.disabled = true
-		_found_reason.text = GameSetup.REASON_SETTLER
-		_skip_button.disabled = true
-		_fortify_button.disabled = true
-		_order_reason.text = ""
 	else:
 		var stats := _config.unit(unit.unit_type)
 		_selection_title.text = unit.unit_type.capitalize()
 		_selection_detail.text = _unit_summary(unit, stats)
 		_set_volcanic_warning(_volcanic_warning(unit))
-		var reason := setup.can_found(unit)
-		_found_button.disabled = not reason.is_empty()
-		_found_reason.text = reason
-		var skip_reason := setup.skip_reason(unit)
-		var fortify_reason := setup.fortify_reason(unit)
-		_skip_button.disabled = not skip_reason.is_empty()
-		_fortify_button.disabled = not fortify_reason.is_empty()
-		_order_reason.text = fortify_reason if fortify_reason == GameSetup.REASON_AP else ""
+	_refresh_abilities()
 	_apply_combat_preview()
 	_refresh_end_warning()
 	_rebuild_move_highlights()
@@ -677,13 +652,14 @@ func _rebuild_move_highlights() -> void:
 	if not _spell_id.is_empty():
 		_rebuild_spell_highlights()
 		return
+	if not _ability_id.is_empty():
+		_rebuild_ability_highlights()
+		return
 	var unit := _selected_unit()
 	if unit != null:
 		_add_highlight(unit.cell, _SELECTED)
 		for cell in setup.reachable_tiles(unit).keys():
 			_add_highlight(cell as Vector2i, _REACHABLE)
-		for cell in setup.attackable_cells(unit):
-			_add_highlight(cell, _ATTACK)
 		return
 	var city := _selected_city()
 	if city == null:
@@ -820,10 +796,12 @@ func hover_at_local(local: Vector2, screen: Vector2 = Vector2.INF) -> void:
 	_spell_direction = direction
 	if moved:
 		_highlight.clear()
-		if _spell_id.is_empty():
+		if _spell_id.is_empty() and _ability_id.is_empty():
 			_highlight.set_cell(cell, _HIGHLIGHT_SOURCE, Vector2i.ZERO)
-		else:
+		elif not _spell_id.is_empty():
 			_rebuild_spell_highlights()
+		else:
+			_rebuild_ability_highlights()
 	_tooltip.text = _tip_for(cell, axial)
 	_tooltip_panel.visible = true
 	_apply_combat_preview()
@@ -864,19 +842,13 @@ func _combat_hover_text() -> String:
 	var unit := _selected_unit()
 	if unit == null or setup == null or setup.map == null or not setup.map.in_bounds(_hovered):
 		return ""
+	if not _ability_id.is_empty():
+		return _preview_line(setup.ability_preview(unit, _ability_id, _hovered))
 	if not setup.fog.unit_visible(unit.owner, _hovered):
 		return ""
 	if setup.capture_destination(unit, _hovered) and setup.reachable_tiles(unit).has(_hovered):
 		return "Capture"
-	var ability_id := setup.primary_ability(unit)
-	if ability_id.is_empty():
-		return ""
-	var enemy := setup.enemy_at(unit, _hovered)
-	var city := setup.city_at_cell(_hovered)
-	var hostile_city := city != null and city.player != unit.owner
-	if enemy == null and not hostile_city:
-		return ""
-	return _preview_line(setup.ability_preview(unit, ability_id, _hovered))
+	return ""
 
 
 func _preview_line(preview: Dictionary) -> String:
@@ -924,7 +896,7 @@ func _clear_hover() -> void:
 	_tooltip_panel.visible = false
 	if _combat_preview != null:
 		_combat_preview.text = ""
-	if not _spell_id.is_empty():
+	if _armed():
 		_clear(_moves)
 
 
@@ -1179,6 +1151,7 @@ func _on_spell_pressed(spell_id: String) -> void:
 	if not setup.spell_block_reason(setup.human_index, spell_id).is_empty():
 		return
 	_placing = ""
+	_ability_id = ""
 	if _spell_id == spell_id:
 		_spell_id = ""
 	else:
@@ -1186,6 +1159,8 @@ func _on_spell_pressed(spell_id: String) -> void:
 		if setup.map.in_bounds(_hovered):
 			_spell_direction = _sector(_hovered, _hover_local)
 	_refresh_spells()
+	_refresh_abilities()
+	_highlight.clear()
 	_rebuild_move_highlights()
 	_refresh_city_panel()
 	if setup.map.in_bounds(_hovered):
@@ -1193,12 +1168,19 @@ func _on_spell_pressed(spell_id: String) -> void:
 		_tooltip_panel.visible = true
 
 
+func _armed() -> bool:
+	return not _spell_id.is_empty() or not _ability_id.is_empty()
+
+
 func _cancel_targeting() -> void:
-	if _spell_id.is_empty():
+	if not _armed():
 		return
 	_spell_id = ""
+	_ability_id = ""
 	_refresh_spells()
+	_refresh_abilities()
 	_rebuild_move_highlights()
+	_apply_combat_preview()
 	if setup != null and setup.map.in_bounds(_hovered):
 		_highlight.clear()
 		_highlight.set_cell(_hovered, _HIGHLIGHT_SOURCE, Vector2i.ZERO)
@@ -1252,6 +1234,19 @@ func _place_tooltip(screen: Vector2) -> void:
 	_tooltip_panel.position = pos
 
 
+func _paint_preview_tiles(tiles: Array, tint: Color, reason: String, skipped: Dictionary, destroyed: Dictionary) -> void:
+	for cell in tiles:
+		var here := cell as Vector2i
+		var color := tint
+		if not reason.is_empty() and here == _hovered:
+			color = _INVALID
+		elif skipped.has(here):
+			color = _SKIPPED
+		_add_highlight(here, color)
+		if reason.is_empty() and destroyed.has(here):
+			_add_highlight(here, _SINK, 0.74)
+
+
 func _rebuild_spell_highlights() -> void:
 	_clear(_moves)
 	if _spell_id.is_empty() or setup == null or not setup.map.in_bounds(_hovered):
@@ -1265,17 +1260,29 @@ func _rebuild_spell_highlights() -> void:
 	var destroyed := {}
 	for cell in preview["destroyed"]:
 		destroyed[cell] = true
-	var reason := str(preview["reason"])
-	for cell in preview["tiles"]:
-		var here := cell as Vector2i
-		var color := tint
-		if not reason.is_empty() and here == _hovered:
-			color = _INVALID
-		elif skipped.has(here):
-			color = _SKIPPED
-		_add_highlight(here, color)
-		if reason.is_empty() and destroyed.has(here):
-			_add_highlight(here, _SINK, 0.74)
+	_paint_preview_tiles(preview["tiles"], tint, str(preview["reason"]), skipped, destroyed)
+
+
+func _rebuild_ability_highlights() -> void:
+	_clear(_moves)
+	var unit := _selected_unit()
+	if unit == null or setup == null or _ability_id.is_empty():
+		return
+	var targets := setup.ability_targets(unit, _ability_id)
+	var area: Array[Vector2i] = []
+	var reason := ""
+	if setup.map.in_bounds(_hovered):
+		area = setup.ability_area(unit, _ability_id, _hovered)
+		reason = setup.can_use_ability(unit, _ability_id, _hovered)
+	var covered := {}
+	for cell in area:
+		covered[cell] = true
+	for cell in targets:
+		if covered.has(cell):
+			continue
+		_add_highlight(cell, _ATTACK)
+	if not area.is_empty():
+		_paint_preview_tiles(area, _ATTACK, reason, {}, {})
 
 
 func _sector(cell: Vector2i, local: Vector2) -> int:
@@ -1309,3 +1316,179 @@ func _spell_tip() -> String:
 	if skipped > 0:
 		line = "%s\n%d skipped" % [line, skipped]
 	return "%s\n%s" % [header, line]
+
+
+func _use_ability_at_screen(screen: Vector2) -> void:
+	if setup == null or _ability_id.is_empty():
+		return
+	var unit := _selected_unit()
+	if unit == null:
+		_ability_id = ""
+		_refresh_board()
+		return
+	var cell := _cell_at_screen(screen)
+	var world: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * screen
+	var local := _map.to_local(world)
+	var reason := setup.use_ability(unit, _ability_id, cell)
+	if reason.is_empty():
+		_ability_id = ""
+		_cancel_end_confirm()
+		if setup.map.in_bounds(cell):
+			_hovered = cell
+			_hover_local = local
+		_refresh_board()
+		if _leaving or setup == null or setup.result != null:
+			return
+		if setup.map.in_bounds(cell):
+			_highlight.clear()
+			_highlight.set_cell(cell, _HIGHLIGHT_SOURCE, Vector2i.ZERO)
+		return
+	_hovered = cell
+	_hover_local = local
+	_highlight.clear()
+	_rebuild_ability_highlights()
+	_apply_combat_preview()
+	if setup.map.in_bounds(cell):
+		_tooltip.text = _tip_for(cell, Hex.offset_to_axial(cell))
+	else:
+		_tooltip.text = "%s\n%s" % [_config.ability(_ability_id).ability_name, reason]
+	_tooltip_panel.visible = true
+	_place_tooltip(screen)
+
+
+func _refresh_abilities() -> void:
+	if _ability_bar == null:
+		return
+	var unit: PlayerState.UnitState = null
+	if setup != null:
+		unit = _selected_unit()
+	if unit == null:
+		_ability_id = ""
+		_ability_bar.visible = false
+		_clear_ability_entries()
+		return
+	if not _ability_id.is_empty() and not setup.ability_block_reason(unit, _ability_id).is_empty():
+		_ability_id = ""
+	var stats := _config.unit(unit.unit_type)
+	_ability_ap.text = "AP %d / %d" % [unit.ap, stats.ap]
+	_ability_bar.visible = true
+	_rebuild_ability_buttons(unit)
+
+
+func _rebuild_ability_buttons(unit: PlayerState.UnitState) -> void:
+	_clear_ability_entries()
+	var gap := _ability_row.get_node("OrderGap") as Control
+	var abilities := setup.unit_abilities(unit)
+	gap.visible = not abilities.is_empty()
+	for ability_id in abilities:
+		var button := _ABILITY_SCENE.instantiate() as Button
+		button.name = "Ability_%s" % ability_id
+		button.focus_mode = Control.FOCUS_NONE
+		button.pressed.connect(_on_ability_pressed.bind(ability_id))
+		_ability_row.add_child(button)
+		_ability_row.move_child(button, gap.get_index())
+		_paint_ability_button(button, unit, ability_id)
+	if _config.skip_enabled:
+		_add_order_button("skip", "Skip", "S", "No AP", setup.skip_reason(unit), _on_skip_pressed)
+	if _config.fortify_enabled:
+		_add_order_button("fortify", "Fortify", "F", "1 AP", setup.fortify_reason(unit), _on_fortify_pressed)
+	if setup.can_found(unit) != GameSetup.REASON_SETTLER:
+		_add_order_button("found", "Found", "B", "1 AP", setup.can_found(unit), _on_found_city_pressed)
+
+
+func _add_order_button(order_id: String, order_name: String, hotkey: String, cost: String, reason: String, handler: Callable) -> void:
+	var button := _ABILITY_SCENE.instantiate() as Button
+	button.name = "Order_%s" % order_id
+	button.focus_mode = Control.FOCUS_NONE
+	button.pressed.connect(handler)
+	_ability_row.add_child(button)
+	_paint_order_button(button, order_name, hotkey, cost, reason)
+
+
+func _paint_ability_button(button: Button, unit: PlayerState.UnitState, ability_id: String) -> void:
+	var stats := _config.ability(ability_id)
+	var reason := setup.ability_block_reason(unit, ability_id)
+	var left := setup.ability_cooldown_left(unit, ability_id)
+	(button.get_node("Column/NameLabel") as Label).text = stats.ability_name
+	var cost := "No AP" if stats.ap_cost <= 0 else "%d AP" % stats.ap_cost
+	(button.get_node("Column/CostLabel") as Label).text = cost
+	var cooldown := "–"
+	if left > 0:
+		cooldown = "Cooldown %d" % left
+	elif stats.cooldown > 0:
+		cooldown = str(stats.cooldown)
+	(button.get_node("Column/CooldownLabel") as Label).text = cooldown
+	var state := "Ready"
+	if _ability_id == ability_id and reason.is_empty():
+		state = "Targeting"
+	elif not reason.is_empty():
+		state = reason
+	_paint_bar_button(button, state, reason, _ability_id == ability_id and reason.is_empty())
+	var hotkey := button.get_node("Column/HotkeyLabel") as Label
+	hotkey.text = ""
+	hotkey.visible = false
+
+
+func _paint_order_button(button: Button, order_name: String, hotkey_text: String, cost: String, reason: String) -> void:
+	(button.get_node("Column/NameLabel") as Label).text = order_name
+	(button.get_node("Column/CostLabel") as Label).text = cost
+	(button.get_node("Column/CooldownLabel") as Label).text = "–"
+	var state := "Ready" if reason.is_empty() else reason
+	_paint_bar_button(button, state, reason, false)
+	var hotkey := button.get_node("Column/HotkeyLabel") as Label
+	hotkey.text = hotkey_text
+	hotkey.visible = not hotkey_text.is_empty()
+
+
+func _paint_bar_button(button: Button, state: String, reason: String, targeting: bool) -> void:
+	var state_label := button.get_node("Column/StateLabel") as Label
+	state_label.text = state
+	button.disabled = not reason.is_empty()
+	button.tooltip_text = reason
+	var muted := button.disabled
+	var name_color := Color(0.78, 0.78, 0.8) if muted else Color(0.97, 0.96, 0.92)
+	var cost_color := Color(0.62, 0.8, 0.96) if muted else Color(0.72, 0.88, 1.0)
+	var quiet := Color(0.74, 0.74, 0.7) if muted else Color(0.9, 0.9, 0.84)
+	(button.get_node("Column/NameLabel") as Label).add_theme_color_override("font_color", name_color)
+	(button.get_node("Column/CostLabel") as Label).add_theme_color_override("font_color", cost_color)
+	(button.get_node("Column/CooldownLabel") as Label).add_theme_color_override("font_color", quiet)
+	var state_color := Color(0.95, 0.62, 0.48) if muted else Color(0.9, 0.9, 0.84)
+	state_label.add_theme_color_override("font_color", state_color)
+	if muted:
+		button.modulate = Color(0.92, 0.92, 0.94)
+	elif targeting:
+		button.modulate = Color(0.88, 0.95, 1.0)
+	else:
+		button.modulate = Color.WHITE
+
+
+func _on_ability_pressed(ability_id: String) -> void:
+	if setup == null or _menu.visible:
+		return
+	var unit := _selected_unit()
+	if unit == null or not setup.ability_block_reason(unit, ability_id).is_empty():
+		return
+	_placing = ""
+	_spell_id = ""
+	if _ability_id == ability_id:
+		_ability_id = ""
+	else:
+		_ability_id = ability_id
+	_refresh_spells()
+	_refresh_abilities()
+	_highlight.clear()
+	_rebuild_move_highlights()
+	_apply_combat_preview()
+	if setup.map.in_bounds(_hovered):
+		_tooltip.text = _tip_for(_hovered, Hex.offset_to_axial(_hovered))
+		_tooltip_panel.visible = true
+
+
+func _clear_ability_entries() -> void:
+	if _ability_row == null:
+		return
+	for child in _ability_row.get_children():
+		if child.name == "OrderGap":
+			continue
+		_ability_row.remove_child(child)
+		child.queue_free()

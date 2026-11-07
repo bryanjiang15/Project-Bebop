@@ -34,6 +34,8 @@ func _run() -> void:
 		return
 	if not _assert_new_game(game):
 		return
+	if not _ability_bar(game):
+		return
 	if not _move_settler(game):
 		return
 	if not _warrior_orders(game):
@@ -174,6 +176,311 @@ func _assert_new_game(game: Node) -> bool:
 	return true
 
 
+func _ability_bar(game: Node) -> bool:
+	var setup := game.get("setup") as GameSetup
+	var warrior := _human_unit(setup, "warrior")
+	var settler := _human_unit(setup, "settler")
+	if warrior == null or settler == null:
+		print("FAIL ability bar roster")
+		quit(1)
+		return false
+	_click_cell(game, warrior.cell)
+	if (game.get_node("%SelectionTitle") as Label).text != "Warrior":
+		_click_cell(game, warrior.cell)
+	if not (game.get_node("%AbilityBar") as CanvasItem).visible:
+		print("FAIL ability bar hidden for the warrior")
+		quit(1)
+		return false
+	var ap := (game.get_node("%AbilityApLabel") as Label).text
+	if ap != "AP %d / %d" % [warrior.ap, setup.config.unit("warrior").ap]:
+		print("FAIL ability AP '", ap, "'")
+		quit(1)
+		return false
+	var strike := _SceneDriver.ability_button(game, "strike")
+	if strike == null or (strike.get_node("Column/NameLabel") as Label).text != "Strike" or (strike.get_node("Column/CostLabel") as Label).text != "1 AP":
+		print("FAIL strike button")
+		quit(1)
+		return false
+	if strike.disabled or (strike.get_node("Column/StateLabel") as Label).text != "Ready":
+		print("FAIL strike should be ready")
+		quit(1)
+		return false
+	if _SceneDriver.order_button(game, "skip") == null or _SceneDriver.order_button(game, "fortify") == null:
+		print("FAIL warrior orders missing")
+		quit(1)
+		return false
+	if game.get_node("%AbilityButtons").get_node_or_null("Order_found") != null or game.get_node("%AbilityButtons").get_node_or_null("Ability_shoot") != null:
+		print("FAIL warrior bar shows Found or Shoot")
+		quit(1)
+		return false
+	print("PASS warrior bar ", ap)
+	_click_cell(game, settler.cell)
+	if (game.get_node("%SelectionTitle") as Label).text != "Settler":
+		print("FAIL settler was not selected")
+		quit(1)
+		return false
+	if game.get_node("%AbilityButtons").get_node_or_null("Ability_strike") != null:
+		print("FAIL settler bar shows Strike")
+		quit(1)
+		return false
+	var found := _SceneDriver.order_button(game, "found")
+	if found.disabled or found.tooltip_text != "" or (found.get_node("Column/CostLabel") as Label).text != "1 AP":
+		print("FAIL Found on the settler bar")
+		quit(1)
+		return false
+	if (found.get_node("Column/NameLabel") as Label).text != "Found":
+		print("FAIL Found name")
+		quit(1)
+		return false
+	print("PASS settler bar shows Found")
+	_click_cell(game, warrior.cell)
+	var saved_ap := warrior.ap
+	warrior.ap = 0
+	game._refresh_board()
+	strike = _SceneDriver.ability_button(game, "strike")
+	var fortify := _SceneDriver.order_button(game, "fortify")
+	var skip := _SceneDriver.order_button(game, "skip")
+	if not strike.disabled or strike.tooltip_text != GameSetup.REASON_AP or not fortify.disabled or fortify.tooltip_text != GameSetup.REASON_AP or skip.disabled:
+		print("FAIL 0 AP strike='", strike.tooltip_text, "' fortify='", fortify.tooltip_text, "' skip ", skip.disabled)
+		quit(1)
+		return false
+	print("PASS 0 AP greys Strike and Fortify")
+	warrior.ap = saved_ap
+	warrior.acted = false
+	game._refresh_board()
+	var foe := _open_neighbor(setup, warrior.cell)
+	if foe.x < 0:
+		print("FAIL no tile for the ability target")
+		quit(1)
+		return false
+	var home := warrior.cell
+	var home_land := setup.map.land_at(home)
+	var foe_land := setup.map.land_at(foe)
+	setup.map.set_land(home, "plains")
+	setup.map.set_land(foe, "plains")
+	var rival := setup.spawn_unit(1, "warrior", foe)
+	if rival == null:
+		print("FAIL ability rival did not spawn")
+		quit(1)
+		return false
+	game._refresh_board()
+	if (game.get_node("%SelectionTitle") as Label).text != "Warrior":
+		_click_cell(game, home)
+	var hp := warrior.hp
+	var rival_hp := rival.hp
+	var ap_now := warrior.ap
+	_click_cell(game, foe, MOUSE_BUTTON_RIGHT)
+	if warrior.cell != home or warrior.ap != ap_now or warrior.hp != hp or rival.hp != rival_hp:
+		print("FAIL right click attacked or moved")
+		quit(1)
+		return false
+	print("PASS right click on an enemy does nothing")
+	var step := _plain_step(setup, home, foe)
+	if step.x < 0:
+		print("FAIL no empty step")
+		quit(1)
+		return false
+	var step_land := setup.map.land_at(step)
+	setup.map.set_land(step, "plains")
+	game._refresh_board()
+	_click_cell(game, step, MOUSE_BUTTON_RIGHT)
+	if warrior.cell != step:
+		print("FAIL right click did not move to ", step, " still ", warrior.cell)
+		quit(1)
+		return false
+	_click_cell(game, home, MOUSE_BUTTON_RIGHT)
+	if warrior.cell != home:
+		print("FAIL warrior did not step back")
+		quit(1)
+		return false
+	warrior.ap = setup.config.unit("warrior").ap
+	warrior.acted = false
+	warrior.order = ""
+	warrior.fortified = false
+	game._refresh_board()
+	print("PASS right click moves")
+	strike = _SceneDriver.ability_button(game, "strike")
+	strike.pressed.emit()
+	strike = _SceneDriver.ability_button(game, "strike")
+	if str(game.get("_ability_id")) != "strike" or (strike.get_node("Column/StateLabel") as Label).text != "Targeting":
+		print("FAIL strike did not arm")
+		quit(1)
+		return false
+	_hover_cell(game, foe)
+	var preview: Dictionary = setup.ability_preview(warrior, "strike", foe)
+	var line := "Damage %d   Counter %d" % [int(preview["damage"]), int(preview["counter"])]
+	var shown := (game.get_node("%CombatPreview") as Label).text
+	if not bool(preview["ok"]) or shown != line or not _highlight_at(game, foe):
+		print("FAIL valid preview '", shown, "' expected ", line)
+		quit(1)
+		return false
+	print("PASS targeting preview ", shown)
+	var far := _ranged_out(setup, home)
+	if far.x < 0:
+		print("FAIL no out-of-range tile")
+		quit(1)
+		return false
+	_hover_cell(game, far)
+	shown = (game.get_node("%CombatPreview") as Label).text
+	var tint := _highlight_tint(game, far)
+	var invalid := Color(0.95, 0.28, 0.24, 0.95)
+	if shown != GameSetup.REASON_RANGE or not tint.is_equal_approx(invalid):
+		print("FAIL invalid preview '", shown, "' tint ", tint)
+		quit(1)
+		return false
+	print("PASS invalid target ", shown)
+	_press_action(game, "toggle_menu")
+	if str(game.get("_ability_id")) != "" or (game.get_node("%InGameMenu") as CanvasItem).visible:
+		print("FAIL esc did not cancel targeting")
+		quit(1)
+		return false
+	strike = _SceneDriver.ability_button(game, "strike")
+	strike.pressed.emit()
+	_click_cell(game, foe, MOUSE_BUTTON_RIGHT)
+	if str(game.get("_ability_id")) != "" or warrior.cell != home or rival.hp != rival_hp:
+		print("FAIL right click did not cancel targeting")
+		quit(1)
+		return false
+	print("PASS esc and right click cancel targeting")
+	strike = _SceneDriver.ability_button(game, "strike")
+	strike.pressed.emit()
+	var spell := game.get_node("%SpellButtons").get_node("Spell_restore_plains") as Button
+	if spell.disabled:
+		print("FAIL restore plains greyed: ", spell.tooltip_text)
+		quit(1)
+		return false
+	spell.pressed.emit()
+	if str(game.get("_spell_id")) != "restore_plains" or str(game.get("_ability_id")) != "":
+		print("FAIL spell did not cancel the ability")
+		quit(1)
+		return false
+	strike = _SceneDriver.ability_button(game, "strike")
+	strike.pressed.emit()
+	if str(game.get("_ability_id")) != "strike" or str(game.get("_spell_id")) != "":
+		print("FAIL ability did not cancel the spell")
+		quit(1)
+		return false
+	(game.get_node("%EndTurnButton") as Button).pressed.emit()
+	if str(game.get("_ability_id")) != "":
+		print("FAIL End Turn left targeting armed")
+		quit(1)
+		return false
+	if (game.get_node("%EndTurnButton") as Button).text != "End anyway (Enter)":
+		print("FAIL End Turn advanced while cancelling targeting")
+		quit(1)
+		return false
+	_click_cell(game, home)
+	if (game.get_node("%EndTurnButton") as Button).text != "End Turn (Enter)":
+		print("FAIL end confirm stayed")
+		quit(1)
+		return false
+	print("PASS spell and ability targeting are exclusive")
+	strike = _SceneDriver.ability_button(game, "strike")
+	strike.pressed.emit()
+	_click_cell(game, foe)
+	if rival.hp >= rival_hp or warrior.ap != 0 or warrior.cell != home:
+		print("FAIL strike hp ", warrior.hp, " ", rival.hp, " ap ", warrior.ap)
+		quit(1)
+		return false
+	strike = _SceneDriver.ability_button(game, "strike")
+	fortify = _SceneDriver.order_button(game, "fortify")
+	skip = _SceneDriver.order_button(game, "skip")
+	if not strike.disabled or strike.tooltip_text != GameSetup.REASON_AP or not fortify.disabled or skip.disabled or str(game.get("_ability_id")) != "":
+		print("FAIL bar after strike")
+		quit(1)
+		return false
+	print("PASS strike from the bar")
+	warrior.hp = hp
+	warrior.ap = setup.config.unit("warrior").ap
+	warrior.acted = false
+	warrior.used_ability = false
+	warrior.order = ""
+	warrior.fortified = false
+	setup.players[rival.owner].units.erase(rival)
+	setup.map.set_land(home, home_land)
+	setup.map.set_land(foe, foe_land)
+	setup.map.set_land(step, step_land)
+	setup._refresh_fog()
+	game._refresh_board()
+	if (game.get_node("%SelectionTitle") as Label).text != "Warrior":
+		_click_cell(game, home)
+	skip = _SceneDriver.order_button(game, "skip")
+	skip.pressed.emit()
+	if warrior.order != GameSetup.ORDER_SKIP or warrior.ap != 0:
+		print("FAIL bar skip order ", warrior.order, " ap ", warrior.ap)
+		quit(1)
+		return false
+	warrior.order = ""
+	warrior.ap = setup.config.unit("warrior").ap
+	game._refresh_board()
+	fortify = _SceneDriver.order_button(game, "fortify")
+	fortify.pressed.emit()
+	if not warrior.fortified or warrior.order != GameSetup.ORDER_FORTIFY or warrior.ap != 0:
+		print("FAIL bar fortify")
+		quit(1)
+		return false
+	warrior.fortified = false
+	warrior.order = ""
+	warrior.acted = false
+	warrior.ap = setup.config.unit("warrior").ap
+	game._refresh_board()
+	_click_cell(game, settler.cell)
+	found = _SceneDriver.order_button(game, "found")
+	settler.ap = 0
+	game._refresh_board()
+	found = _SceneDriver.order_button(game, "found")
+	if not found.disabled or found.tooltip_text != GameSetup.REASON_AP:
+		print("FAIL bar found at 0 AP '", found.tooltip_text, "'")
+		quit(1)
+		return false
+	settler.ap = setup.config.unit("settler").ap
+	settler.order = ""
+	game._refresh_board()
+	print("PASS bar orders match Skip, Fortify, and Found")
+	return true
+
+
+func _plain_step(setup: GameSetup, origin: Vector2i, reserved: Vector2i) -> Vector2i:
+	var axial := Hex.offset_to_axial(origin)
+	for dir in 6:
+		var cell := Hex.axial_to_offset(Hex.neighbor(axial, dir))
+		if cell == reserved or not setup.map.in_bounds(cell):
+			continue
+		var occupied := false
+		for player in setup.players:
+			for unit in player.units:
+				if unit.cell == cell:
+					occupied = true
+		if not occupied:
+			return cell
+	return Vector2i(-1, -1)
+
+
+func _ranged_out(setup: GameSetup, origin: Vector2i) -> Vector2i:
+	var axial := Hex.offset_to_axial(origin)
+	for dir in 6:
+		var cursor := axial
+		for _step_i in 2:
+			cursor = Hex.neighbor(cursor, dir)
+		var cell := Hex.axial_to_offset(cursor)
+		if setup.map.in_bounds(cell) and setup.fog.unit_visible(setup.human_index, cell):
+			return cell
+	return Vector2i(-1, -1)
+
+
+func _highlight_at(game: Node, cell: Vector2i) -> bool:
+	return _highlight_tint(game, cell).a > 0.0
+
+
+func _highlight_tint(game: Node, cell: Vector2i) -> Color:
+	var map := game.get_node("%Map") as TileMapLayer
+	var want := map.map_to_local(cell)
+	for child in game.get_node("%MoveHighlights").get_children():
+		if (child as Node2D).position.is_equal_approx(want):
+			return (child as CanvasItem).modulate
+	return Color(0, 0, 0, 0)
+
+
 func _move_settler(game: Node) -> bool:
 	var setup := game.get("setup") as GameSetup
 	var origin := setup.human_settler_cell()
@@ -279,12 +586,12 @@ func _warrior_orders(game: Node) -> bool:
 		quit(1)
 		return false
 	_press_action(game, "fortify_unit")
-	var order_reason := (game.get_node("%OrderReason") as Label).text
-	if order_reason != GameSetup.REASON_AP or warrior.ap != 0 or not (game.get_node("%FortifyButton") as Button).disabled:
-		print("FAIL fortify at 0 AP '", order_reason, "'")
+	var fortify := _SceneDriver.order_button(game, "fortify")
+	if fortify.tooltip_text != GameSetup.REASON_AP or warrior.ap != 0 or not fortify.disabled:
+		print("FAIL fortify at 0 AP '", fortify.tooltip_text, "'")
 		quit(1)
 		return false
-	(game.get_node("%SkipButton") as Button).pressed.emit()
+	_SceneDriver.order_button(game, "skip").pressed.emit()
 	detail = (game.get_node("%SelectionDetail") as Label).text
 	# The step already set acted. Skip zeros AP and does not clear that flag.
 	if not detail.contains("Skip") or not detail.contains("HP %d / %d" % [warrior.hp, warrior.max_hp]) or warrior.ap != 0 or not warrior.acted:
@@ -376,6 +683,7 @@ func _capture_city_and_settler(game: Node) -> bool:
 		print("FAIL capture selection")
 		quit(1)
 		return false
+	_SceneDriver.ability_button(game, "strike").pressed.emit()
 	_hover_cell(game, city_cell)
 	var preview := (game.get_node("%CombatPreview") as Label).text
 	var tip := (game.get_node("%Tooltip") as Label).text
@@ -383,7 +691,7 @@ func _capture_city_and_settler(game: Node) -> bool:
 		print("FAIL city preview '", preview, "' tip '", tip, "'")
 		quit(1)
 		return false
-	var dealt := int(setup.ability_preview(warrior, setup.primary_ability(warrior), city.cell)["damage"])
+	var dealt := int(setup.ability_preview(warrior, setup.unit_abilities(warrior)[0], city.cell)["damage"])
 	if dealt <= 0 or not preview.contains(str(dealt)):
 		print("FAIL city damage ", dealt, " preview ", preview)
 		quit(1)
@@ -391,8 +699,12 @@ func _capture_city_and_settler(game: Node) -> bool:
 	print("PASS city attack preview ", preview)
 	city.hp = dealt
 	game._refresh_board()
+	if (game.get_node("%SelectionTitle") as Label).text != "Warrior":
+		_click_cell(game, warrior.cell)
+	if str(game.get("_ability_id")) != "strike":
+		_SceneDriver.ability_button(game, "strike").pressed.emit()
 	var home := warrior.cell
-	_click_cell(game, city_cell, MOUSE_BUTTON_RIGHT)
+	_click_cell(game, city_cell)
 	if city.hp != 0 or city.player != rival or warrior.cell != home or warrior.ap != 0:
 		print("FAIL city attack hp ", city.hp, " owner ", city.player, " cell ", warrior.cell)
 		quit(1)
@@ -571,6 +883,7 @@ func _scripted_combat(game: Node) -> bool:
 		print("FAIL combat selection ", (game.get_node("%SelectionTitle") as Label).text)
 		quit(1)
 		return false
+	_SceneDriver.ability_button(game, "strike").pressed.emit()
 	if not _hover(game, dest, true):
 		return false
 	var preview := (game.get_node("%CombatPreview") as Label).text
@@ -592,7 +905,7 @@ func _scripted_combat(game: Node) -> bool:
 	var attacker_hp := warrior.hp
 	var defender_hp := rival.hp
 	var attacker_cell := warrior.cell
-	_click_cell(game, dest, MOUSE_BUTTON_RIGHT)
+	_click_cell(game, dest)
 	if warrior.cell != attacker_cell:
 		print("FAIL attacker advanced to ", warrior.cell)
 		quit(1)
@@ -884,8 +1197,9 @@ func _rival_land_cast(game: Node) -> bool:
 		print("FAIL move highlights before the cast")
 		quit(1)
 		return false
+	_SceneDriver.ability_button(game, "strike").pressed.emit()
 	_hover_cell(game, target)
-	var plain_hit: Dictionary = setup.ability_preview(warrior, setup.primary_ability(warrior), defender.cell)
+	var plain_hit: Dictionary = setup.ability_preview(warrior, setup.unit_abilities(warrior)[0], defender.cell)
 	var preview := game.get_node("%CombatPreview") as Label
 	var plain_text := "Damage %d   Counter %d" % [int(plain_hit["damage"]), int(plain_hit["counter"])]
 	if not bool(plain_hit["ok"]) or preview.text != plain_text:
@@ -935,16 +1249,24 @@ func _rival_land_cast(game: Node) -> bool:
 		print("FAIL panel text did not change")
 		quit(1)
 		return false
-	var hill_hit: Dictionary = setup.ability_preview(warrior, setup.primary_ability(warrior), defender.cell)
+	if _highlight_has(game, far) or not _highlight_has(game, near):
+		print("FAIL move highlights after the cast")
+		quit(1)
+		return false
+	_SceneDriver.ability_button(game, "strike").pressed.emit()
+	_hover_cell(game, defender.cell)
+	var hill_hit: Dictionary = setup.ability_preview(warrior, setup.unit_abilities(warrior)[0], defender.cell)
 	var hill_text := "Damage %d   Counter %d" % [int(hill_hit["damage"]), int(hill_hit["counter"])]
 	if int(hill_hit["damage"]) >= int(plain_hit["damage"]) or preview.text != hill_text:
 		print("FAIL combat preview after '", preview.text, "' expected ", hill_text)
 		quit(1)
 		return false
-	if _highlight_has(game, far) or not _highlight_has(game, near):
-		print("FAIL move highlights after the cast")
+	_SceneDriver.ability_button(game, "strike").pressed.emit()
+	if str(game.get("_ability_id")) != "":
+		print("FAIL strike stayed armed")
 		quit(1)
 		return false
+	_hover_cell(game, target)
 	var tip := (game.get_node("%Tooltip") as Label).text
 	if not tip.contains("hills"):
 		print("FAIL tooltip '", tip, "'")
@@ -1081,7 +1403,7 @@ func _land_effects(game: Node) -> bool:
 		quit(1)
 		return false
 	print("PASS volcanic warning")
-	(game.get_node("%SkipButton") as Button).pressed.emit()
+	_SceneDriver.order_button(game, "skip").pressed.emit()
 	if not _press_end_turn(game):
 		return false
 	if warrior.hp != warrior.max_hp - setup.config.volcanic_damage:
@@ -1097,7 +1419,7 @@ func _land_effects(game: Node) -> bool:
 	print("PASS volcanic drop ", warrior.hp)
 	warrior.hp = 40
 	warrior.acted = false
-	(game.get_node("%SkipButton") as Button).pressed.emit()
+	_SceneDriver.order_button(game, "skip").pressed.emit()
 	if not _press_end_turn(game):
 		return false
 	if warrior.hp != 40 or not setup.players[setup.human_index].units.has(warrior):
@@ -1239,17 +1561,17 @@ func _found_city(game: Node) -> bool:
 	game._refresh_board()
 	_click_cell(game, cell)
 	_press_action(game, "found_city")
-	var refused := (game.get_node("%FoundCityReason") as Label).text
-	if setup.cities.size() != 0 or refused != GameSetup.REASON_AP or not (game.get_node("%FoundCityButton") as Button).disabled:
-		print("FAIL found at 0 AP '", refused, "' cities ", setup.cities.size())
+	var found := _SceneDriver.order_button(game, "found")
+	if setup.cities.size() != 0 or found.tooltip_text != GameSetup.REASON_AP or not found.disabled:
+		print("FAIL found at 0 AP '", found.tooltip_text, "' cities ", setup.cities.size())
 		quit(1)
 		return false
 	print("PASS found refused without AP")
 	settler.ap = saved_ap
 	game._refresh_board()
 	_click_cell(game, cell)
-	var found := game.get_node("%FoundCityButton") as Button
-	var reason := (game.get_node("%FoundCityReason") as Label).text
+	found = _SceneDriver.order_button(game, "found")
+	var reason := found.tooltip_text
 	if found.disabled or reason != "":
 		print("FAIL found city available: disabled=", found.disabled, " reason='", reason, "'")
 		quit(1)
