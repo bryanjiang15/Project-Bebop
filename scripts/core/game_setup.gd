@@ -313,13 +313,24 @@ func can_use_ability(unit: PlayerState.UnitState, ability_id: String, cell: Vect
 	return str(_ability_plan(unit, ability_id, cell)["reason"])
 
 
-## Same shape as the old attack preview: ok, reason, damage, counter.
+## ok, reason, damage, counter, plus push, push_open, and push_cell.
+## push is true when the ability's push_distance is greater than 0.
+## push_open is true when the target is a unit and that hex is free.
+## A city and a blocked hex keep push set and push_open false.
 func ability_preview(unit: PlayerState.UnitState, ability_id: String, cell: Vector2i) -> Dictionary:
 	var plan := _ability_plan(unit, ability_id, cell)
 	var reason := str(plan["reason"])
 	if not reason.is_empty():
-		return {"ok": false, "reason": reason, "damage": 0, "counter": 0}
-	return {"ok": true, "reason": "", "damage": int(plan["damage"]), "counter": int(plan["counter"])}
+		return {"ok": false, "reason": reason, "damage": 0, "counter": 0, "push": false, "push_open": false, "push_cell": NO_CELL}
+	return {
+		"ok": true,
+		"reason": "",
+		"damage": int(plan["damage"]),
+		"counter": int(plan["counter"]),
+		"push": bool(plan["push"]),
+		"push_open": bool(plan["push_open"]),
+		"push_cell": plan["push_cell"],
+	}
 
 
 ## Resolves a damage ability, then ends the unit's turn: AP is 0 and acted is set.
@@ -333,7 +344,12 @@ func use_ability(unit: PlayerState.UnitState, ability_id: String, cell: Vector2i
 	if not reason.is_empty():
 		return reason
 	var ability := config.ability(ability_id)
-	var preview := {"damage": int(plan["damage"]), "counter": int(plan["counter"])}
+	var preview := {
+		"damage": int(plan["damage"]),
+		"counter": int(plan["counter"]),
+		"push_open": bool(plan["push_open"]),
+		"push_cell": plan["push_cell"],
+	}
 	if str(plan["kind"]) == "unit":
 		_apply_unit_hit(unit, plan["unit"] as PlayerState.UnitState, preview)
 	else:
@@ -343,7 +359,17 @@ func use_ability(unit: PlayerState.UnitState, ability_id: String, cell: Vector2i
 
 
 func _ability_plan(unit: PlayerState.UnitState, ability_id: String, cell: Vector2i) -> Dictionary:
-	var empty := {"reason": "", "kind": "", "unit": null, "city": null, "damage": 0, "counter": 0}
+	var empty := {
+		"reason": "",
+		"kind": "",
+		"unit": null,
+		"city": null,
+		"damage": 0,
+		"counter": 0,
+		"push": false,
+		"push_open": false,
+		"push_cell": NO_CELL,
+	}
 	var gate := _ability_gate(unit, ability_id)
 	if not gate.is_empty():
 		empty["reason"] = gate
@@ -366,16 +392,24 @@ func _ability_plan(unit: PlayerState.UnitState, ability_id: String, cell: Vector
 		return empty
 	var damage := 0
 	var counter := 0
+	var counters := _ability_counters(ability)
 	if str(picked["kind"]) == "unit":
 		var defender := picked["unit"] as PlayerState.UnitState
 		damage = _blow(unit, ability, defender)
-		if ability.melee or not config.ranged_takes_no_counter:
+		if counters:
 			counter = _counter(defender, unit, ability)
 	else:
 		var city := picked["city"] as MapCity
 		damage = _city_blow(unit, ability, city)
-		if ability.melee or not config.ranged_takes_no_counter:
+		if counters:
 			counter = _city_counter(city, unit, ability)
+	var pushing := ability.push_distance > 0
+	var push_cell := NO_CELL
+	var push_open := false
+	if pushing:
+		push_cell = _away_cell(unit, cell, ability.push_distance)
+		if str(picked["kind"]) == "unit":
+			push_open = not push_blocked(push_cell)
 	return {
 		"reason": "",
 		"kind": picked["kind"],
@@ -383,6 +417,9 @@ func _ability_plan(unit: PlayerState.UnitState, ability_id: String, cell: Vector
 		"city": picked["city"],
 		"damage": damage,
 		"counter": counter,
+		"push": pushing,
+		"push_open": push_open,
+		"push_cell": push_cell,
 	}
 
 
@@ -442,6 +479,7 @@ func ability_targets(unit: PlayerState.UnitState, ability_id: String) -> Array[V
 
 
 ## Tiles the ability would affect on `cell`. `single` is that one tile.
+## A push hex is not part of the area. The view reads it from ability_preview.
 ## A radius area is ticket 28. Off-map cells are dropped.
 func ability_area(unit: PlayerState.UnitState, ability_id: String, cell: Vector2i) -> Array[Vector2i]:
 	var tiles: Array[Vector2i] = []
@@ -517,6 +555,10 @@ func _apply_unit_hit(attacker: PlayerState.UnitState, defender: PlayerState.Unit
 	else:
 		_remove_if_dead(defender)
 	_remove_if_dead(attacker)
+	if not defender_removed and bool(preview.get("push_open", false)):
+		var dest: Vector2i = preview["push_cell"]
+		if not push_blocked(dest):
+			defender.cell = dest
 	_refresh_fog()
 	if defender_removed:
 		_eliminate_if_out(defender_owner)
@@ -1127,6 +1169,53 @@ func move_queue(city: MapCity, index: int, delta: int) -> void:
 	var item: MapCity.Item = city.queue[index]
 	city.queue.remove_at(index)
 	city.queue.insert(next, item)
+
+
+## Melee counter follows deals_counter, so Shield Bash can be melee and still
+## deal none. A ranged ability counters when deals_counter is true, or when
+## ranged_takes_no_counter is false. Shoot ships with deals_counter false, so
+## the global flag still decides it.
+func _ability_counters(ability: GameConfig.AbilityStats) -> bool:
+	if ability.melee:
+		return ability.deals_counter
+	return ability.deals_counter or not config.ranged_takes_no_counter
+
+
+## One step past `cell`, continuing the step from the unit through that cell.
+## push_distance walks that same direction. Off the six axes, this is NO_CELL.
+func push_destination(unit: PlayerState.UnitState, cell: Vector2i) -> Vector2i:
+	return _away_cell(unit, cell, 1)
+
+
+func _away_cell(unit: PlayerState.UnitState, cell: Vector2i, distance: int) -> Vector2i:
+	if unit == null or distance < 1:
+		return NO_CELL
+	var step := Hex.offset_to_axial(cell) - Hex.offset_to_axial(unit.cell)
+	var direction := -1
+	for index in Hex.DIRECTIONS.size():
+		if Hex.DIRECTIONS[index] == step:
+			direction = index
+			break
+	if direction < 0:
+		return NO_CELL
+	var axial := Hex.offset_to_axial(cell)
+	for _step_index in distance:
+		axial = Hex.neighbor(axial, direction)
+	return Hex.axial_to_offset(axial)
+
+
+## Off the map, impassable land, any unit, or a city center. A building does
+## not block, and fog does not block. A push is not a walk, so this checks
+## water itself. It never captures.
+func push_blocked(cell: Vector2i) -> bool:
+	if map == null or config == null or not map.in_bounds(cell):
+		return true
+	var stats := config.land(map.land_at(cell))
+	if not stats.passable or stats.move_cost < 0:
+		return true
+	if city_at_cell(cell) != null:
+		return true
+	return _unit_at(cell) != null
 
 
 func _strike_strength(unit: PlayerState.UnitState, ability: GameConfig.AbilityStats) -> float:

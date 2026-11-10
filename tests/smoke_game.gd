@@ -205,6 +205,23 @@ func _ability_bar(game: Node) -> bool:
 		print("FAIL strike should be ready")
 		quit(1)
 		return false
+	var bash := _SceneDriver.ability_button(game, "shield_bash")
+	if bash == null or (bash.get_node("Column/NameLabel") as Label).text != "Shield Bash" or (bash.get_node("Column/CostLabel") as Label).text != "1 AP" or (bash.get_node("Column/CooldownLabel") as Label).text != "2":
+		print("FAIL shield bash button")
+		quit(1)
+		return false
+	if bash.disabled or (bash.get_node("Column/StateLabel") as Label).text != "Ready":
+		print("FAIL shield bash should be ready")
+		quit(1)
+		return false
+	var bar_order: PackedStringArray = []
+	for child in game.get_node("%AbilityButtons").get_children():
+		bar_order.append(str(child.name))
+	var expected_order := PackedStringArray(["Ability_strike", "Ability_shield_bash", "OrderGap", "Order_skip", "Order_fortify"])
+	if bar_order != expected_order:
+		print("FAIL bar order ", bar_order)
+		quit(1)
+		return false
 	if _SceneDriver.order_button(game, "skip") == null or _SceneDriver.order_button(game, "fortify") == null:
 		print("FAIL warrior orders missing")
 		quit(1)
@@ -404,6 +421,8 @@ func _ability_bar(game: Node) -> bool:
 	game._refresh_board()
 	if (game.get_node("%SelectionTitle") as Label).text != "Warrior":
 		_click_cell(game, home)
+	if not _shield_bash(game, warrior):
+		return false
 	skip = _SceneDriver.order_button(game, "skip")
 	skip.pressed.emit()
 	if warrior.order != GameSetup.ORDER_SKIP or warrior.ap != 0:
@@ -438,6 +457,152 @@ func _ability_bar(game: Node) -> bool:
 	game._refresh_board()
 	print("PASS bar orders match Skip, Fortify, and Found")
 	return true
+
+
+func _shield_bash(game: Node, warrior: PlayerState.UnitState) -> bool:
+	var setup := game.get("setup") as GameSetup
+	var home := warrior.cell
+	var lane := _bash_lane(setup, home)
+	if lane.is_empty():
+		lane = _find_bash_lane(setup, warrior)
+	if lane.is_empty():
+		print("FAIL no shield bash lane")
+		quit(1)
+		return false
+	var foe_cell: Vector2i = lane[0]
+	var dest: Vector2i = lane[1]
+	var stand := warrior.cell
+	var stand_land := setup.map.land_at(stand)
+	var foe_land := setup.map.land_at(foe_cell)
+	var dest_land := setup.map.land_at(dest)
+	setup.map.set_land(stand, "plains")
+	setup.map.set_land(foe_cell, "plains")
+	setup.map.set_land(dest, "plains")
+	var rival := setup.spawn_unit(1, "warrior", foe_cell)
+	if rival == null:
+		print("FAIL bash rival did not spawn")
+		quit(1)
+		return false
+	setup._refresh_fog()
+	game._refresh_board()
+	if (game.get_node("%SelectionTitle") as Label).text != "Warrior":
+		_click_cell(game, stand)
+	var hp := warrior.hp
+	var rival_hp := rival.hp
+	var bash := _SceneDriver.ability_button(game, "shield_bash")
+	bash.pressed.emit()
+	_hover_cell(game, foe_cell)
+	var preview: Dictionary = setup.ability_preview(warrior, "shield_bash", foe_cell)
+	var line := "Damage %d   Counter 0   Push" % int(preview["damage"])
+	var shown := (game.get_node("%CombatPreview") as Label).text
+	var place := Color(0.4, 0.85, 0.95, 0.95)
+	if not bool(preview["ok"]) or not bool(preview["push_open"]) or shown != line or not _highlight_tint(game, dest).is_equal_approx(place):
+		print("FAIL push preview '", shown, "' expected ", line, " tint ", _highlight_tint(game, dest))
+		quit(1)
+		return false
+	print("PASS shield bash preview ", shown)
+	setup.map.set_land(dest, "water")
+	game._refresh_board()
+	_hover_cell(game, foe_cell)
+	preview = setup.ability_preview(warrior, "shield_bash", foe_cell)
+	line = "Damage %d   Counter 0   No push" % int(preview["damage"])
+	shown = (game.get_node("%CombatPreview") as Label).text
+	var invalid := Color(0.95, 0.28, 0.24, 0.95)
+	if shown != line or not _highlight_tint(game, dest).is_equal_approx(invalid):
+		print("FAIL blocked preview '", shown, "' expected ", line, " tint ", _highlight_tint(game, dest))
+		quit(1)
+		return false
+	print("PASS shield bash blocked preview ", shown)
+	setup.map.set_land(dest, "plains")
+	game._refresh_board()
+	_hover_cell(game, foe_cell)
+	_click_cell(game, foe_cell)
+	if rival.cell != dest or warrior.cell != stand or warrior.hp != hp or rival.hp >= rival_hp:
+		print("FAIL open bash cell ", rival.cell, " expected ", dest, " warrior ", warrior.cell, " hp ", warrior.hp, " ", rival.hp)
+		quit(1)
+		return false
+	bash = _SceneDriver.ability_button(game, "shield_bash")
+	if warrior.ap != 0 or not bash.disabled or bash.tooltip_text != GameSetup.REASON_COOLDOWN or (bash.get_node("Column/CooldownLabel") as Label).text != "Cooldown 2":
+		print("FAIL bash cooldown '", (bash.get_node("Column/CooldownLabel") as Label).text, "' tip ", bash.tooltip_text, " ap ", warrior.ap)
+		quit(1)
+		return false
+	print("PASS shield bash push")
+	warrior.ap = setup.config.unit("warrior").ap
+	warrior.acted = false
+	warrior.used_ability = false
+	warrior.order = ""
+	warrior.fortified = false
+	warrior.hp = hp
+	warrior.ability_cooldowns.clear()
+	rival.cell = foe_cell
+	rival.hp = rival_hp
+	setup.map.set_land(dest, "water")
+	setup._refresh_fog()
+	game._refresh_board()
+	if (game.get_node("%SelectionTitle") as Label).text != "Warrior":
+		_click_cell(game, stand)
+	bash = _SceneDriver.ability_button(game, "shield_bash")
+	bash.pressed.emit()
+	_click_cell(game, foe_cell)
+	if rival.cell != foe_cell or warrior.cell != stand or rival.hp >= rival_hp or warrior.hp != hp or setup._unit_at(dest) != null:
+		print("FAIL blocked bash cell ", rival.cell, " hp ", rival.hp, " warrior ", warrior.hp)
+		quit(1)
+		return false
+	print("PASS shield bash blocked")
+	setup.players[rival.owner].units.erase(rival)
+	setup.map.set_land(stand, stand_land)
+	setup.map.set_land(foe_cell, foe_land)
+	setup.map.set_land(dest, dest_land)
+	warrior.cell = home
+	warrior.hp = hp
+	warrior.ap = setup.config.unit("warrior").ap
+	warrior.acted = false
+	warrior.used_ability = false
+	warrior.order = ""
+	warrior.fortified = false
+	warrior.ability_cooldowns.clear()
+	setup._refresh_fog()
+	game._refresh_board()
+	if (game.get_node("%SelectionTitle") as Label).text != "Warrior":
+		_click_cell(game, home)
+	return true
+
+
+func _bash_lane(setup: GameSetup, origin: Vector2i) -> Array:
+	var axial := Hex.offset_to_axial(origin)
+	for dir in 6:
+		var foe := Hex.axial_to_offset(Hex.neighbor(axial, dir))
+		var dest := Hex.axial_to_offset(Hex.neighbor(Hex.neighbor(axial, dir), dir))
+		if not setup.map.in_bounds(foe) or not setup.map.in_bounds(dest):
+			continue
+		if _cell_taken(setup, foe) or _cell_taken(setup, dest):
+			continue
+		return [foe, dest]
+	return []
+
+
+func _find_bash_lane(setup: GameSetup, warrior: PlayerState.UnitState) -> Array:
+	for row in range(2, setup.map.height - 2):
+		for col in range(2, setup.map.width - 2):
+			var cell := Vector2i(col, row)
+			if cell == warrior.cell or _cell_taken(setup, cell):
+				continue
+			var lane := _bash_lane(setup, cell)
+			if lane.is_empty():
+				continue
+			warrior.cell = cell
+			return lane
+	return []
+
+
+func _cell_taken(setup: GameSetup, cell: Vector2i) -> bool:
+	if setup.city_at_cell(cell) != null:
+		return true
+	for player in setup.players:
+		for unit in player.units:
+			if unit.cell == cell:
+				return true
+	return false
 
 
 func _plain_step(setup: GameSetup, origin: Vector2i, reserved: Vector2i) -> Vector2i:
