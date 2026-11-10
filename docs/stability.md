@@ -6,11 +6,11 @@ Ticket 20. Five full games, back to back, with no crash and no soft-lock. There 
 
 `tests/soak_games.gd` is one process. It loads a temp config (`GameConfig.path_override`, `log.directory` under `/tmp/bebop-soak-logs`, not `user://logs`), opens the main menu, and presses New Game. Each later game is Restart on the Victory or Defeat screen. That is the same scene change, `MatchResult.latest` clear, and new log file as a player restarting.
 
-The scripted human is `tests/soak_policy.gd`. It uses the view handlers the smoke tests already call: left and right click, the spell buttons, Found City, Skip, Fortify, the build buttons, queue cancel and reorder, Cancel Place, End Turn, and the menu button. `tests/scene_driver.gd` holds those helpers. `tests/smoke_game.gd` and `tests/smoke_log.gd` use it too.
+The scripted human is `tests/soak_policy.gd`. It uses the view handlers the smoke tests already call: left and right click, the spell buttons, the ability bar (Strike, then a left click), Found, Skip, Fortify, the build buttons, queue cancel and reorder, Cancel Place, End Turn, and the menu button. `tests/scene_driver.gd` holds those helpers. `tests/smoke_game.gd` and `tests/smoke_log.gd` use it too.
 
 Three calls go to core because no handler exists for them:
 
-- The conquest game moves the two rival settlers onto plains beside the human warrior. Rivals never walk, and the start-distance gap is too far for a short hunt. The captures themselves are right-clicks.
+- The conquest game moves the two rival settlers onto plains beside the human warrior. Rivals never walk, and the start-distance gap is too far for a short hunt. The captures themselves are right-clicks. Attacks go through the ability bar.
 - Each score game founds one rival city at `city.min_distance` so a spell can target rival-owned land. The human cannot found a city for someone else.
 - Ticket 30, below.
 
