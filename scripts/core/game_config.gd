@@ -13,13 +13,14 @@ const SPELL_FIELDS: PackedStringArray = ["name", "shape", "radius", "length", "m
 const UNIT_IDS: PackedStringArray = ["scout", "warrior", "archer", "settler"]
 const UNIT_FIELDS: PackedStringArray = ["hp", "attack", "defense", "ap", "cost", "combatant", "population_cost", "min_city_size", "can_capture", "abilities"]
 ## Shipped abilities. The loader also accepts extra ids in a test config.
-const ABILITY_IDS: PackedStringArray = ["strike", "shoot", "shield_bash"]
+const ABILITY_IDS: PackedStringArray = ["strike", "shoot", "shield_bash", "volley"]
 const ABILITY_FIELDS: PackedStringArray = ["name", "target", "range", "area", "ap_cost", "cooldown", "effect", "damage_multiplier", "melee", "deals_counter", "push_distance"]
-## target "enemy" is one enemy unit or city. area "single" is that tile.
+## target "enemy" is one enemy unit or city. target "tile" is an aimed cell.
+## area "single" is that tile. area "radius" also requires "radius".
 ## effect "status", "move", and "terraform" parse and refuse until a later ticket.
 const ABILITY_EFFECTS: PackedStringArray = ["damage", "status", "move", "terraform"]
-const ABILITY_TARGETS: PackedStringArray = ["enemy"]
-const ABILITY_AREAS: PackedStringArray = ["single"]
+const ABILITY_TARGETS: PackedStringArray = ["enemy", "tile"]
+const ABILITY_AREAS: PackedStringArray = ["single", "radius"]
 
 var turn_limit: int
 var player_count: int
@@ -189,6 +190,7 @@ class AbilityStats extends RefCounted:
 	var melee: bool
 	var deals_counter: bool
 	var push_distance: int
+	var radius: int
 
 	func to_dict() -> Dictionary:
 		var body := {
@@ -200,6 +202,8 @@ class AbilityStats extends RefCounted:
 			"cooldown": cooldown,
 			"effect": effect,
 		}
+		if area == "radius":
+			body["radius"] = radius
 		if effect == "damage":
 			body["damage_multiplier"] = damage_multiplier
 			body["melee"] = melee
@@ -361,6 +365,8 @@ static func required_paths() -> PackedStringArray:
 	for ability_id in ABILITY_IDS:
 		for field in ABILITY_FIELDS:
 			paths.append("abilities.%s.%s" % [ability_id, field])
+	## radius is required only on a radius area. Volley is the shipped one.
+	paths.append("abilities.volley.radius")
 	for unit_id in UNIT_IDS:
 		for field in UNIT_FIELDS:
 			paths.append("units.%s.%s" % [unit_id, field])
@@ -516,8 +522,22 @@ static func ability_errors(data: Dictionary) -> PackedStringArray:
 				errors.append("game_config.json %s.effect is unknown" % prefix)
 		if body.has("target") and not (body["target"] is String and ABILITY_TARGETS.has(str(body["target"]))):
 			errors.append("game_config.json %s.target is unknown" % prefix)
-		if body.has("area") and not (body["area"] is String and ABILITY_AREAS.has(str(body["area"]))):
-			errors.append("game_config.json %s.area is unknown" % prefix)
+		var area := ""
+		if body.has("area"):
+			if body["area"] is String and ABILITY_AREAS.has(str(body["area"])):
+				area = str(body["area"])
+			else:
+				errors.append("game_config.json %s.area is unknown" % prefix)
+		if area == "radius":
+			if not body.has("radius"):
+				errors.append("game_config.json missing key: %s.radius" % prefix)
+			else:
+				var radius_value: Variant = body["radius"]
+				var radius_whole := radius_value is int or (radius_value is float and is_equal_approx(float(radius_value), round(float(radius_value))))
+				if not radius_whole:
+					errors.append("game_config.json %s.radius expected int" % prefix)
+				elif int(round(float(radius_value))) < 0:
+					errors.append("game_config.json %s.radius must be at least 0" % prefix)
 		if effect == "damage":
 			if not body.has("damage_multiplier"):
 				errors.append("game_config.json missing key: %s.damage_multiplier" % prefix)
@@ -829,6 +849,7 @@ func _read(data: Dictionary) -> void:
 		ability_stats.target = _string(data, ability_prefix + ".target")
 		ability_stats.range = _int(data, ability_prefix + ".range")
 		ability_stats.area = _string(data, ability_prefix + ".area")
+		ability_stats.radius = _int(data, ability_prefix + ".radius") if ability_stats.area == "radius" else 0
 		ability_stats.ap_cost = _int(data, ability_prefix + ".ap_cost")
 		ability_stats.cooldown = _int(data, ability_prefix + ".cooldown")
 		ability_stats.effect = _string(data, ability_prefix + ".effect")

@@ -853,8 +853,14 @@ func _combat_hover_text() -> String:
 
 func _preview_line(preview: Dictionary) -> String:
 	if bool(preview["ok"]):
+		var hits: Array = preview.get("hits", [])
 		var line := "Damage %d   Counter %d" % [int(preview["damage"]), int(preview["counter"])]
-		if bool(preview.get("push", false)):
+		if hits.size() > 1:
+			var parts := PackedStringArray()
+			for hit in hits:
+				parts.append(str(int((hit as Dictionary)["damage"])))
+			line = "Damage %s   Counter %d" % [", ".join(parts), int(preview["counter"])]
+		elif bool(preview.get("push", false)):
 			line += "   Push" if bool(preview.get("push_open", false)) else "   No push"
 		return line
 	return str(preview["reason"])
@@ -1274,9 +1280,13 @@ func _rebuild_ability_highlights() -> void:
 	var targets := setup.ability_targets(unit, _ability_id)
 	var area: Array[Vector2i] = []
 	var reason := ""
+	var skipped := {}
+	var preview := {}
 	if setup.map.in_bounds(_hovered):
 		area = setup.ability_area(unit, _ability_id, _hovered)
 		reason = setup.can_use_ability(unit, _ability_id, _hovered)
+		preview = setup.ability_preview(unit, _ability_id, _hovered)
+		skipped = preview.get("skipped", {})
 	var covered := {}
 	for cell in area:
 		covered[cell] = true
@@ -1285,16 +1295,14 @@ func _rebuild_ability_highlights() -> void:
 			continue
 		_add_highlight(cell, _ATTACK)
 	if not area.is_empty():
-		_paint_preview_tiles(area, _ATTACK, reason, {}, {})
-	if reason.is_empty() and setup.map.in_bounds(_hovered):
-		var preview := setup.ability_preview(unit, _ability_id, _hovered)
-		if bool(preview.get("push", false)):
-			var dest: Vector2i = preview["push_cell"]
-			if setup.map.in_bounds(dest) and dest != _hovered:
-				if bool(preview.get("push_open", false)):
-					_add_highlight(dest, _PLACE)
-				else:
-					_add_highlight(dest, _INVALID, 0.72)
+		_paint_preview_tiles(area, _ATTACK, reason, skipped, {})
+	if reason.is_empty() and bool(preview.get("push", false)):
+		var dest: Vector2i = preview["push_cell"]
+		if setup.map.in_bounds(dest) and dest != _hovered:
+			if bool(preview.get("push_open", false)):
+				_add_highlight(dest, _PLACE)
+			else:
+				_add_highlight(dest, _INVALID, 0.72)
 
 
 func _sector(cell: Vector2i, local: Vector2) -> int:

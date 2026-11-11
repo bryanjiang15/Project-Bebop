@@ -12,26 +12,27 @@ A unit stores current HP and max HP from `units.<type>.hp`. The settler's HP is 
 | --- | --- | --- | --- | --- | --- |
 | Scout | 50 | 5 | 5 | 3 | Strike |
 | Warrior | 100 | 20 | 20 | 2 | Strike, Shield Bash |
-| Archer | 100 | 25 | 12 | 2 | Shoot |
+| Archer | 100 | 25 | 12 | 2 | Shoot, Volley |
 | Settler | 0 | 0 | 0 | 2 | none |
 
 Attack is the strength used when this unit strikes. Defense is the strength used when this unit is struck. An archer shoots with 25 and is struck with 12. Reach comes from the ability, not from the unit.
 
 ## Abilities
 
-`abilities` is a top-level table. Each unit lists ids in `units.<type>.abilities`, in bar order. The shipped damage abilities are Strike, Shoot, and Shield Bash:
+`abilities` is a top-level table. Each unit lists ids in `units.<type>.abilities`, in bar order. The shipped damage abilities are Strike, Shoot, Shield Bash, and Volley:
 
 ```json
 "strike": {"name": "Strike", "target": "enemy", "range": 1, "area": "single", "ap_cost": 1, "cooldown": 0, "effect": "damage", "damage_multiplier": 1.0, "melee": true, "deals_counter": true, "push_distance": 0}
 "shoot": {"name": "Shoot", "target": "enemy", "range": 2, "area": "single", "ap_cost": 1, "cooldown": 0, "effect": "damage", "damage_multiplier": 1.0, "melee": false, "deals_counter": false, "push_distance": 0}
 "shield_bash": {"name": "Shield Bash", "target": "enemy", "range": 1, "area": "single", "ap_cost": 1, "cooldown": 2, "effect": "damage", "damage_multiplier": 0.5, "melee": true, "deals_counter": false, "push_distance": 1}
+"volley": {"name": "Volley", "target": "tile", "range": 2, "area": "radius", "radius": 1, "ap_cost": 1, "cooldown": 3, "effect": "damage", "damage_multiplier": 0.5, "melee": false, "deals_counter": false, "push_distance": 0}
 ```
 
-Allowed `effect` values are `damage`, `status`, `move`, and `terraform`. Allowed `target` is `enemy` (one enemy unit or city). Allowed `area` is `single`. `status`, `move`, and `terraform` parse and `use_ability` returns `Not available yet` without changing AP, HP, or land. A damage ability's strike strength is `units.<type>.attack * damage_multiplier`. At 1.0 the numbers match the old formula. The multiplier also scales the opposing strength in the counter. A damage ability also requires `deals_counter` and `push_distance`.
+Allowed `effect` values are `damage`, `status`, `move`, and `terraform`. Allowed `target` is `enemy` (one enemy unit or city) or `tile` (an aimed cell). Allowed `area` is `single` or `radius`. A `radius` area requires integer `radius`. Single abilities omit it. `status`, `move`, and `terraform` parse and `use_ability` returns `Not available yet` without changing AP, HP, or land. A damage ability's strike strength is `units.<type>.attack * damage_multiplier`. At 1.0 the numbers match the old formula. The multiplier also scales the opposing strength in the counter. A damage ability also requires `deals_counter` and `push_distance`.
 
-`ap_cost` is the AP that must remain before the ability is legal. Using it still sets AP to 0. `UnitState.ability_cooldowns` stores turns left. End Turn decrements each entry and drops it at 0, in the same gap as spell cooldowns. Strike and Shoot ship at cooldown 0. Shield Bash ships at cooldown 2.
+`ap_cost` is the AP that must remain before the ability is legal. Using it still sets AP to 0. `UnitState.ability_cooldowns` stores turns left. End Turn decrements each entry and drops it at 0, in the same gap as spell cooldowns. Strike and Shoot ship at cooldown 0. Shield Bash ships at cooldown 2. Volley ships at cooldown 3.
 
-`GameSetup.unit_abilities`, `can_use_ability`, `ability_preview`, and `use_ability` are the only attack path. `ability_preview` returns `{ok, reason, damage, counter, push, push_open, push_cell}`. An empty reason means the cell is legal. `push` is true when `push_distance` is greater than 0. `push_open` is true when the target is a unit and `push_cell` is free. `ability_block_reason` is the gate, then the cooldown, then AP, with no cell, and that string is the bar tooltip. `ability_targets` lists every cell where `can_use_ability` is empty. `ability_area` is the tiles a targeted cell would affect. `single` returns that one cell. The push hex is not part of the area. A radius is ticket 28.
+`GameSetup.unit_abilities`, `can_use_ability`, `ability_preview`, and `use_ability` are the only attack path. `ability_preview` returns `{ok, reason, damage, counter, push, push_open, push_cell, hits, skipped}`. An empty reason means the cell is legal. `hits` is one entry per unit that would take damage. `skipped` maps a tile to `friendly`, `city`, or `unseen`. `push` is true when `push_distance` is greater than 0. `push_open` is true when the target is a unit and `push_cell` is free. `ability_block_reason` is the gate, then the cooldown, then AP, with no cell, and that string is the bar tooltip. `ability_targets` lists every cell where `can_use_ability` is empty. For `single` those cells are enemy units and cities. For `radius` they are the legal aimed cells. `ability_area` is the tiles a targeted cell would affect. `single` returns that one cell. `radius` is `Hex.disk` around the aimed cell, including empty tiles, with off-map cells dropped. The push hex is not part of the area.
 
 ## Damage
 
@@ -59,6 +60,16 @@ A melee Shield Bash still rejects a settler with `Cannot attack a settler`.
 
 While Shield Bash is armed, the target tile stays on the shared preview path. An open destination is painted with the place tint. A blocked destination that is on the map is painted with the invalid tint at a smaller scale. The combat line is `Damage N   Counter 0   Push` when the destination is open, and `Damage N   Counter 0   No push` when it is blocked or the target is a city. A hit that will remove the unit can still read `Push`; the apply path does not move that unit. Strike and Shoot keep `Damage N   Counter N` because `push` is false.
 
+## Volley
+
+Volley is the archer's second ability. Shoot is unchanged: same damage, range 2, cooldown 0, no counter, and it still damages a city, including the `archers_can_zero_city_hp` floor. Volley is ranged, range 2, radius 1, costs 1 AP, and has cooldown 3. Strike strength is the archer's attack times `damage_multiplier` (0.5), so the formula is Shoot's at strength 12.5. That is weaker than Shoot. It spends the turn once: AP becomes 0, `acted` is set, and the cooldown is stored on that unit. Shoot on a fresh archer is not on that clock. A cooldown of 3 cast this turn reads `Cooldown 3`, then `Cooldown 2`, then `Cooldown 1`, then ready after the third End Turn.
+
+The player aims a tile, not an enemy body. The aimed cell has to be on the map, currently visible, and at hex distance 1 through `abilities.volley.range` (2). The archer's own tile is not a legal center. Tiles in the disk may sit outside that range. Only the center is checked. The center must be currently visible (`fog.unit_visible`). A center with no hittable enemy unit in the disk is refused with `No enemy in that area`. An off-map center is `Cannot target off the map`. A center outside vision is `Cannot see that tile`. Distance 0 or past the range is `Out of range`.
+
+`ability_area` is the radius-1 disk, seven tiles in the open. Every visible enemy unit in that disk takes the formula. Friendlies, including the archer, are not hit. Cities are not hit, friendly or enemy. That city rule is provisional: the design doc leaves enemy cities open (Q1 in `docs/agreed_defaults.md`). An unseen enemy is skipped with the same `fog.unit_visible` check Shoot uses. A lone enemy settler is removed the way Shoot removes one. A settler sharing a tile with a military unit is not a separate target. There is no counter and no push. The archer does not step onto a tile this emptied. Damage is computed for every hit before any HP changes, then applied, then `_finish_ability` runs once.
+
+While Volley is armed, the disk uses the shared preview path. A skipped tile is grey. The combat line is `Damage N   Counter 0` for one enemy and `Damage N, N   Counter 0` when several take damage. Each N is that defender's formula result, in disk order.
+
 A unit at 0 HP is removed. The attacker does not step onto a tile this emptied. A resolved ability sets the attacker's AP to 0 and `acted` true. A unit with less than `ap_cost` AP cannot use it. The reason is `Needs at least 1 AP`. The attack does not clear Fortify.
 
 ## Who can be attacked
@@ -78,6 +89,9 @@ Other reasons, shown in the unit panel and the hover tooltip:
 - `Cannot attack your own city`
 - `Cannot see that city`
 - `A unit defends that city`
+- `Cannot target off the map`
+- `Cannot see that tile`
+- `No enemy in that area`
 
 An unseen unit is not named. The view does not offer it as a target.
 
@@ -129,7 +143,7 @@ Skip (`skip_unit`, S), Fortify (`fortify_unit`, F), and Found are orders, not ab
 
 `%AbilityBar` sits at the bottom center while one of the human's units is selected, and it hides otherwise. `%AbilityApLabel` reads `AP current / max`. `%AbilityButtons` instances `scenes/ui/ability_button.tscn` for each ability in config order, then Skip, Fortify, and Found after the authored `OrderGap`. Found appears only when the unit is a settler. An ability button shows the name, the AP cost, the cooldown, and `Ready`, `Targeting`, or the reason from `ability_block_reason`. An order shows the name, `No AP` or `1 AP`, an en dash instead of a cooldown, and the order reason. A disabled button is grey and its tooltip is that reason. S, F, and B still call the same order handlers.
 
-Clicking a ready ability sets the target. Spell targeting and ability targeting cancel each other. Legal cells use the attack tint. Hovering paints `ability_area` with the shared spell preview: the hovered tile is red when `can_use_ability` returns a reason, and a skipped tile is grey. A push hex is painted from `ability_preview` on that same highlight path, not as a second area. `%CombatPreview` shows `Damage N   Counter N` from `ability_preview` only while an ability is targeted, and `Push` or `No push` when the ability pushes, including the reason when the hovered tile is illegal. With nothing targeted, a reachable capture still shows `Capture`, and the map shows the selected tile and the green reachable tiles only. Left-click a legal tile to call `use_ability`, then leave targeting. The unit stays selected. At 0 AP the ability and the AP orders are grey. Right-click or Esc cancels targeting and does not move. A right click with nothing targeted moves onto a highlighted tile, including a capture, and does not attack. A left click still selects.
+Clicking a ready ability sets the target. Spell targeting and ability targeting cancel each other. Legal cells use the attack tint. Hovering paints `ability_area` with the shared spell preview: the hovered tile is red when `can_use_ability` returns a reason, and a skipped tile is grey. A radius preview passes that skipped set into the same paint path. A push hex is painted from `ability_preview` on that same highlight path, not as a second area. `%CombatPreview` shows `Damage N   Counter N` from `ability_preview` only while an ability is targeted, `Damage N, N   Counter 0` when several units are hit, and `Push` or `No push` when the ability pushes, including the reason when the hovered tile is illegal. With nothing targeted, a reachable capture still shows `Capture`, and the map shows the selected tile and the green reachable tiles only. Left-click a legal tile to call `use_ability`, then leave targeting. The unit stays selected. At 0 AP the ability and the AP orders are grey. Right-click or Esc cancels targeting and does not move. A right click with nothing targeted moves onto a highlighted tile, including a capture, and does not attack. A left click still selects.
 
 `%VolcanicWarning` is the amber hazard line under the unit summary. HP, strength, AP, and the order stay on `%SelectionDetail`.
 

@@ -36,6 +36,8 @@ func _run() -> void:
 		return
 	if not _ability_bar(game):
 		return
+	if not _volley(game):
+		return
 	if not _move_settler(game):
 		return
 	if not _warrior_orders(game):
@@ -644,6 +646,238 @@ func _highlight_tint(game: Node, cell: Vector2i) -> Color:
 		if (child as Node2D).position.is_equal_approx(want):
 			return (child as CanvasItem).modulate
 	return Color(0, 0, 0, 0)
+
+
+func _volley(game: Node) -> bool:
+	var setup := game.get("setup") as GameSetup
+	var center := _free_disk(setup)
+	if center.x < 0:
+		print("FAIL no open disk for volley")
+		quit(1)
+		return false
+	var axial := Hex.offset_to_axial(center)
+	var stand := Hex.axial_to_offset(Hex.neighbor(axial, Hex.WEST))
+	var east := Hex.axial_to_offset(Hex.neighbor(axial, Hex.EAST))
+	var north := Hex.axial_to_offset(Hex.neighbor(axial, Hex.NORTHEAST))
+	var friendly_cell := Hex.axial_to_offset(Hex.neighbor(axial, Hex.SOUTHEAST))
+	var step := Hex.axial_to_offset(Hex.neighbor(axial, Hex.SOUTHWEST))
+	var saved := {}
+	var disk: Array[Vector2i] = []
+	for hex in Hex.disk(axial, 1):
+		var cell := Hex.axial_to_offset(hex)
+		saved[cell] = setup.map.land_at(cell)
+		setup.map.set_land(cell, "plains")
+		disk.append(cell)
+	var archer := setup.spawn_unit(0, "archer", stand)
+	if archer == null or disk.size() != 7:
+		print("FAIL volley disk ", disk.size())
+		quit(1)
+		return false
+	setup._refresh_fog()
+	game._refresh_board()
+	if not _select_unit_title(game, archer.cell, "Archer"):
+		return false
+	var names: PackedStringArray = []
+	for child in game.get_node("%AbilityButtons").get_children():
+		names.append(str(child.name))
+	var expected := PackedStringArray(["Ability_shoot", "Ability_volley", "OrderGap", "Order_skip", "Order_fortify"])
+	if names != expected:
+		print("FAIL archer bar ", names)
+		quit(1)
+		return false
+	var volley := _SceneDriver.ability_button(game, "volley")
+	var shoot := _SceneDriver.ability_button(game, "shoot")
+	if volley == null or shoot == null or volley.disabled or (volley.get_node("Column/NameLabel") as Label).text != "Volley" or (volley.get_node("Column/CooldownLabel") as Label).text != "3":
+		print("FAIL volley button")
+		quit(1)
+		return false
+	print("PASS archer bar Shoot then Volley")
+	var home := archer.cell
+	_click_cell(game, step, MOUSE_BUTTON_RIGHT)
+	if archer.cell != step:
+		print("FAIL right click did not move the archer to ", step, " still ", archer.cell)
+		quit(1)
+		return false
+	_click_cell(game, home, MOUSE_BUTTON_RIGHT)
+	if archer.cell != home:
+		print("FAIL archer did not step back")
+		quit(1)
+		return false
+	archer.ap = setup.config.unit("archer").ap
+	archer.acted = false
+	archer.order = ""
+	game._refresh_board()
+	print("PASS right click moves the archer")
+	var east_unit := setup.spawn_unit(1, "warrior", east)
+	var north_unit := setup.spawn_unit(1, "warrior", north)
+	var friend := setup.spawn_unit(0, "scout", friendly_cell)
+	if east_unit == null or north_unit == null or friend == null:
+		print("FAIL volley units did not spawn")
+		quit(1)
+		return false
+	game._refresh_board()
+	if not _select_unit_title(game, home, "Archer"):
+		return false
+	volley = _SceneDriver.ability_button(game, "volley")
+	volley.pressed.emit()
+	_hover_cell(game, center)
+	var preview: Dictionary = setup.ability_preview(archer, "volley", center)
+	var parts := PackedStringArray()
+	for hit in preview["hits"]:
+		parts.append(str(int((hit as Dictionary)["damage"])))
+	var line := "Damage %s   Counter 0" % ", ".join(parts)
+	var shown := (game.get_node("%CombatPreview") as Label).text
+	var attack := Color(0.95, 0.32, 0.28, 0.95)
+	var skipped := Color(0.78, 0.78, 0.82, 0.75)
+	if not bool(preview["ok"]) or (preview["hits"] as Array).size() != 2 or shown != line or shown != game._preview_line(preview):
+		print("FAIL volley preview '", shown, "' expected ", line)
+		quit(1)
+		return false
+	if not _highlight_tint(game, center).is_equal_approx(attack) or not _highlight_tint(game, friendly_cell).is_equal_approx(skipped):
+		print("FAIL volley tints center ", _highlight_tint(game, center), " friendly ", _highlight_tint(game, friendly_cell))
+		quit(1)
+		return false
+	var painted := 0
+	for cell in disk:
+		if _highlight_at(game, cell):
+			painted += 1
+	if painted != 7:
+		print("FAIL volley area highlights ", painted)
+		quit(1)
+		return false
+	print("PASS volley preview ", shown)
+	var east_hp := east_unit.hp
+	var north_hp := north_unit.hp
+	var friend_hp := friend.hp
+	var archer_hp := archer.hp
+	_click_cell(game, center, MOUSE_BUTTON_RIGHT)
+	if str(game.get("_ability_id")) != "" or east_unit.hp != east_hp or archer.cell != home:
+		print("FAIL right click while aiming should cancel")
+		quit(1)
+		return false
+	volley = _SceneDriver.ability_button(game, "volley")
+	volley.pressed.emit()
+	_hover_cell(game, center)
+	_click_cell(game, center)
+	var east_damage := int(_preview_hit_smoke(preview, east)["damage"])
+	var north_damage := int(_preview_hit_smoke(preview, north)["damage"])
+	if east_unit.hp != east_hp - east_damage or north_unit.hp != north_hp - north_damage or friend.hp != friend_hp or archer.hp != archer_hp or archer.cell != home or archer.ap != 0:
+		print("FAIL volley result east ", east_unit.hp, " north ", north_unit.hp, " friend ", friend.hp, " archer ", archer.hp, " ap ", archer.ap)
+		quit(1)
+		return false
+	volley = _SceneDriver.ability_button(game, "volley")
+	var ap_text := (game.get_node("%AbilityApLabel") as Label).text
+	if not volley.disabled or volley.tooltip_text != GameSetup.REASON_COOLDOWN or (volley.get_node("Column/CooldownLabel") as Label).text != "Cooldown 3" or ap_text != "AP 0 / 2":
+		print("FAIL volley cooldown '", (volley.get_node("Column/CooldownLabel") as Label).text, "' tip ", volley.tooltip_text, " ", ap_text)
+		quit(1)
+		return false
+	print("PASS volley from the bar")
+	var bow := _shoot_pair(setup, disk)
+	if bow.is_empty():
+		print("FAIL no tile for the shoot check")
+		quit(1)
+		return false
+	var bow_cell: Vector2i = bow[0]
+	var foe_cell: Vector2i = bow[1]
+	var bow_land := setup.map.land_at(bow_cell)
+	var foe_land := setup.map.land_at(foe_cell)
+	setup.map.set_land(bow_cell, "plains")
+	setup.map.set_land(foe_cell, "plains")
+	var shooter := setup.spawn_unit(0, "archer", bow_cell)
+	var target := setup.spawn_unit(1, "warrior", foe_cell)
+	if shooter == null or target == null:
+		print("FAIL shoot pair did not spawn")
+		quit(1)
+		return false
+	game._refresh_board()
+	if not _select_unit_title(game, bow_cell, "Archer"):
+		return false
+	shoot = _SceneDriver.ability_button(game, "shoot")
+	shoot.pressed.emit()
+	_hover_cell(game, foe_cell)
+	var shot: Dictionary = setup.ability_preview(shooter, "shoot", foe_cell)
+	var shot_line := "Damage %d   Counter 0" % int(shot["damage"])
+	shown = (game.get_node("%CombatPreview") as Label).text
+	var target_hp := target.hp
+	var shooter_hp := shooter.hp
+	if not bool(shot["ok"]) or int(shot["counter"]) != 0 or shown != shot_line:
+		print("FAIL shoot preview '", shown, "' expected ", shot_line)
+		quit(1)
+		return false
+	_click_cell(game, foe_cell)
+	if target.hp != target_hp - int(shot["damage"]) or shooter.hp != shooter_hp or shooter.cell != bow_cell:
+		print("FAIL shoot result target ", target.hp, " shooter ", shooter.hp)
+		quit(1)
+		return false
+	print("PASS shoot from the bar has no counter")
+	for unit in [archer, east_unit, north_unit, friend, shooter, target]:
+		if unit != null and unit.owner >= 0 and unit.owner < setup.players.size():
+			setup.players[unit.owner].units.erase(unit)
+	for cell in saved.keys():
+		setup.map.set_land(cell, saved[cell])
+	setup.map.set_land(bow_cell, bow_land)
+	setup.map.set_land(foe_cell, foe_land)
+	setup._refresh_fog()
+	game._refresh_board()
+	return true
+
+
+func _free_disk(setup: GameSetup) -> Vector2i:
+	for row in range(3, setup.map.height - 3):
+		for col in range(3, setup.map.width - 3):
+			var center := Vector2i(col, row)
+			var axial := Hex.offset_to_axial(center)
+			var open := true
+			for hex in Hex.disk(axial, 1):
+				var cell := Hex.axial_to_offset(hex)
+				if not setup.map.in_bounds(cell) or _cell_taken(setup, cell):
+					open = false
+					break
+			if open:
+				return center
+	return Vector2i(-1, -1)
+
+
+func _shoot_pair(setup: GameSetup, reserved: Array) -> Array:
+	var blocked := {}
+	for cell in reserved:
+		blocked[cell] = true
+	for row in range(2, setup.map.height - 2):
+		for col in range(2, setup.map.width - 2):
+			var origin := Vector2i(col, row)
+			var foe := _step_smoke(origin, Hex.EAST, 1)
+			if blocked.has(origin) or blocked.has(foe):
+				continue
+			if not setup.map.in_bounds(foe) or _cell_taken(setup, origin) or _cell_taken(setup, foe):
+				continue
+			return [origin, foe]
+	return []
+
+
+func _step_smoke(cell: Vector2i, direction: int, steps: int) -> Vector2i:
+	var axial := Hex.offset_to_axial(cell)
+	for _i in steps:
+		axial = Hex.neighbor(axial, direction)
+	return Hex.axial_to_offset(axial)
+
+
+func _preview_hit_smoke(preview: Dictionary, cell: Vector2i) -> Dictionary:
+	for item in preview["hits"]:
+		var hit := item as Dictionary
+		if hit["cell"] == cell:
+			return hit
+	return {}
+
+
+func _select_unit_title(game: Node, cell: Vector2i, title: String) -> bool:
+	_click_cell(game, cell)
+	if (game.get_node("%SelectionTitle") as Label).text != title:
+		_click_cell(game, cell)
+	if (game.get_node("%SelectionTitle") as Label).text != title:
+		print("FAIL selected ", (game.get_node("%SelectionTitle") as Label).text, " wanted ", title)
+		quit(1)
+		return false
+	return true
 
 
 func _move_settler(game: Node) -> bool:
