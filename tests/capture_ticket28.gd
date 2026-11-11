@@ -111,6 +111,10 @@ func _run() -> void:
 		await process_frame
 	if not await _save("/opt/cursor/artifacts/ticket28_volley_preview_skipped.png"):
 		return
+	# Full bars hide a 22-point hit. Leave both enemies low enough that the
+	# same shot turns the bars red, without changing the preview numbers.
+	east_unit.hp = 36
+	north_unit.hp = 36
 	var east_before := east_unit.hp
 	var north_before := north_unit.hp
 	var city_hp := founded.hp
@@ -140,11 +144,13 @@ func _run() -> void:
 		await process_frame
 	if not await _save("/opt/cursor/artifacts/ticket28_cooldown.png"):
 		return
-	var bow := _step(center, Hex.SOUTHEAST, 4)
-	var foe_cell := _step(bow, Hex.EAST, 1)
-	if not setup.map.in_bounds(bow) or not setup.map.in_bounds(foe_cell) or _occupied(setup, bow) or _occupied(setup, foe_cell):
-		bow = Vector2i(18, 12)
-		foe_cell = _step(bow, Hex.EAST, 1)
+	var pair := _distant_pair(setup, center)
+	if pair.is_empty():
+		print("FAIL no distant shoot pair")
+		quit(1)
+		return
+	var bow: Vector2i = pair[0]
+	var foe_cell: Vector2i = pair[1]
 	setup.map.set_land(bow, "plains")
 	setup.map.set_land(foe_cell, "plains")
 	var shooter := setup.spawn_unit(0, "archer", bow)
@@ -154,7 +160,7 @@ func _run() -> void:
 		quit(1)
 		return
 	game._refresh_board()
-	_frame(game, bow)
+	_frame(game, bow, 1.45)
 	if not _select_unit(game, bow, "Archer"):
 		return
 	var shoot := SceneDriver.ability_button(game, "shoot")
@@ -236,7 +242,7 @@ func _open_center(setup: GameSetup) -> Vector2i:
 		for col in range(4, setup.map.width - 4):
 			var center := Vector2i(col, row)
 			var open := true
-			for hex in Hex.disk(Hex.offset_to_axial(center), 1):
+			for hex in Hex.disk(Hex.offset_to_axial(center), 2):
 				var cell := Hex.axial_to_offset(hex)
 				if not setup.map.in_bounds(cell) or _occupied(setup, cell) or setup.city_at_cell(cell) != null:
 					open = false
@@ -244,6 +250,24 @@ func _open_center(setup: GameSetup) -> Vector2i:
 			if open:
 				return center
 	return Vector2i(-1, -1)
+
+
+func _distant_pair(setup: GameSetup, away: Vector2i) -> Array:
+	var away_axial := Hex.offset_to_axial(away)
+	for row in range(setup.map.height - 4, 3, -1):
+		for col in range(setup.map.width - 4, 3, -1):
+			var bow := Vector2i(col, row)
+			if Hex.distance(Hex.offset_to_axial(bow), away_axial) < 14:
+				continue
+			var foe := _step(bow, Hex.EAST, 1)
+			if not setup.map.in_bounds(foe):
+				continue
+			if _occupied(setup, bow) or _occupied(setup, foe):
+				continue
+			if setup.city_at_cell(bow) != null or setup.city_at_cell(foe) != null:
+				continue
+			return [bow, foe]
+	return []
 
 
 func _occupied(setup: GameSetup, cell: Vector2i) -> bool:
@@ -254,10 +278,10 @@ func _occupied(setup: GameSetup, cell: Vector2i) -> bool:
 	return false
 
 
-func _frame(game: Node, cell: Vector2i) -> void:
+func _frame(game: Node, cell: Vector2i, zoom: float = 1.05) -> void:
 	var map := game.get_node("%Map") as TileMapLayer
 	var camera := game.get_node("%Camera") as Camera2D
-	camera.zoom = Vector2(1.05, 1.05)
+	camera.zoom = Vector2(zoom, zoom)
 	camera.position = map.map_to_local(cell) + Vector2(0, 40)
 	game._clamp_camera()
 
