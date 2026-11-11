@@ -24,6 +24,7 @@ func _init() -> void:
 	_test_combat()
 	_test_ap_and_abilities()
 	_test_ability_targets()
+	_test_shield_bash()
 	_test_city_capture()
 	_test_spells()
 	_test_rival_land_updates()
@@ -90,10 +91,12 @@ func _test_config() -> void:
 	_ok(cfg.unit("archer").attack == 25 and cfg.unit("archer").defense == 12 and cfg.unit("archer").ap == 2, "archer")
 	_ok(cfg.unit("warrior").ap == 2 and cfg.unit("settler").ap == 2 and cfg.unit("scout").ap == 3, "AP is scout 3 and 2 for every other unit")
 	_ok(cfg.unit("settler").abilities.is_empty(), "the settler has no abilities")
-	_ok(cfg.unit("warrior").abilities.size() == 1 and cfg.unit("warrior").abilities[0] == "strike" and cfg.unit("scout").abilities[0] == "strike", "warrior and scout open with Strike")
+	_ok(cfg.unit("warrior").abilities.size() == 2 and cfg.unit("warrior").abilities[0] == "strike" and cfg.unit("warrior").abilities[1] == "shield_bash" and cfg.unit("scout").abilities.size() == 1 and cfg.unit("scout").abilities[0] == "strike", "warrior opens with Strike then Shield Bash, and the scout keeps Strike")
 	_ok(cfg.unit("archer").abilities.size() == 1 and cfg.unit("archer").abilities[0] == "shoot", "archer opens with Shoot")
-	_ok(cfg.ability("strike").ability_name == "Strike" and cfg.ability("strike").target == "enemy" and cfg.ability("strike").area == "single" and cfg.ability("strike").melee and cfg.ability("strike").range == 1 and cfg.ability("strike").ap_cost == 1 and cfg.ability("strike").cooldown == 0 and cfg.ability("strike").effect == "damage" and is_equal_approx(cfg.ability("strike").damage_multiplier, 1.0), "strike")
-	_ok(not cfg.ability("shoot").melee and cfg.ability("shoot").range == 2 and cfg.ability("shoot").ability_name == "Shoot" and cfg.ability("shoot").ap_cost == 1, "shoot")
+	_ok(cfg.ability("strike").ability_name == "Strike" and cfg.ability("strike").target == "enemy" and cfg.ability("strike").area == "single" and cfg.ability("strike").melee and cfg.ability("strike").range == 1 and cfg.ability("strike").ap_cost == 1 and cfg.ability("strike").cooldown == 0 and cfg.ability("strike").effect == "damage" and is_equal_approx(cfg.ability("strike").damage_multiplier, 1.0) and cfg.ability("strike").deals_counter and cfg.ability("strike").push_distance == 0, "strike")
+	_ok(not cfg.ability("shoot").melee and cfg.ability("shoot").range == 2 and cfg.ability("shoot").ability_name == "Shoot" and cfg.ability("shoot").ap_cost == 1 and not cfg.ability("shoot").deals_counter and cfg.ability("shoot").push_distance == 0, "shoot")
+	var bash := cfg.ability("shield_bash")
+	_ok(bash.ability_name == "Shield Bash" and bash.target == "enemy" and bash.area == "single" and bash.melee and bash.range == 1 and bash.ap_cost == 1 and bash.cooldown == 2 and bash.effect == "damage" and is_equal_approx(bash.damage_multiplier, 0.5) and not bash.deals_counter and bash.push_distance == 1, "shield bash")
 	_ok(GameConfig.ability_errors(raw).is_empty(), "the shipped ability table validates")
 	_ok(not cfg.unit("settler").combatant and cfg.unit("settler").population_cost == 1 and cfg.unit("settler").min_city_size == 2, "settler")
 	_ok(cfg.combat_base_damage == 30 and is_equal_approx(cfg.strength_exponent_base, 1.04), "damage formula")
@@ -163,6 +166,8 @@ func _test_config() -> void:
 		"abilities.strike.effect",
 		"abilities.strike.damage_multiplier",
 		"abilities.strike.melee",
+		"abilities.strike.deals_counter",
+		"abilities.strike.push_distance",
 		"abilities.shoot.name",
 		"abilities.shoot.target",
 		"abilities.shoot.range",
@@ -172,6 +177,19 @@ func _test_config() -> void:
 		"abilities.shoot.effect",
 		"abilities.shoot.damage_multiplier",
 		"abilities.shoot.melee",
+		"abilities.shoot.deals_counter",
+		"abilities.shoot.push_distance",
+		"abilities.shield_bash.name",
+		"abilities.shield_bash.target",
+		"abilities.shield_bash.range",
+		"abilities.shield_bash.area",
+		"abilities.shield_bash.ap_cost",
+		"abilities.shield_bash.cooldown",
+		"abilities.shield_bash.effect",
+		"abilities.shield_bash.damage_multiplier",
+		"abilities.shield_bash.melee",
+		"abilities.shield_bash.deals_counter",
+		"abilities.shield_bash.push_distance",
 		"units.scout.ap",
 		"units.scout.abilities",
 		"units.warrior.ap",
@@ -195,6 +213,14 @@ func _test_config() -> void:
 	var unknown_id: Dictionary = raw.duplicate(true)
 	(unknown_id["units"]["warrior"] as Dictionary)["abilities"] = ["nope"]
 	_ok(_error_has(GameConfig.ability_errors(unknown_id), "unknown id"), "an ability id that does not exist fails loudly")
+	_ok(_error_has(GameConfig.ability_errors(_without_key(raw, "abilities.shield_bash.deals_counter")), "deals_counter"), "missing deals_counter fails loudly")
+	_ok(_error_has(GameConfig.ability_errors(_without_key(raw, "abilities.shield_bash.push_distance")), "push_distance"), "missing push_distance fails loudly")
+	var bad_counter: Dictionary = raw.duplicate(true)
+	(bad_counter["abilities"]["strike"] as Dictionary)["deals_counter"] = "yes"
+	_ok(_error_has(GameConfig.ability_errors(bad_counter), "deals_counter"), "deals_counter must be a bool")
+	var bad_push: Dictionary = raw.duplicate(true)
+	(bad_push["abilities"]["shield_bash"] as Dictionary)["push_distance"] = "one"
+	_ok(_error_has(GameConfig.ability_errors(bad_push), "push_distance"), "push_distance must be an int")
 
 
 func _test_hex_neighbors() -> void:
@@ -1279,6 +1305,214 @@ func _test_ap_and_abilities() -> void:
 		var before_ap := user.ap
 		var before_hp := other.hp
 		_ok(hooked.use_ability(user, "hook", other.cell) == GameSetup.REASON_NOT_YET and user.ap == before_ap and not user.acted and other.hp == before_hp, "%s is refused and changes nothing" % effect)
+
+
+func _bash_pair(dir: int = Hex.EAST) -> Array:
+	var game := _blank_setup("plains")
+	var origin := Vector2i(8, 8)
+	var foe_cell := _step(origin, dir, 1)
+	var dest := _step(origin, dir, 2)
+	var warrior := game.spawn_unit(0, "warrior", origin)
+	var foe := game.spawn_unit(1, "warrior", foe_cell)
+	return [game, warrior, foe, dest, origin]
+
+
+func _test_shield_bash() -> void:
+	print("[shield bash]")
+	var cfg: GameConfig = GameConfig.load_file()
+	var sample: Array = _bash_pair()
+	var sample_game: GameSetup = sample[0]
+	var sample_warrior: PlayerState.UnitState = sample[1]
+	var sample_foe: PlayerState.UnitState = sample[2]
+	if sample_warrior == null or sample_foe == null:
+		_ok(false, "bash pair spawned")
+		return
+	var listed := sample_game.unit_abilities(sample_warrior)
+	_ok(listed.size() == 2 and listed[0] == "strike" and listed[1] == "shield_bash", "the warrior lists Strike then Shield Bash")
+	var scout := sample_game.spawn_unit(0, "scout", Vector2i(4, 4))
+	var scout_ids := sample_game.unit_abilities(scout)
+	_ok(scout != null and scout_ids.size() == 1 and scout_ids[0] == "strike", "the scout still has only Strike")
+	var strike := sample_game.ability_preview(sample_warrior, "strike", sample_foe.cell)
+	_ok(bool(strike["ok"]) and int(strike["damage"]) == 30 and int(strike["counter"]) == 30 and not bool(strike["push"]), "strike on open ground is still 30 and 30 and does not push")
+	sample_game.map.set_land(sample_foe.cell, "hills")
+	sample_foe.fortified = true
+	var stacked := sample_game.ability_preview(sample_warrior, "strike", sample_foe.cell)
+	var stacked_defense := Combat.defender_strength(cfg, 20.0, true, true)
+	_ok(int(stacked["damage"]) == Combat.damage(cfg, 20.0, stacked_defense) and int(stacked["counter"]) == Combat.damage(cfg, stacked_defense, 20.0), "strike on hills against a fortified defender is unchanged")
+	sample_foe.fortified = false
+	sample_game.map.set_land(sample_foe.cell, "plains")
+	var bash_hills_land := sample_game.map.land_at(sample_foe.cell)
+	sample_game.map.set_land(sample_foe.cell, "hills")
+	var bash_hills := sample_game.ability_preview(sample_warrior, "shield_bash", sample_foe.cell)
+	var hill_defense := Combat.defender_strength(cfg, 20.0, true, false)
+	_ok(bool(bash_hills["ok"]) and int(bash_hills["damage"]) == Combat.damage(cfg, 10.0, hill_defense) and int(bash_hills["counter"]) == 0, "shield bash on hills is strength 10 and no counter")
+	sample_game.map.set_land(sample_foe.cell, bash_hills_land)
+	for dir in 6:
+		var packed: Array = _bash_pair(dir)
+		var game: GameSetup = packed[0]
+		var warrior: PlayerState.UnitState = packed[1]
+		var foe: PlayerState.UnitState = packed[2]
+		var dest: Vector2i = packed[3]
+		var origin: Vector2i = packed[4]
+		if warrior == null or foe == null or not game.map.in_bounds(dest):
+			_ok(false, "push direction %d stays on the map" % dir)
+			return
+		var defense := 20.0
+		if dir == Hex.EAST:
+			foe.ap = 1
+			foe.fortified = true
+			foe.order = GameSetup.ORDER_FORTIFY
+			defense = Combat.defender_strength(cfg, 20.0, false, true)
+		var foe_hp := foe.hp
+		var warrior_hp := warrior.hp
+		var preview := game.ability_preview(warrior, "shield_bash", foe.cell)
+		var expected := Combat.damage(cfg, 10.0, defense)
+		_ok(bool(preview["ok"]) and int(preview["damage"]) == expected and int(preview["counter"]) == 0, "shield bash damage is strength 10, direction %d" % dir)
+		_ok(bool(preview["push"]) and bool(preview["push_open"]) and preview["push_cell"] == dest and game.push_destination(warrior, foe.cell) == dest, "push destination is directly away, direction %d" % dir)
+		_ok(game.use_ability(warrior, "shield_bash", foe.cell).is_empty(), "open bash resolves, direction %d" % dir)
+		_ok(foe.cell == dest and warrior.cell == origin, "the target is pushed and the warrior stays, direction %d" % dir)
+		_ok(foe.hp == foe_hp - expected and warrior.hp == warrior_hp, "HP matches the preview and there is no counter, direction %d" % dir)
+		if dir == Hex.EAST:
+			_ok(foe.ap == 1 and foe.fortified and foe.order == GameSetup.ORDER_FORTIFY, "a push does not spend AP or clear Fortify")
+	var blocked_water: Array = _bash_pair()
+	var water_game: GameSetup = blocked_water[0]
+	var water_warrior: PlayerState.UnitState = blocked_water[1]
+	var water_foe: PlayerState.UnitState = blocked_water[2]
+	var water_dest: Vector2i = blocked_water[3]
+	water_game.map.set_land(water_dest, "water")
+	var water_preview := water_game.ability_preview(water_warrior, "shield_bash", water_foe.cell)
+	var water_cell := water_foe.cell
+	var water_hp := water_foe.hp
+	_ok(water_game.push_blocked(water_dest) and bool(water_preview["push"]) and not bool(water_preview["push_open"]), "water blocks the push")
+	_ok(water_game.use_ability(water_warrior, "shield_bash", water_foe.cell).is_empty() and water_foe.cell == water_cell and water_foe.hp == water_hp - int(water_preview["damage"]) and water_warrior.cell == blocked_water[4], "a water push deals damage and does not move")
+	var occupied: Array = _bash_pair()
+	var occ_game: GameSetup = occupied[0]
+	var occ_warrior: PlayerState.UnitState = occupied[1]
+	var occ_foe: PlayerState.UnitState = occupied[2]
+	var occ_dest: Vector2i = occupied[3]
+	var blocker := occ_game.spawn_unit(0, "scout", occ_dest)
+	var occ_preview := occ_game.ability_preview(occ_warrior, "shield_bash", occ_foe.cell)
+	var occ_cell := occ_foe.cell
+	var occ_hp := occ_foe.hp
+	_ok(blocker != null and not bool(occ_preview["push_open"]), "an occupied hex blocks the push")
+	_ok(occ_game.use_ability(occ_warrior, "shield_bash", occ_foe.cell).is_empty() and occ_foe.cell == occ_cell and blocker.cell == occ_dest and occ_foe.hp == occ_hp - int(occ_preview["damage"]), "an occupied push deals damage and captures nothing")
+	var edge := Vector2i(0, 8)
+	var off_game := _blank_setup("plains")
+	var off_found := false
+	for dir in 6:
+		var inward := _step(edge, dir, 1)
+		if not off_game.map.in_bounds(inward):
+			continue
+		var away := (dir + 3) % 6
+		var off_dest := _step(edge, away, 1)
+		if off_game.map.in_bounds(off_dest):
+			continue
+		var off_warrior := off_game.spawn_unit(0, "warrior", inward)
+		var off_foe := off_game.spawn_unit(1, "warrior", edge)
+		var off_preview := off_game.ability_preview(off_warrior, "shield_bash", off_foe.cell)
+		var off_cell := off_foe.cell
+		var off_hp := off_foe.hp
+		_ok(off_game.push_blocked(off_dest) and not bool(off_preview["push_open"]), "an off-map hex blocks the push")
+		_ok(off_game.use_ability(off_warrior, "shield_bash", off_foe.cell).is_empty() and off_foe.cell == off_cell and off_foe.hp == off_hp - int(off_preview["damage"]) and off_warrior.cell == inward, "an off-map push deals damage and does not move")
+		off_found = true
+		break
+	_ok(off_found, "the map edge has an off-map push")
+	var city_block: Array = _bash_pair()
+	var city_game: GameSetup = city_block[0]
+	var city_warrior: PlayerState.UnitState = city_block[1]
+	var city_foe: PlayerState.UnitState = city_block[2]
+	var city_dest: Vector2i = city_block[3]
+	var founded := city_game.found_city(city_game.spawn_unit(1, "settler", city_dest))
+	founded.hp = 0
+	var city_owner := founded.player
+	var city_preview := city_game.ability_preview(city_warrior, "shield_bash", city_foe.cell)
+	var city_foe_cell := city_foe.cell
+	var city_foe_hp := city_foe.hp
+	_ok(founded != null and city_game.push_blocked(city_dest) and not bool(city_preview["push_open"]), "a 0 HP city blocks the push")
+	_ok(city_game.use_ability(city_warrior, "shield_bash", city_foe.cell).is_empty() and city_foe.cell == city_foe_cell and city_foe.hp == city_foe_hp - int(city_preview["damage"]), "a city behind the target does not move the target")
+	_ok(founded.player == city_owner and founded.hp == 0 and founded.cell == city_dest and city_warrior.cell == city_block[4], "a blocked push does not capture the city")
+	var settler_block: Array = _bash_pair()
+	var set_game: GameSetup = settler_block[0]
+	var set_warrior: PlayerState.UnitState = settler_block[1]
+	var set_foe: PlayerState.UnitState = settler_block[2]
+	var set_dest: Vector2i = settler_block[3]
+	var parked := set_game.spawn_unit(1, "settler", set_dest)
+	var set_preview := set_game.ability_preview(set_warrior, "shield_bash", set_foe.cell)
+	var set_cell := set_foe.cell
+	_ok(parked != null and not bool(set_preview["push_open"]), "a settler blocks the push")
+	_ok(set_game.use_ability(set_warrior, "shield_bash", set_foe.cell).is_empty() and set_foe.cell == set_cell and parked.cell == set_dest and parked.owner == 1, "a push onto a settler does not capture")
+	var built: Array = _bash_pair()
+	var built_game: GameSetup = built[0]
+	var built_warrior: PlayerState.UnitState = built[1]
+	var built_foe: PlayerState.UnitState = built[2]
+	var built_dest: Vector2i = built[3]
+	var mill_city := built_game.found_city(built_game.spawn_unit(0, "settler", Vector2i(2, 2)))
+	_place_building(mill_city, "lumber_mill", built_dest)
+	built_game.map.set_land(built_dest, "forest")
+	var built_preview := built_game.ability_preview(built_warrior, "shield_bash", built_foe.cell)
+	_ok(not built_game.push_blocked(built_dest) and bool(built_preview["push_open"]), "a building on passable land does not block")
+	_ok(built_game.use_ability(built_warrior, "shield_bash", built_foe.cell).is_empty() and built_foe.cell == built_dest and mill_city.buildings.size() == 1, "the push lands on the building")
+	for land_id in ["forest", "hills", "volcanic"]:
+		var land_pair: Array = _bash_pair()
+		var land_game: GameSetup = land_pair[0]
+		var land_dest: Vector2i = land_pair[3]
+		land_game.map.set_land(land_dest, land_id)
+		_ok(not land_game.push_blocked(land_dest), "%s does not block a push" % land_id)
+		var land_warrior: PlayerState.UnitState = land_pair[1]
+		var land_foe: PlayerState.UnitState = land_pair[2]
+		_ok(land_game.use_ability(land_warrior, "shield_bash", land_foe.cell).is_empty() and land_foe.cell == land_dest, "the push lands on %s" % land_id)
+	var fog_game := _blank_setup("plains")
+	fog_game.config.unit_vision = 1
+	var fog_origin := Vector2i(8, 8)
+	var fog_warrior := fog_game.spawn_unit(0, "warrior", fog_origin)
+	var fog_dest := _step(fog_origin, Hex.EAST, 2)
+	var fog_foe := fog_game.spawn_unit(1, "warrior", _step(fog_origin, Hex.EAST, 1))
+	_ok(fog_warrior != null and fog_foe != null and fog_game.fog.sight(0, fog_dest) == FogState.Sight.UNREVEALED and fog_game.fog.unit_visible(0, fog_foe.cell), "the destination is unrevealed and the target is visible")
+	_ok(bool(fog_game.ability_preview(fog_warrior, "shield_bash", fog_foe.cell)["push_open"]), "fog does not block the push")
+	_ok(fog_game.use_ability(fog_warrior, "shield_bash", fog_foe.cell).is_empty() and fog_foe.cell == fog_dest, "the push enters unrevealed land")
+	var lethal: Array = _bash_pair(Hex.SOUTHEAST)
+	var lethal_game: GameSetup = lethal[0]
+	var lethal_warrior: PlayerState.UnitState = lethal[1]
+	var lethal_foe: PlayerState.UnitState = lethal[2]
+	var lethal_dest: Vector2i = lethal[3]
+	var lethal_preview := lethal_game.ability_preview(lethal_warrior, "shield_bash", lethal_foe.cell)
+	lethal_foe.hp = int(lethal_preview["damage"])
+	var lethal_home: Vector2i = lethal_warrior.cell
+	_ok(lethal_game.use_ability(lethal_warrior, "shield_bash", lethal_foe.cell).is_empty(), "a lethal bash resolves")
+	_ok(not lethal_game.players[1].units.has(lethal_foe) and lethal_game._unit_at(lethal_dest) == null and lethal_warrior.cell == lethal_home, "a lethal bash removes the target and does not place it on the dest")
+	var siege := _blank_setup("plains")
+	var siege_city := siege.found_city(siege.spawn_unit(1, "settler", Vector2i(12, 6)))
+	var siege_side := _step(siege_city.cell, Hex.WEST, 1)
+	var sieger := siege.spawn_unit(0, "warrior", siege_side)
+	var city_defense := Combat.defender_strength(cfg, float(cfg.city_defense), false, false)
+	var city_strike := siege.ability_preview(sieger, "strike", siege_city.cell)
+	_ok(bool(city_strike["ok"]) and int(city_strike["damage"]) == Combat.damage(cfg, 20.0, city_defense) and int(city_strike["counter"]) > 0 and not bool(city_strike["push"]), "strike against a city still counters and does not push")
+	var city_bash := siege.ability_preview(sieger, "shield_bash", siege_city.cell)
+	var siege_hp := siege_city.hp
+	var sieger_hp := sieger.hp
+	_ok(bool(city_bash["ok"]) and int(city_bash["damage"]) == Combat.damage(cfg, 10.0, city_defense) and int(city_bash["counter"]) == 0 and bool(city_bash["push"]) and not bool(city_bash["push_open"]), "a bash on a city has no counter and no push")
+	_ok(siege.use_ability(sieger, "shield_bash", siege_city.cell).is_empty() and siege_city.cell == Vector2i(12, 6) and siege_city.hp == siege_hp - int(city_bash["damage"]) and sieger.hp == sieger_hp and sieger.cell == siege_side, "the city takes the damage and stays put")
+	var reject := _blank_setup("plains")
+	var reject_warrior := reject.spawn_unit(0, "warrior", Vector2i(8, 8))
+	var lone := reject.spawn_unit(1, "settler", _step(Vector2i(8, 8), Hex.EAST, 1))
+	var reject_ap := reject_warrior.ap
+	_ok(reject.can_use_ability(reject_warrior, "shield_bash", lone.cell) == GameSetup.REASON_ATTACK_SETTLER, "shield bash still rejects a settler")
+	_ok(reject.use_ability(reject_warrior, "shield_bash", lone.cell) == GameSetup.REASON_ATTACK_SETTLER and reject_warrior.ap == reject_ap and reject.players[1].units.has(lone), "a rejected settler bash spends nothing")
+	var cooled: Array = _bash_pair(Hex.WEST)
+	var cool_game: GameSetup = cooled[0]
+	var cool_warrior: PlayerState.UnitState = cooled[1]
+	var cool_foe: PlayerState.UnitState = cooled[2]
+	_ok(cool_game.use_ability(cool_warrior, "shield_bash", cool_foe.cell).is_empty() and cool_warrior.ap == 0 and cool_game.ability_cooldown_left(cool_warrior, "shield_bash") == 2, "bash sets AP to 0 and cooldown 2")
+	cool_warrior.ap = 2
+	_ok(cool_game.ability_block_reason(cool_warrior, "shield_bash") == GameSetup.REASON_COOLDOWN, "the button reason is On cooldown")
+	var other := cool_game.spawn_unit(0, "warrior", Vector2i(14, 8))
+	var dummy := cool_game.spawn_unit(1, "warrior", _step(Vector2i(14, 8), Hex.EAST, 1))
+	_ok(other != null and dummy != null and cool_game.use_ability(other, "strike", dummy.cell).is_empty() and other.hp == 70 and dummy.hp == 70, "another warrior can Strike for 30 and 30 while Shield Bash is cooling")
+	_ok(cool_game.ability_cooldown_left(cool_warrior, "shield_bash") == 2, "the other Strike does not clear this cooldown")
+	cool_game.end_turn()
+	_ok(cool_game.ability_cooldown_left(cool_warrior, "shield_bash") == 1, "one End Turn leaves cooldown 1")
+	cool_game.end_turn()
+	_ok(cool_game.ability_cooldown_left(cool_warrior, "shield_bash") == 0 and cool_game.ability_block_reason(cool_warrior, "shield_bash").is_empty(), "cooldown 2 is ready after two End Turns")
 
 
 func _test_ability_targets() -> void:

@@ -1,7 +1,7 @@
 [gd_scene format=3]
 
 [node name="AbilityButton" type="Button"]
-custom_minimum_size = Vector2(206, 168)
+custom_minimum_size = Vector2(160, 168)
 focus_mode = 0
 theme_override_font_sizes/font_size = 22
 text = ""
@@ -23,7 +23,7 @@ theme_override_constants/separation = 0
 [node name="NameLabel" type="Label" parent="Column"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.96, 0.95, 0.9, 1)
-theme_override_font_sizes/font_size = 26
+theme_override_font_sizes/font_size = 24
 text = "Ability"
 vertical_alignment = 1
 

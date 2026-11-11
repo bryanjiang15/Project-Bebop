@@ -13,8 +13,8 @@ const SPELL_FIELDS: PackedStringArray = ["name", "shape", "radius", "length", "m
 const UNIT_IDS: PackedStringArray = ["scout", "warrior", "archer", "settler"]
 const UNIT_FIELDS: PackedStringArray = ["hp", "attack", "defense", "ap", "cost", "combatant", "population_cost", "min_city_size", "can_capture", "abilities"]
 ## Shipped abilities. The loader also accepts extra ids in a test config.
-const ABILITY_IDS: PackedStringArray = ["strike", "shoot"]
-const ABILITY_FIELDS: PackedStringArray = ["name", "target", "range", "area", "ap_cost", "cooldown", "effect", "damage_multiplier", "melee"]
+const ABILITY_IDS: PackedStringArray = ["strike", "shoot", "shield_bash"]
+const ABILITY_FIELDS: PackedStringArray = ["name", "target", "range", "area", "ap_cost", "cooldown", "effect", "damage_multiplier", "melee", "deals_counter", "push_distance"]
 ## target "enemy" is one enemy unit or city. area "single" is that tile.
 ## effect "status", "move", and "terraform" parse and refuse until a later ticket.
 const ABILITY_EFFECTS: PackedStringArray = ["damage", "status", "move", "terraform"]
@@ -187,6 +187,8 @@ class AbilityStats extends RefCounted:
 	var effect: String
 	var damage_multiplier: float
 	var melee: bool
+	var deals_counter: bool
+	var push_distance: int
 
 	func to_dict() -> Dictionary:
 		var body := {
@@ -201,6 +203,8 @@ class AbilityStats extends RefCounted:
 		if effect == "damage":
 			body["damage_multiplier"] = damage_multiplier
 			body["melee"] = melee
+			body["deals_counter"] = deals_counter
+			body["push_distance"] = push_distance
 		return body
 
 
@@ -483,7 +487,8 @@ func unit(id: String) -> UnitStats:
 
 ## Loud problems that are not a missing shipped key: unknown effect, target, or
 ## area, a damage ability missing its effect fields, or a unit ability id that
-## is not in the table. from_dict push_errors and quits on a non-empty result.
+## is not in the table. Damage abilities require deals_counter and push_distance.
+## from_dict push_errors and quits on a non-empty result.
 static func ability_errors(data: Dictionary) -> PackedStringArray:
 	var errors := PackedStringArray()
 	if not data.has("abilities") or not (data["abilities"] is Dictionary):
@@ -522,6 +527,17 @@ static func ability_errors(data: Dictionary) -> PackedStringArray:
 				errors.append("game_config.json missing key: %s.melee" % prefix)
 			elif not (body["melee"] is bool):
 				errors.append("game_config.json %s.melee expected bool" % prefix)
+			if not body.has("deals_counter"):
+				errors.append("game_config.json missing key: %s.deals_counter" % prefix)
+			elif not (body["deals_counter"] is bool):
+				errors.append("game_config.json %s.deals_counter expected bool" % prefix)
+			if not body.has("push_distance"):
+				errors.append("game_config.json missing key: %s.push_distance" % prefix)
+			else:
+				var distance: Variant = body["push_distance"]
+				var whole := distance is int or (distance is float and is_equal_approx(float(distance), round(float(distance))))
+				if not whole:
+					errors.append("game_config.json %s.push_distance expected int" % prefix)
 		for field in ["range", "ap_cost", "cooldown"]:
 			if not body.has(field):
 				continue
@@ -819,9 +835,13 @@ func _read(data: Dictionary) -> void:
 		if ability_stats.effect == "damage":
 			ability_stats.damage_multiplier = _float(data, ability_prefix + ".damage_multiplier")
 			ability_stats.melee = _bool(data, ability_prefix + ".melee")
+			ability_stats.deals_counter = _bool(data, ability_prefix + ".deals_counter")
+			ability_stats.push_distance = _int(data, ability_prefix + ".push_distance")
 		else:
 			ability_stats.damage_multiplier = 1.0
 			ability_stats.melee = false
+			ability_stats.deals_counter = false
+			ability_stats.push_distance = 0
 		abilities[ability_id] = ability_stats
 	one_unit_per_tile = _bool(data, "units.one_unit_per_tile")
 	capture_lone_settler = _bool(data, "units.capture_lone_settler")
