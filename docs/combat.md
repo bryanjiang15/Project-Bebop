@@ -79,7 +79,7 @@ Sprint is `effect` `move`, `target` `self`, range 0, area `single`. It costs 1 A
 
 While `UnitState.movement_only` is set, every ability and every order is refused with `Can only move`. That includes a second Sprint, Skip, Fortify, and Found. `move_unit` still walks and still spends AP, including a capture of a lone settler. Scout `can_capture` stays false, so a 0 HP city is still not a capture. The flag lasts until End Turn, even after AP reaches 0. End Turn discards leftover bonus and refills AP to `units.scout.ap` (3). There is no auto-advance when AP hits 0.
 
-Arming Sprint previews `reachable_tiles` at the current AP plus `ap_bonus`, in the move highlight tint, without changing AP. Confirm by clicking the scout's tile or the Sprint button again. Another tile stays in targeting and does not move. Right-click or Esc cancels. After the confirm, `%AbilityApLabel` shows the real AP, which may read `AP 5 / 3`.
+Arming Sprint previews `reachable_tiles` at the current AP plus `ap_bonus`, in the move highlight tint, without changing AP. That reach stays when the cursor leaves the map. Confirm by clicking the scout's tile or the Sprint button again. Another tile stays in targeting and does not move. Right-click or Esc cancels. After the confirm, `%AbilityApLabel` shows the real AP, which may read `AP 5 / 3`.
 
 A unit at 0 HP is removed. The attacker does not step onto a tile this emptied. A resolved damage ability sets the attacker's AP to 0 and `acted` true. A move ability adds `ap_bonus` instead. A unit with less than `ap_cost` AP cannot use it. The reason is `Needs at least 1 AP`. The attack does not clear Fortify.
 

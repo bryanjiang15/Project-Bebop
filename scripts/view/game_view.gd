@@ -907,7 +907,8 @@ func _clear_hover() -> void:
 	_tooltip_panel.visible = false
 	if _combat_preview != null:
 		_combat_preview.text = ""
-	if _armed():
+	# A move ability's reach is not a hover preview. Leave it up when the cursor leaves the map.
+	if _armed() and (_ability_id.is_empty() or _config.ability(_ability_id).effect != "move"):
 		_clear(_moves)
 
 
@@ -1420,7 +1421,8 @@ func _rebuild_ability_buttons(unit: PlayerState.UnitState) -> void:
 		_add_order_button("skip", "Skip", "S", "No AP", setup.skip_reason(unit), _on_skip_pressed)
 	if _config.fortify_enabled:
 		_add_order_button("fortify", "Fortify", "F", "1 AP", setup.fortify_reason(unit), _on_fortify_pressed)
-	if setup.can_found(unit) != GameSetup.REASON_SETTLER:
+	# Found is a settler order. A movement-only reason must not put it on a scout.
+	if unit.unit_type == "settler":
 		_add_order_button("found", "Found", "B", "1 AP", setup.can_found(unit), _on_found_city_pressed)
 
 

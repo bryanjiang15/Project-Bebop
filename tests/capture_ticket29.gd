@@ -97,6 +97,10 @@ func _run() -> void:
 		print("FAIL after sprint ", ap_text, " ap ", scout.ap)
 		quit(1)
 		return
+	if game.get_node("%AbilityButtons").get_node_or_null("Order_found") != null:
+		print("FAIL Found appeared on the scout after Sprint")
+		quit(1)
+		return false
 	if not strike.disabled or strike.tooltip_text != GameSetup.REASON_MOVE_ONLY or not skip.disabled or skip.tooltip_text != GameSetup.REASON_MOVE_ONLY or not fortify.disabled or fortify.tooltip_text != GameSetup.REASON_MOVE_ONLY or not sprint.disabled or sprint.tooltip_text != GameSetup.REASON_MOVE_ONLY:
 		print("FAIL grey bar strike ", strike.tooltip_text, " skip ", skip.tooltip_text)
 		quit(1)

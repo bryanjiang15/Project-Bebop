@@ -1461,6 +1461,10 @@ func _sprint(game: Node) -> bool:
 	sprint = _SceneDriver.ability_button(game, "sprint")
 	var skip := _SceneDriver.order_button(game, "skip")
 	var fortify := _SceneDriver.order_button(game, "fortify")
+	if game.get_node("%AbilityButtons").get_node_or_null("Order_found") != null:
+		print("FAIL Found appeared on the scout after Sprint")
+		quit(1)
+		return false
 	if ap_text != "AP 5 / 3" or not strike.disabled or strike.tooltip_text != GameSetup.REASON_MOVE_ONLY or not skip.disabled or skip.tooltip_text != GameSetup.REASON_MOVE_ONLY or not fortify.disabled or fortify.tooltip_text != GameSetup.REASON_MOVE_ONLY or not sprint.disabled or sprint.tooltip_text != GameSetup.REASON_MOVE_ONLY:
 		print("FAIL after sprint ", ap_text, " strike ", strike.tooltip_text, " skip ", skip.tooltip_text, " fortify ", fortify.tooltip_text)
 		quit(1)
