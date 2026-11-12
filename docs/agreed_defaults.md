@@ -32,13 +32,11 @@ Notion is the source of truth for the prototype brief and the design doc. This f
     - D1. `area` may be `radius`. Integer `radius` is required only then (Volley: 1). Single abilities omit it. Missing `abilities.volley.radius` fails the load. Core branches on `area`, not on the ability id.
     - D2. Volley aims at a tile, so `target` is `tile`. Shoot stays `enemy`.
     - D3. Range is hex distance 1 through `abilities.volley.range` (2) to the aimed cell. The archer's own tile is not a legal center. Tiles in the disk may fall outside that range. The center must be currently visible.
-    - D4. A center with no hittable enemy unit is illegal. Volley cannot be spent on empty ground, friendlies, or cities alone.
-    - D5. The combat line is `Damage N   Counter 0` for one enemy and `Damage N, N   Counter 0` for several. Skipped tiles use the skipped tint.
+    - D4. A center with no hittable enemy unit or enemy city is illegal. Volley cannot be spent on empty ground or friendlies alone. A visible enemy city in the disk is a hit.
+    - D5. The combat line is `Damage N   Counter 0` for one hit and `Damage N, N   Counter 0` for several, including an enemy city's damage. Skipped tiles use the skipped tint.
     - D6. The bar's existing cooldown line is the only clock. After Volley it reads `Cooldown 3`, then `Cooldown 2`, then `Cooldown 1`, then ready.
 
-## Open question
-
-Q1. The design doc (v0.4.3 open questions) and the brief (section 9) say Bryan decided "enemies only", but whether enemy cities count is ambiguous and remains open; the tunables table does not decide it. This is not a default. Provisional behavior, in `_radius_hits`, so it can be flipped later: Volley damages enemy units only, and does not damage any city in the radius, friendly or enemy. Shoot still damages cities as a single-target shot.
+Bryan decided that Volley damages enemy cities in its radius. The damage is the same half-of-Shoot formula, counter 0, and the city does not move. Friendly units and friendly cities stay skipped. That decision lives in `_radius_hits`.
 
 Also: volcanic damage uses the brief's flat value, not the design doc's chance-based proposal.
 

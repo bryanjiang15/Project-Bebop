@@ -365,7 +365,7 @@ func use_ability(unit: PlayerState.UnitState, ability_id: String, cell: Vector2i
 		return reason
 	var ability := config.ability(ability_id)
 	if ability.area == "radius":
-		_apply_radius_hits(unit, plan["hits"])
+		_apply_radius_hits(unit, ability, plan["hits"])
 	else:
 		var preview := {
 			"damage": int(plan["damage"]),
@@ -587,28 +587,49 @@ func _radius_plan(unit: PlayerState.UnitState, ability: GameConfig.AbilityStats,
 	return plan
 
 
-## Enemy units in the disk. Damage is read from the board as it is now.
-## Cities are not hit, friendly or enemy. Q1 is open: enemy cities stay out
-## until that question is decided. Shoot still hits a city on its own.
+## Enemy units and enemy cities in the disk. Damage is read from the board as it is now.
+## A military unit on a city tile is the hit, and that city is not also hit.
+## A friendly city is not hit. An unseen enemy city is not hit.
 func _radius_hits(unit: PlayerState.UnitState, ability: GameConfig.AbilityStats, center: Vector2i) -> Array[Dictionary]:
 	var hits: Array[Dictionary] = []
 	for cell in ability_area(unit, ability.id, center):
 		var enemy := enemy_at(unit, cell)
-		if enemy == null:
+		var city := city_at_cell(cell)
+		var hostile_city := city != null and city.player != unit.owner
+		if enemy != null and config.unit(enemy.unit_type).combatant:
+			if _unit_target_reason(unit, ability, enemy).is_empty():
+				hits.append(_radius_unit_hit(unit, ability, enemy, cell))
 			continue
-		if not _unit_target_reason(unit, ability, enemy).is_empty():
+		if hostile_city and _city_target_reason(unit, city).is_empty():
+			var damage := _city_blow(unit, ability, city)
+			var counter := 0
+			if _ability_counters(ability):
+				counter = _city_counter(city, unit, ability)
+			hits.append({
+				"cell": cell,
+				"unit": null,
+				"city": city,
+				"damage": damage,
+				"counter": counter,
+			})
 			continue
-		var damage := _blow(unit, ability, enemy)
-		var counter := 0
-		if _ability_counters(ability):
-			counter = _counter(enemy, unit, ability)
-		hits.append({
-			"cell": cell,
-			"unit": enemy,
-			"damage": damage,
-			"counter": counter,
-		})
+		if enemy != null and _unit_target_reason(unit, ability, enemy).is_empty():
+			hits.append(_radius_unit_hit(unit, ability, enemy, cell))
 	return hits
+
+
+func _radius_unit_hit(unit: PlayerState.UnitState, ability: GameConfig.AbilityStats, enemy: PlayerState.UnitState, cell: Vector2i) -> Dictionary:
+	var damage := _blow(unit, ability, enemy)
+	var counter := 0
+	if _ability_counters(ability):
+		counter = _counter(enemy, unit, ability)
+	return {
+		"cell": cell,
+		"unit": enemy,
+		"city": null,
+		"damage": damage,
+		"counter": counter,
+	}
 
 
 func _radius_skipped(unit: PlayerState.UnitState, ability: GameConfig.AbilityStats, center: Vector2i, hits: Array[Dictionary]) -> Dictionary:
@@ -625,15 +646,21 @@ func _radius_skipped(unit: PlayerState.UnitState, ability: GameConfig.AbilitySta
 	return skipped
 
 
-## friendly, unseen, or city. An empty tile is not skipped.
+## friendly, unseen, or a friendly city. An empty tile is not skipped.
+## A visible enemy city is a hit, so it is not listed here.
 func _radius_skip_reason(unit: PlayerState.UnitState, cell: Vector2i) -> String:
 	if _friendly_at(unit, cell) != null:
 		return "friendly"
 	var enemy := enemy_at(unit, cell)
 	if enemy != null and (fog == null or not fog.unit_visible(unit.owner, enemy.cell)):
 		return "unseen"
-	if city_at_cell(cell) != null:
+	var city := city_at_cell(cell)
+	if city == null:
+		return ""
+	if city.player == unit.owner:
 		return "city"
+	if fog == null or not fog.unit_visible(unit.owner, city.cell):
+		return "unseen"
 	return ""
 
 
@@ -720,12 +747,16 @@ func _spend_unit_hit(attacker: PlayerState.UnitState, defender: PlayerState.Unit
 
 
 ## Every hit uses the damage stored on the plan, which was read before any HP changed.
-## Cities are not in that list. The attacker does not step onto an emptied tile.
-func _apply_radius_hits(attacker: PlayerState.UnitState, hits: Array) -> void:
+## An enemy city takes that damage and stays on its tile. The attacker does not step onto an emptied tile.
+func _apply_radius_hits(attacker: PlayerState.UnitState, ability: GameConfig.AbilityStats, hits: Array) -> void:
 	var removed: Array[int] = []
 	for item in hits:
 		var hit := item as Dictionary
-		var defender := hit["unit"] as PlayerState.UnitState
+		var city := hit.get("city") as MapCity
+		if city != null:
+			_spend_city_hit(attacker, ability, city, int(hit["damage"]), int(hit["counter"]))
+			continue
+		var defender := hit.get("unit") as PlayerState.UnitState
 		if defender == null:
 			continue
 		var owner := defender.owner
@@ -743,19 +774,24 @@ func _apply_radius_hits(attacker: PlayerState.UnitState, hits: Array) -> void:
 
 
 func _apply_city_hit(attacker: PlayerState.UnitState, ability: GameConfig.AbilityStats, city: MapCity, preview: Dictionary) -> void:
-	var next := maxi(0, city.hp - int(preview["damage"]))
-	if not ability.melee and not config.archers_can_zero_city_hp and city.hp > 0:
-		next = maxi(1, next)
-	city.hp = next
-	city.attacked = true
+	_spend_city_hit(attacker, ability, city, int(preview["damage"]), int(preview["counter"]))
 	var attacker_owner := attacker.owner
-	attacker.hp = maxi(0, attacker.hp - int(preview["counter"]))
 	var attacker_removed := attacker.hp <= 0
 	_remove_if_dead(attacker)
 	_refresh_fog()
 	if attacker_removed:
 		_eliminate_if_out(attacker_owner)
 		_finish_elimination_check()
+
+
+## HP only. The city stays on its tile. The caller refreshes fog.
+func _spend_city_hit(attacker: PlayerState.UnitState, ability: GameConfig.AbilityStats, city: MapCity, damage: int, counter: int) -> void:
+	var next := maxi(0, city.hp - damage)
+	if not ability.melee and not config.archers_can_zero_city_hp and city.hp > 0:
+		next = maxi(1, next)
+	city.hp = next
+	city.attacked = true
+	attacker.hp = maxi(0, attacker.hp - counter)
 
 
 ## ap_cost was already checked. Using the ability spends the rest of the turn.

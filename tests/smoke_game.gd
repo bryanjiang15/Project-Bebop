@@ -711,7 +711,9 @@ func _volley(game: Node) -> bool:
 	var east_unit := setup.spawn_unit(1, "warrior", east)
 	var north_unit := setup.spawn_unit(1, "warrior", north)
 	var friend := setup.spawn_unit(0, "scout", friendly_cell)
-	if east_unit == null or north_unit == null or friend == null:
+	var city_cell := Hex.axial_to_offset(Hex.neighbor(axial, Hex.NORTHWEST))
+	var town := setup.found_city(setup.spawn_unit(1, "settler", city_cell))
+	if east_unit == null or north_unit == null or friend == null or town == null:
 		print("FAIL volley units did not spawn")
 		quit(1)
 		return false
@@ -729,12 +731,13 @@ func _volley(game: Node) -> bool:
 	var shown := (game.get_node("%CombatPreview") as Label).text
 	var attack := Color(0.95, 0.32, 0.28, 0.95)
 	var skipped := Color(0.78, 0.78, 0.82, 0.75)
-	if not bool(preview["ok"]) or (preview["hits"] as Array).size() != 2 or shown != line or shown != game._preview_line(preview):
+	var city_hit := _preview_hit_smoke(preview, city_cell)
+	if not bool(preview["ok"]) or (preview["hits"] as Array).size() != 3 or city_hit.is_empty() or int(city_hit["counter"]) != 0 or shown != line or shown != game._preview_line(preview) or not shown.contains(str(int(city_hit["damage"]))):
 		print("FAIL volley preview '", shown, "' expected ", line)
 		quit(1)
 		return false
-	if not _highlight_tint(game, center).is_equal_approx(attack) or not _highlight_tint(game, friendly_cell).is_equal_approx(skipped):
-		print("FAIL volley tints center ", _highlight_tint(game, center), " friendly ", _highlight_tint(game, friendly_cell))
+	if not _highlight_tint(game, center).is_equal_approx(attack) or not _highlight_tint(game, friendly_cell).is_equal_approx(skipped) or not _highlight_tint(game, city_cell).is_equal_approx(attack):
+		print("FAIL volley tints center ", _highlight_tint(game, center), " friendly ", _highlight_tint(game, friendly_cell), " city ", _highlight_tint(game, city_cell))
 		quit(1)
 		return false
 	var painted := 0
@@ -750,6 +753,8 @@ func _volley(game: Node) -> bool:
 	var north_hp := north_unit.hp
 	var friend_hp := friend.hp
 	var archer_hp := archer.hp
+	var city_hp := town.hp
+	var city_where := town.cell
 	_click_cell(game, center, MOUSE_BUTTON_RIGHT)
 	if str(game.get("_ability_id")) != "" or east_unit.hp != east_hp or archer.cell != home:
 		print("FAIL right click while aiming should cancel")
@@ -761,8 +766,9 @@ func _volley(game: Node) -> bool:
 	_click_cell(game, center)
 	var east_damage := int(_preview_hit_smoke(preview, east)["damage"])
 	var north_damage := int(_preview_hit_smoke(preview, north)["damage"])
-	if east_unit.hp != east_hp - east_damage or north_unit.hp != north_hp - north_damage or friend.hp != friend_hp or archer.hp != archer_hp or archer.cell != home or archer.ap != 0:
-		print("FAIL volley result east ", east_unit.hp, " north ", north_unit.hp, " friend ", friend.hp, " archer ", archer.hp, " ap ", archer.ap)
+	var city_damage := int(_preview_hit_smoke(preview, city_cell)["damage"])
+	if east_unit.hp != east_hp - east_damage or north_unit.hp != north_hp - north_damage or town.hp != city_hp - city_damage or town.cell != city_where or friend.hp != friend_hp or archer.hp != archer_hp or archer.cell != home or archer.ap != 0:
+		print("FAIL volley result east ", east_unit.hp, " north ", north_unit.hp, " city ", town.hp, " friend ", friend.hp, " archer ", archer.hp, " ap ", archer.ap)
 		quit(1)
 		return false
 	volley = _SceneDriver.ability_button(game, "volley")
@@ -813,6 +819,7 @@ func _volley(game: Node) -> bool:
 	for unit in [archer, east_unit, north_unit, friend, shooter, target]:
 		if unit != null and unit.owner >= 0 and unit.owner < setup.players.size():
 			setup.players[unit.owner].units.erase(unit)
+	_drop_city(setup, town)
 	for cell in saved.keys():
 		setup.map.set_land(cell, saved[cell])
 	setup.map.set_land(bow_cell, bow_land)
@@ -820,6 +827,18 @@ func _volley(game: Node) -> bool:
 	setup._refresh_fog()
 	game._refresh_board()
 	return true
+
+
+func _drop_city(setup: GameSetup, city: MapCity) -> void:
+	if city == null:
+		return
+	setup.cities.erase(city)
+	for hex in Hex.disk(Hex.offset_to_axial(city.cell), city.radius):
+		var cell := Hex.axial_to_offset(hex)
+		if int(setup._city_tiles.get(cell, -1)) != city.id:
+			continue
+		setup._owners.erase(cell)
+		setup._city_tiles.erase(cell)
 
 
 func _free_disk(setup: GameSetup) -> Vector2i:

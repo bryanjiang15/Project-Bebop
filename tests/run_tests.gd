@@ -1644,9 +1644,13 @@ func _test_volley() -> void:
 	city_game._refresh_fog()
 	var enemy_preview := city_game.ability_preview(siege, "volley", enemy_aim)
 	var enemy_city_hp := enemy_city.hp
+	var enemy_city_cell := enemy_city.cell
 	var scout_hp := enemy_unit.hp
-	_ok(siege != null and bool(enemy_preview["ok"]) and str(enemy_preview["skipped"][enemy_city.cell]) == "city" and _preview_hit(enemy_preview, enemy_city.cell).is_empty(), "an enemy city in the disk is not a hit")
-	_ok(city_game.use_ability(siege, "volley", enemy_aim).is_empty() and enemy_city.hp == enemy_city_hp and not enemy_city.attacked and enemy_unit.hp == scout_hp - int(_preview_hit(enemy_preview, enemy_unit.cell)["damage"]), "volley damages the enemy unit and not the enemy city")
+	var city_defense := Combat.defender_strength(cfg, float(cfg.city_defense), false, false)
+	var city_damage := Combat.damage(cfg, 12.5, city_defense)
+	var city_hit := _preview_hit(enemy_preview, enemy_city.cell)
+	_ok(siege != null and bool(enemy_preview["ok"]) and not city_hit.is_empty() and int(city_hit["damage"]) == city_damage and int(city_hit["counter"]) == 0 and not enemy_preview["skipped"].has(enemy_city.cell), "an enemy city in the disk is a hit at half of Shoot")
+	_ok(city_game.use_ability(siege, "volley", enemy_aim).is_empty() and enemy_city.hp == enemy_city_hp - city_damage and enemy_city.cell == enemy_city_cell and enemy_city.attacked and enemy_unit.hp == scout_hp - int(_preview_hit(enemy_preview, enemy_unit.cell)["damage"]), "volley damages the enemy city and the enemy unit, and the city stays put")
 	var shooter := city_game.spawn_unit(0, "archer", _step(enemy_city.cell, Hex.EAST, 2))
 	city_game._refresh_fog()
 	var city_shot := city_game.ability_preview(shooter, "shoot", enemy_city.cell)
@@ -1658,6 +1662,42 @@ func _test_volley() -> void:
 	shooter.acted = false
 	shooter.used_ability = false
 	_ok(city_game.use_ability(shooter, "shoot", enemy_city.cell).is_empty() and enemy_city.hp == 1, "Shoot still leaves 1 HP when archers cannot zero a city")
+	var alone := _blank_setup("plains")
+	var alone_archer := alone.spawn_unit(0, "archer", Vector2i(10, 10))
+	var alone_site := _step(Vector2i(10, 10), Hex.EAST, 2)
+	var alone_city := alone.found_city(alone.spawn_unit(1, "settler", alone_site))
+	alone._refresh_fog()
+	var alone_preview := alone.ability_preview(alone_archer, "volley", alone_site)
+	var alone_hit := _preview_hit(alone_preview, alone_site)
+	var alone_hp := alone_city.hp if alone_city != null else 0
+	_ok(alone_city != null and bool(alone_preview["ok"]) and (alone_preview["hits"] as Array).size() == 1 and int(alone_hit["damage"]) == city_damage and int(alone_preview["counter"]) == 0, "an enemy city alone is a legal volley")
+	_ok(alone.use_ability(alone_archer, "volley", alone_site).is_empty() and alone_city.hp == alone_hp - city_damage and alone_city.cell == alone_site and alone_city.attacked, "volley on a city alone deals the preview damage and does not move it")
+	alone.config.archers_can_zero_city_hp = false
+	alone_city.hp = 8
+	var finisher := alone.spawn_unit(0, "archer", _step(alone_site, Hex.WEST, 1))
+	alone._refresh_fog()
+	_ok(finisher != null and alone.use_ability(finisher, "volley", alone_site).is_empty() and alone_city.hp == 1 and alone_city.cell == alone_site, "volley leaves 1 HP when archers cannot zero a city")
+	var held := _blank_setup("plains")
+	var held_archer := held.spawn_unit(0, "archer", Vector2i(12, 12))
+	var held_site := _step(Vector2i(12, 12), Hex.EAST, 2)
+	var held_city := held.found_city(held.spawn_unit(1, "settler", held_site))
+	var guard := held.spawn_unit(1, "warrior", held_site)
+	held._refresh_fog()
+	var held_preview := held.ability_preview(held_archer, "volley", held_site)
+	var held_hp := held_city.hp if held_city != null else 0
+	_ok(guard != null and bool(held_preview["ok"]) and _preview_hit(held_preview, held_site).is_empty() == false and held_preview["hits"].size() == 1 and int(_preview_hit(held_preview, held_site)["damage"]) == Combat.damage(cfg, 12.5, 20.0), "a unit on the city is the hit")
+	_ok(held.use_ability(held_archer, "volley", held_site).is_empty() and held_city.hp == held_hp and not held_city.attacked and held_city.cell == held_site and guard.hp == 100 - Combat.damage(cfg, 12.5, 20.0), "volley does not also damage the city under that unit")
+	var fog_city := _blank_setup("plains")
+	var watcher := fog_city.spawn_unit(0, "archer", Vector2i(6, 8))
+	var far_site := _step(Vector2i(6, 8), Hex.EAST, 3)
+	var far_town := fog_city.found_city(fog_city.spawn_unit(1, "settler", far_site))
+	var near_guard := fog_city.spawn_unit(1, "warrior", _step(Vector2i(6, 8), Hex.EAST, 1))
+	var mid := _step(Vector2i(6, 8), Hex.EAST, 2)
+	fog_city._refresh_fog()
+	var far_hp := far_town.hp if far_town != null else 0
+	var fog_preview := fog_city.ability_preview(watcher, "volley", mid)
+	_ok(far_town != null and near_guard != null and not fog_city.fog.unit_visible(0, far_site) and bool(fog_preview["ok"]) and _preview_hit(fog_preview, far_site).is_empty() and str(fog_preview["skipped"][far_site]) == "unseen", "an unseen enemy city is skipped")
+	_ok(fog_city.use_ability(watcher, "volley", mid).is_empty() and far_town.hp == far_hp and not far_town.attacked and near_guard.hp < 100, "volley does not damage an unseen enemy city")
 	var hidden_game := _blank_setup("plains")
 	var hider := hidden_game.spawn_unit(0, "archer", Vector2i(6, 6))
 	var hidden_center := _step(Vector2i(6, 6), Hex.EAST, 2)

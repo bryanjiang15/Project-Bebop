@@ -66,7 +66,8 @@ func _run() -> void:
 		return
 	var east_unit := setup.spawn_unit(1, "warrior", east)
 	var north_unit := setup.spawn_unit(1, "warrior", north)
-	if east_unit == null or north_unit == null:
+	var founded := setup.found_city(setup.spawn_unit(1, "settler", city_cell))
+	if east_unit == null or north_unit == null or founded == null:
 		print("FAIL enemies did not spawn")
 		quit(1)
 		return
@@ -80,8 +81,16 @@ func _run() -> void:
 	var preview: Dictionary = setup.ability_preview(archer, "volley", center)
 	var shown := (game.get_node("%CombatPreview") as Label).text
 	var line: String = game._preview_line(preview)
-	if not bool(preview["ok"]) or (preview["hits"] as Array).size() != 2 or shown != line or not shown.contains(", ") or not shown.ends_with("Counter 0"):
+	var city_hit: Dictionary = {}
+	for hit in preview["hits"]:
+		if (hit as Dictionary)["cell"] == city_cell:
+			city_hit = hit
+	if not bool(preview["ok"]) or (preview["hits"] as Array).size() != 3 or city_hit.is_empty() or int(city_hit["counter"]) != 0 or shown != line or not shown.contains(", ") or not shown.contains(str(int(city_hit["damage"]))) or not shown.ends_with("Counter 0"):
 		print("FAIL volley preview '", shown, "' expected '", line, "'")
+		quit(1)
+		return
+	if not _highlight_is(game, city_cell, Color(0.95, 0.32, 0.28, 0.95)):
+		print("FAIL enemy city is not a hit highlight")
 		quit(1)
 		return
 	for _frame in 3:
@@ -89,8 +98,7 @@ func _run() -> void:
 	if not await _save("/opt/cursor/artifacts/ticket28_volley_preview.png"):
 		return
 	var friend := setup.spawn_unit(0, "scout", south)
-	var founded := setup.found_city(setup.spawn_unit(1, "settler", city_cell))
-	if friend == null or founded == null:
+	if friend == null:
 		print("FAIL skip fixtures")
 		quit(1)
 		return
@@ -99,11 +107,11 @@ func _run() -> void:
 	preview = setup.ability_preview(archer, "volley", center)
 	shown = (game.get_node("%CombatPreview") as Label).text
 	line = game._preview_line(preview)
-	if shown != line or str(preview["skipped"].get(south, "")) != "friendly" or str(preview["skipped"].get(city_cell, "")) != "city":
+	if shown != line or str(preview["skipped"].get(south, "")) != "friendly" or preview["skipped"].has(city_cell):
 		print("FAIL skipped preview '", shown, "'")
 		quit(1)
 		return
-	if not _highlight_is(game, south, Color(0.78, 0.78, 0.82, 0.75)) or not _highlight_is(game, city_cell, Color(0.78, 0.78, 0.82, 0.75)):
+	if not _highlight_is(game, south, Color(0.78, 0.78, 0.82, 0.75)) or not _highlight_is(game, city_cell, Color(0.95, 0.32, 0.28, 0.95)):
 		print("FAIL skipped tint")
 		quit(1)
 		return
@@ -115,12 +123,14 @@ func _run() -> void:
 	# same shot turns the bars red, without changing the preview numbers.
 	east_unit.hp = 36
 	north_unit.hp = 36
+	founded.hp = 40
 	var east_before := east_unit.hp
 	var north_before := north_unit.hp
 	var city_hp := founded.hp
+	var city_where := founded.cell
 	var friend_hp := friend.hp
 	_click(game, center)
-	if east_unit.hp >= east_before or north_unit.hp >= north_before or friend.hp != friend_hp or founded.hp != city_hp or archer.ap != 0 or archer.cell != stand:
+	if east_unit.hp >= east_before or north_unit.hp >= north_before or friend.hp != friend_hp or founded.hp >= city_hp or founded.cell != city_where or archer.ap != 0 or archer.cell != stand:
 		print("FAIL volley result")
 		quit(1)
 		return
