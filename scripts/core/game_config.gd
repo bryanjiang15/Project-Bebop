@@ -13,14 +13,20 @@ const SPELL_FIELDS: PackedStringArray = ["name", "shape", "radius", "length", "m
 const UNIT_IDS: PackedStringArray = ["scout", "warrior", "archer", "settler"]
 const UNIT_FIELDS: PackedStringArray = ["hp", "attack", "defense", "ap", "cost", "combatant", "population_cost", "min_city_size", "can_capture", "abilities"]
 ## Shipped abilities. The loader also accepts extra ids in a test config.
-const ABILITY_IDS: PackedStringArray = ["strike", "shoot", "shield_bash", "volley"]
-const ABILITY_FIELDS: PackedStringArray = ["name", "target", "range", "area", "ap_cost", "cooldown", "effect", "damage_multiplier", "melee", "deals_counter", "push_distance"]
+const ABILITY_IDS: PackedStringArray = ["strike", "shoot", "shield_bash", "volley", "sprint"]
+## Fields every ability has. Damage and move abilities add their own keys.
+const ABILITY_FIELDS: PackedStringArray = ["name", "target", "range", "area", "ap_cost", "cooldown", "effect"]
+const ABILITY_DAMAGE_FIELDS: PackedStringArray = ["damage_multiplier", "melee", "deals_counter", "push_distance"]
+const ABILITY_MOVE_FIELDS: PackedStringArray = ["ap_bonus", "movement_only"]
 ## target "enemy" is one enemy unit or city. target "tile" is an aimed cell.
+## target "self" is the caster's own tile.
 ## area "single" is that tile. area "radius" also requires "radius".
-## effect "status", "move", and "terraform" parse and refuse until a later ticket.
+## effect "move" requires ap_bonus and movement_only, and omits the damage fields.
+## effect "status" and "terraform" parse and refuse until a later ticket.
 const ABILITY_EFFECTS: PackedStringArray = ["damage", "status", "move", "terraform"]
-const ABILITY_TARGETS: PackedStringArray = ["enemy", "tile"]
+const ABILITY_TARGETS: PackedStringArray = ["enemy", "tile", "self"]
 const ABILITY_AREAS: PackedStringArray = ["single", "radius"]
+const DAMAGE_ABILITY_IDS: PackedStringArray = ["strike", "shoot", "shield_bash", "volley"]
 
 var turn_limit: int
 var player_count: int
@@ -191,6 +197,8 @@ class AbilityStats extends RefCounted:
 	var deals_counter: bool
 	var push_distance: int
 	var radius: int
+	var ap_bonus: int
+	var movement_only: bool
 
 	func to_dict() -> Dictionary:
 		var body := {
@@ -209,6 +217,9 @@ class AbilityStats extends RefCounted:
 			body["melee"] = melee
 			body["deals_counter"] = deals_counter
 			body["push_distance"] = push_distance
+		if effect == "move":
+			body["ap_bonus"] = ap_bonus
+			body["movement_only"] = movement_only
 		return body
 
 
@@ -365,8 +376,13 @@ static func required_paths() -> PackedStringArray:
 	for ability_id in ABILITY_IDS:
 		for field in ABILITY_FIELDS:
 			paths.append("abilities.%s.%s" % [ability_id, field])
+	for ability_id in DAMAGE_ABILITY_IDS:
+		for field in ABILITY_DAMAGE_FIELDS:
+			paths.append("abilities.%s.%s" % [ability_id, field])
 	## radius is required only on a radius area. Volley is the shipped one.
 	paths.append("abilities.volley.radius")
+	for field in ABILITY_MOVE_FIELDS:
+		paths.append("abilities.sprint.%s" % field)
 	for unit_id in UNIT_IDS:
 		for field in UNIT_FIELDS:
 			paths.append("units.%s.%s" % [unit_id, field])
@@ -492,8 +508,9 @@ func unit(id: String) -> UnitStats:
 
 
 ## Loud problems that are not a missing shipped key: unknown effect, target, or
-## area, a damage ability missing its effect fields, or a unit ability id that
-## is not in the table. Damage abilities require deals_counter and push_distance.
+## area, a damage ability missing its effect fields, a move ability missing
+## ap_bonus or movement_only, or a unit ability id that is not in the table.
+## Damage abilities require deals_counter and push_distance.
 ## from_dict push_errors and quits on a non-empty result.
 static func ability_errors(data: Dictionary) -> PackedStringArray:
 	var errors := PackedStringArray()
@@ -558,6 +575,18 @@ static func ability_errors(data: Dictionary) -> PackedStringArray:
 				var whole := distance is int or (distance is float and is_equal_approx(float(distance), round(float(distance))))
 				if not whole:
 					errors.append("game_config.json %s.push_distance expected int" % prefix)
+		if effect == "move":
+			if not body.has("ap_bonus"):
+				errors.append("game_config.json missing key: %s.ap_bonus" % prefix)
+			else:
+				var bonus: Variant = body["ap_bonus"]
+				var bonus_whole := bonus is int or (bonus is float and is_equal_approx(float(bonus), round(float(bonus))))
+				if not bonus_whole:
+					errors.append("game_config.json %s.ap_bonus expected int" % prefix)
+			if not body.has("movement_only"):
+				errors.append("game_config.json missing key: %s.movement_only" % prefix)
+			elif not (body["movement_only"] is bool):
+				errors.append("game_config.json %s.movement_only expected bool" % prefix)
 		for field in ["range", "ap_cost", "cooldown"]:
 			if not body.has(field):
 				continue
@@ -863,6 +892,12 @@ func _read(data: Dictionary) -> void:
 			ability_stats.melee = false
 			ability_stats.deals_counter = false
 			ability_stats.push_distance = 0
+		if ability_stats.effect == "move":
+			ability_stats.ap_bonus = _int(data, ability_prefix + ".ap_bonus")
+			ability_stats.movement_only = _bool(data, ability_prefix + ".movement_only")
+		else:
+			ability_stats.ap_bonus = 0
+			ability_stats.movement_only = false
 		abilities[ability_id] = ability_stats
 	one_unit_per_tile = _bool(data, "units.one_unit_per_tile")
 	capture_lone_settler = _bool(data, "units.capture_lone_settler")

@@ -33,6 +33,7 @@ const REASON_CITY_HELD := "A unit defends that city"
 const REASON_OFF_TARGET := "Cannot target off the map"
 const REASON_UNSEEN_TILE := "Cannot see that tile"
 const REASON_NO_ENEMY := "No enemy in that area"
+const REASON_MOVE_ONLY := "Can only move"
 const ORDER_SKIP := "skip"
 const ORDER_FORTIFY := "fortify"
 const REASON_OVER := "The game is over"
@@ -234,13 +235,20 @@ func spawn_unit(player: int, type: String, pos: Vector2i) -> PlayerState.UnitSta
 
 
 func reachable_tiles(unit: PlayerState.UnitState) -> Dictionary:
-	if unit == null or unit.ap <= 0 or config == null:
+	if unit == null:
+		return {}
+	return reachable_at(unit, unit.ap)
+
+
+## Reachable offset cells if `unit` had `ap` action points. Does not change the unit.
+func reachable_at(unit: PlayerState.UnitState, ap: int) -> Dictionary:
+	if unit == null or ap <= 0 or config == null:
 		return {}
 	_moving = unit
 	_entering_for_move = true
 	var axial_tiles := Pathfinder.reachable(
 		Hex.offset_to_axial(unit.cell),
-		unit.ap,
+		ap,
 		map.width,
 		map.height,
 		Callable(self, "_enter_cost_axial"),
@@ -254,6 +262,19 @@ func reachable_tiles(unit: PlayerState.UnitState) -> Dictionary:
 	for key in axial_tiles.keys():
 		cells[Hex.axial_to_offset(key as Vector2i)] = axial_tiles[key]
 	return cells
+
+
+## Tiles a move ability would open after its ap_bonus. AP is unchanged.
+## Empty when the ability is not a move effect or cannot be aimed.
+func move_reach_preview(unit: PlayerState.UnitState, ability_id: String) -> Dictionary:
+	if unit == null or config == null or not config.abilities.has(ability_id):
+		return {}
+	if not ability_block_reason(unit, ability_id).is_empty():
+		return {}
+	var ability := config.ability(ability_id)
+	if ability.effect != "move":
+		return {}
+	return reachable_at(unit, unit.ap + ability.ap_bonus)
 
 
 func move_unit(unit: PlayerState.UnitState, dest: Vector2i) -> bool:
@@ -311,7 +332,8 @@ func ability_cooldown_left(unit: PlayerState.UnitState, ability_id: String) -> i
 
 ## Empty string means the ability can be used on `cell`.
 ## A melee damage ability still rejects a settler. A ranged one destroys a lone settler.
-## Status, move, and terraform are hooks: they return REASON_NOT_YET and change nothing.
+## A move ability confirms on its target tile and does not change AP until use_ability.
+## Status and terraform are hooks: they return REASON_NOT_YET and change nothing.
 func can_use_ability(unit: PlayerState.UnitState, ability_id: String, cell: Vector2i) -> String:
 	return str(_ability_plan(unit, ability_id, cell)["reason"])
 
@@ -353,9 +375,9 @@ func ability_preview(unit: PlayerState.UnitState, ability_id: String, cell: Vect
 	}
 
 
-## Resolves a damage ability, then ends the unit's turn: AP is 0 and acted is set.
-## ap_cost is the minimum AP required. The turn ends even when ap_cost is 1 and AP remains.
-## The attacker does not step onto a tile this emptied. Returns the reject reason.
+## Resolves the ability. A damage ability then sets AP to 0.
+## A move ability adds ap_bonus instead. ap_cost is only the gate and is not deducted.
+## The attacker does not step onto a tile a damage ability emptied. Returns the reject reason.
 func use_ability(unit: PlayerState.UnitState, ability_id: String, cell: Vector2i) -> String:
 	if result != null:
 		return REASON_OVER
@@ -364,19 +386,20 @@ func use_ability(unit: PlayerState.UnitState, ability_id: String, cell: Vector2i
 	if not reason.is_empty():
 		return reason
 	var ability := config.ability(ability_id)
-	if ability.area == "radius":
-		_apply_radius_hits(unit, ability, plan["hits"])
-	else:
-		var preview := {
-			"damage": int(plan["damage"]),
-			"counter": int(plan["counter"]),
-			"push_open": bool(plan["push_open"]),
-			"push_cell": plan["push_cell"],
-		}
-		if str(plan["kind"]) == "unit":
-			_apply_unit_hit(unit, plan["unit"] as PlayerState.UnitState, preview)
+	if ability.effect == "damage":
+		if ability.area == "radius":
+			_apply_radius_hits(unit, ability, plan["hits"])
 		else:
-			_apply_city_hit(unit, ability, plan["city"] as MapCity, preview)
+			var preview := {
+				"damage": int(plan["damage"]),
+				"counter": int(plan["counter"]),
+				"push_open": bool(plan["push_open"]),
+				"push_cell": plan["push_cell"],
+			}
+			if str(plan["kind"]) == "unit":
+				_apply_unit_hit(unit, plan["unit"] as PlayerState.UnitState, preview)
+			else:
+				_apply_city_hit(unit, ability, plan["city"] as MapCity, preview)
 	_finish_ability(unit, ability)
 	return ""
 
@@ -404,6 +427,8 @@ func _ability_plan(unit: PlayerState.UnitState, ability_id: String, cell: Vector
 		empty["reason"] = gate
 		return empty
 	var ability := config.ability(ability_id)
+	if ability.effect == "move":
+		return _move_plan(unit, ability, cell)
 	if ability.area == "radius":
 		return _radius_plan(unit, ability, cell)
 	var picked := _pick_hostile(unit, ability, cell)
@@ -470,9 +495,13 @@ func _ability_gate(unit: PlayerState.UnitState, ability_id: String) -> String:
 			break
 	if not listed:
 		return REASON_UNKNOWN_ABILITY
+	if unit.movement_only:
+		return REASON_MOVE_ONLY
 	var ability := config.ability(ability_id)
-	if ability.effect == "status" or ability.effect == "move" or ability.effect == "terraform":
+	if ability.effect == "status" or ability.effect == "terraform":
 		return REASON_NOT_YET
+	if ability.effect == "move":
+		return ""
 	if not config.unit(unit.unit_type).combatant:
 		return REASON_SELECT_COMBAT
 	if ability.effect != "damage":
@@ -501,6 +530,10 @@ func ability_targets(unit: PlayerState.UnitState, ability_id: String) -> Array[V
 	if unit == null or not ability_block_reason(unit, ability_id).is_empty():
 		return cells
 	var ability := config.ability(ability_id)
+	if ability.target == "self":
+		if can_use_ability(unit, ability_id, unit.cell).is_empty():
+			cells.append(unit.cell)
+		return cells
 	if ability.area == "radius":
 		return _radius_aim_cells(unit, ability)
 	for player in players:
@@ -536,6 +569,32 @@ func ability_area(unit: PlayerState.UnitState, ability_id: String, cell: Vector2
 			if map.in_bounds(offset):
 				tiles.append(offset)
 	return tiles
+
+
+## A move ability. ap_cost is the gate. The bonus is applied later, in _finish_ability.
+## target "self" accepts only the unit's own tile. range 0 is that tile.
+func _move_plan(unit: PlayerState.UnitState, ability: GameConfig.AbilityStats, cell: Vector2i) -> Dictionary:
+	var plan := _empty_ability_plan()
+	if ability_cooldown_left(unit, ability.id) > 0:
+		plan["reason"] = REASON_COOLDOWN
+		return plan
+	if unit.ap < ability.ap_cost:
+		plan["reason"] = REASON_AP
+		return plan
+	if map == null or not map.in_bounds(cell):
+		plan["reason"] = REASON_OFF_TARGET
+		return plan
+	if ability.target == "self":
+		if cell != unit.cell:
+			plan["reason"] = REASON_RANGE
+			return plan
+	else:
+		var dist := Hex.distance(Hex.offset_to_axial(unit.cell), Hex.offset_to_axial(cell))
+		if dist < 1 or dist > ability.range:
+			plan["reason"] = REASON_RANGE
+			return plan
+	plan["kind"] = "move"
+	return plan
 
 
 ## Aimed cells at distance 1 through range whose disk has a hittable enemy unit.
@@ -794,12 +853,17 @@ func _spend_city_hit(attacker: PlayerState.UnitState, ability: GameConfig.Abilit
 	attacker.hp = maxi(0, attacker.hp - counter)
 
 
-## ap_cost was already checked. Using the ability spends the rest of the turn.
+## ap_cost was already checked. A damage ability spends the rest of the turn.
+## A move ability adds ap_bonus and copies movement_only. It does not zero AP.
 func _finish_ability(unit: PlayerState.UnitState, ability: GameConfig.AbilityStats) -> void:
-	unit.ap = 0
 	unit.acted = true
 	unit.used_ability = true
 	unit.order = ORDER_FORTIFY if unit.fortified else ""
+	if ability.effect == "move":
+		unit.ap += ability.ap_bonus
+		unit.movement_only = ability.movement_only
+	else:
+		unit.ap = 0
 	if ability.cooldown > 0:
 		unit.ability_cooldowns[ability.id] = ability.cooldown
 
@@ -827,9 +891,12 @@ func enemy_at(attacker: PlayerState.UnitState, cell: Vector2i) -> PlayerState.Un
 
 
 ## Empty when Skip is legal. Skip needs no AP.
+## A movement-only unit is refused with the same reason as its abilities.
 func skip_reason(unit: PlayerState.UnitState) -> String:
 	if result != null:
 		return REASON_OVER
+	if unit != null and unit.movement_only:
+		return REASON_MOVE_ONLY
 	if unit == null or config == null or not config.skip_enabled:
 		return REASON_SELECT_COMBAT
 	return ""
@@ -844,9 +911,12 @@ func skip_unit(unit: PlayerState.UnitState) -> bool:
 
 
 ## Empty when Fortify is legal. Fortify needs at least 1 AP, then ends the turn.
+## A movement-only unit is refused with the same reason as its abilities.
 func fortify_reason(unit: PlayerState.UnitState) -> String:
 	if result != null:
 		return REASON_OVER
+	if unit != null and unit.movement_only:
+		return REASON_MOVE_ONLY
 	if unit == null or config == null or not config.fortify_enabled:
 		return REASON_SELECT_COMBAT
 	if unit.ap < 1:
@@ -892,7 +962,8 @@ func end_turn() -> void:
 	# Spell cooldowns then tick once for every player — this End Turn is each
 	# player's turn until turns are sequential. When this turn is `turn_limit`,
 	# the match ends after that resolution and the counter does not advance.
-	# Otherwise the turn counter advances and AP refills.
+	# Otherwise the turn counter advances and AP refills to the pool.
+	# A move ability's leftover bonus is discarded there, and movement_only clears.
 	# A spell with cooldown C cast on turn N is castable again on turn N+C.
 	var income: Array[int] = []
 	income.resize(players.size())
@@ -920,11 +991,14 @@ func end_turn() -> void:
 				unit.order = ORDER_FORTIFY if unit.fortified else ""
 			unit.acted = false
 			unit.used_ability = false
+			unit.movement_only = false
 			unit.ap = config.unit(unit.unit_type).ap
 	_refresh_fog()
 
 
 func can_found(unit: PlayerState.UnitState) -> String:
+	if unit != null and unit.movement_only:
+		return REASON_MOVE_ONLY
 	if unit == null or unit.unit_type != "settler":
 		return REASON_SETTLER
 	if map == null or not map.in_bounds(unit.cell):

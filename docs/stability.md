@@ -40,7 +40,7 @@ These five seeds did not place a starting settler on volcanic ground, so the tic
 - Every unit is in exactly one player's list, its `owner` matches that list, and its cell is on the map.
 - An eliminated player has no units and no cities.
 - City HP is in `[0, max]`, population is at least 1, and every mana pool is at least 0.
-- Every unit's AP is in `[0, units.<type>.ap]`. A unit with `used_ability` set has 0 AP. Ticket 25 re-ran the soak after the move-to-AP rename.
+- Every unit's AP is at least 0. AP above `units.<type>.ap` is allowed only while `movement_only` is set, which is Sprint's bonus for this turn. A unit with `used_ability` set and AP remaining must also be movement-only. Ticket 25 re-ran the soak after the move-to-AP rename. Ticket 29 allows the Sprint exception.
 - Every owned tile is in exactly one city's territory, and that city's owner is `owner_at`.
 - After `result` is set, End Turn and a click do not change units, cities, mana, land, or the selection.
 
