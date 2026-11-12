@@ -18,7 +18,7 @@ Notion is the source of truth for the prototype brief and the design doc. This f
 12. Ties: more tiles, then more cities, then the human loses.
 13. Spells never change tile ownership (flag: `spells.spells_change_tile_ownership`). Borders can claim water. Already-owned tiles can't be claimed.
 14. Unit orders include Skip and Fortify (Fortify = +25% defense while not moving), so the End Turn warning about units with no orders is satisfiable. Skip needs no AP and sets AP to 0. Fortify and Found need at least 1 AP and then set AP to 0. Neither Skip nor Fortify sets `acted`, so idle healing is unchanged.
-15. Abilities live in the top-level `abilities` table. Each unit lists ids in `units.<type>.abilities`. Strike (warrior, scout; melee, range 1), Shield Bash (warrior only), and Shoot (archer; ranged, range 2) ship. The settler list is empty. Using an ability requires its `ap_cost` (1) and then sets AP to 0. `effect` may be `damage`, `status`, `move`, or `terraform`. Status, move, and terraform parse and return `Not available yet` without changing the board. The ability bar lists those abilities, then Skip, Fortify, and Found. The three orders stay orders: they end the turn, Fortify and Found need at least 1 AP, and Skip needs none. Right-click moves, including a capture, and does not attack. Attacks and other abilities come from the bar. `ability_area` is the single-tile hook Volley will extend. Volley and Sprint are tickets 28 and 29. Sprint's movement-only gate stays in the ability gate and the order reasons.
+15. Abilities live in the top-level `abilities` table. Each unit lists ids in `units.<type>.abilities`. Strike (warrior, scout; melee, range 1), Shield Bash (warrior only), Shoot (archer; ranged, range 2), and Volley (archer; radius 1) ship. The settler list is empty. Using an ability requires its `ap_cost` (1) and then sets AP to 0. `effect` may be `damage`, `status`, `move`, or `terraform`. Status, move, and terraform parse and return `Not available yet` without changing the board. The ability bar lists those abilities, then Skip, Fortify, and Found. The three orders stay orders: they end the turn, Fortify and Found need at least 1 AP, and Skip needs none. Right-click moves, including a capture, and does not attack. Attacks and other abilities come from the bar. `ability_area` is `single` or `radius`. Sprint is ticket 29. Sprint's movement-only gate stays in the ability gate and the order reasons.
 
 16. Shield Bash (ticket 27). These are the spec gaps that were built:
     - D1. A damage ability requires `deals_counter` and `push_distance`. Strike is `true` / `0`, Shoot is `false` / `0`, Shield Bash is `false` / `1`. `deals_counter` is the no-counter flag. `push_distance` 0 means no push. There is no `shield_bash` name check in core. A missing key fails the load.
@@ -27,6 +27,16 @@ Notion is the source of truth for the prototype brief and the design doc. This f
     - D4. Blocked means occupied, not passable (water or `move_cost` below 0), off the map, or a city center. A building does not block. Forest, hills, volcanic, and plains do not block. Fog on the destination does not block.
     - D5. The combat line is `Damage N   Counter 0   Push` when the destination is open, and `Damage N   Counter 0   No push` when it is blocked or the target is a city. An open destination uses the place tint. A blocked destination uses the invalid tint.
     - D6. The bar's existing cooldown line is the only clock. After Shield Bash it reads `Cooldown 2`, then `Cooldown 1`, then ready.
+
+17. Volley (ticket 28). These are the spec gaps that were built:
+    - D1. `area` may be `radius`. Integer `radius` is required only then (Volley: 1). Single abilities omit it. Missing `abilities.volley.radius` fails the load. Core branches on `area`, not on the ability id.
+    - D2. Volley aims at a tile, so `target` is `tile`. Shoot stays `enemy`.
+    - D3. Range is hex distance 1 through `abilities.volley.range` (2) to the aimed cell. The archer's own tile is not a legal center. Tiles in the disk may fall outside that range. The center must be currently visible.
+    - D4. A center with no hittable enemy unit or enemy city is illegal. Volley cannot be spent on empty ground or friendlies alone. A visible enemy city in the disk is a hit.
+    - D5. The combat line is `Damage N   Counter 0` for one hit and `Damage N, N   Counter 0` for several, including an enemy city's damage. Skipped tiles use the skipped tint.
+    - D6. The bar's existing cooldown line is the only clock. After Volley it reads `Cooldown 3`, then `Cooldown 2`, then `Cooldown 1`, then ready.
+
+Bryan decided that Volley damages enemy cities in its radius. The damage is the same half-of-Shoot formula, counter 0, and the city does not move. Friendly units and friendly cities stay skipped. That decision lives in `_radius_hits`.
 
 Also: volcanic damage uses the brief's flat value, not the design doc's chance-based proposal.
 

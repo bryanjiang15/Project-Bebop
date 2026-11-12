@@ -25,6 +25,7 @@ func _init() -> void:
 	_test_ap_and_abilities()
 	_test_ability_targets()
 	_test_shield_bash()
+	_test_volley()
 	_test_city_capture()
 	_test_spells()
 	_test_rival_land_updates()
@@ -92,11 +93,14 @@ func _test_config() -> void:
 	_ok(cfg.unit("warrior").ap == 2 and cfg.unit("settler").ap == 2 and cfg.unit("scout").ap == 3, "AP is scout 3 and 2 for every other unit")
 	_ok(cfg.unit("settler").abilities.is_empty(), "the settler has no abilities")
 	_ok(cfg.unit("warrior").abilities.size() == 2 and cfg.unit("warrior").abilities[0] == "strike" and cfg.unit("warrior").abilities[1] == "shield_bash" and cfg.unit("scout").abilities.size() == 1 and cfg.unit("scout").abilities[0] == "strike", "warrior opens with Strike then Shield Bash, and the scout keeps Strike")
-	_ok(cfg.unit("archer").abilities.size() == 1 and cfg.unit("archer").abilities[0] == "shoot", "archer opens with Shoot")
+	_ok(cfg.unit("archer").abilities.size() == 2 and cfg.unit("archer").abilities[0] == "shoot" and cfg.unit("archer").abilities[1] == "volley", "archer opens with Shoot then Volley")
 	_ok(cfg.ability("strike").ability_name == "Strike" and cfg.ability("strike").target == "enemy" and cfg.ability("strike").area == "single" and cfg.ability("strike").melee and cfg.ability("strike").range == 1 and cfg.ability("strike").ap_cost == 1 and cfg.ability("strike").cooldown == 0 and cfg.ability("strike").effect == "damage" and is_equal_approx(cfg.ability("strike").damage_multiplier, 1.0) and cfg.ability("strike").deals_counter and cfg.ability("strike").push_distance == 0, "strike")
 	_ok(not cfg.ability("shoot").melee and cfg.ability("shoot").range == 2 and cfg.ability("shoot").ability_name == "Shoot" and cfg.ability("shoot").ap_cost == 1 and not cfg.ability("shoot").deals_counter and cfg.ability("shoot").push_distance == 0, "shoot")
 	var bash := cfg.ability("shield_bash")
 	_ok(bash.ability_name == "Shield Bash" and bash.target == "enemy" and bash.area == "single" and bash.melee and bash.range == 1 and bash.ap_cost == 1 and bash.cooldown == 2 and bash.effect == "damage" and is_equal_approx(bash.damage_multiplier, 0.5) and not bash.deals_counter and bash.push_distance == 1, "shield bash")
+	var volley := cfg.ability("volley")
+	_ok(volley.ability_name == "Volley" and volley.target == "tile" and volley.area == "radius" and volley.radius == 1 and not volley.melee and volley.range == 2 and volley.ap_cost == 1 and volley.cooldown == 3 and volley.effect == "damage" and is_equal_approx(volley.damage_multiplier, 0.5) and not volley.deals_counter and volley.push_distance == 0, "volley")
+	_ok(cfg.ability("strike").radius == 0 and cfg.ability("shoot").radius == 0 and bash.radius == 0, "single abilities omit radius")
 	_ok(GameConfig.ability_errors(raw).is_empty(), "the shipped ability table validates")
 	_ok(not cfg.unit("settler").combatant and cfg.unit("settler").population_cost == 1 and cfg.unit("settler").min_city_size == 2, "settler")
 	_ok(cfg.combat_base_damage == 30 and is_equal_approx(cfg.strength_exponent_base, 1.04), "damage formula")
@@ -190,6 +194,18 @@ func _test_config() -> void:
 		"abilities.shield_bash.melee",
 		"abilities.shield_bash.deals_counter",
 		"abilities.shield_bash.push_distance",
+		"abilities.volley.name",
+		"abilities.volley.target",
+		"abilities.volley.range",
+		"abilities.volley.area",
+		"abilities.volley.radius",
+		"abilities.volley.ap_cost",
+		"abilities.volley.cooldown",
+		"abilities.volley.effect",
+		"abilities.volley.damage_multiplier",
+		"abilities.volley.melee",
+		"abilities.volley.deals_counter",
+		"abilities.volley.push_distance",
 		"units.scout.ap",
 		"units.scout.abilities",
 		"units.warrior.ap",
@@ -208,11 +224,17 @@ func _test_config() -> void:
 	(unknown_target["abilities"]["strike"] as Dictionary)["target"] = "ally"
 	_ok(_error_has(GameConfig.ability_errors(unknown_target), "target"), "an unknown target fails loudly")
 	var unknown_area: Dictionary = raw.duplicate(true)
-	(unknown_area["abilities"]["strike"] as Dictionary)["area"] = "radius"
+	(unknown_area["abilities"]["strike"] as Dictionary)["area"] = "cone"
 	_ok(_error_has(GameConfig.ability_errors(unknown_area), "area"), "an unknown area fails loudly")
+	var radius_without: Dictionary = raw.duplicate(true)
+	(radius_without["abilities"]["strike"] as Dictionary)["area"] = "radius"
+	_ok(_error_has(GameConfig.ability_errors(radius_without), "radius"), "a radius area requires radius")
 	var unknown_id: Dictionary = raw.duplicate(true)
 	(unknown_id["units"]["warrior"] as Dictionary)["abilities"] = ["nope"]
 	_ok(_error_has(GameConfig.ability_errors(unknown_id), "unknown id"), "an ability id that does not exist fails loudly")
+	var unknown_archer: Dictionary = raw.duplicate(true)
+	(unknown_archer["units"]["archer"] as Dictionary)["abilities"] = ["nope"]
+	_ok(_error_has(GameConfig.ability_errors(unknown_archer), "unknown id"), "an archer ability id that does not exist fails loudly")
 	_ok(_error_has(GameConfig.ability_errors(_without_key(raw, "abilities.shield_bash.deals_counter")), "deals_counter"), "missing deals_counter fails loudly")
 	_ok(_error_has(GameConfig.ability_errors(_without_key(raw, "abilities.shield_bash.push_distance")), "push_distance"), "missing push_distance fails loudly")
 	var bad_counter: Dictionary = raw.duplicate(true)
@@ -221,6 +243,13 @@ func _test_config() -> void:
 	var bad_push: Dictionary = raw.duplicate(true)
 	(bad_push["abilities"]["shield_bash"] as Dictionary)["push_distance"] = "one"
 	_ok(_error_has(GameConfig.ability_errors(bad_push), "push_distance"), "push_distance must be an int")
+	_ok(_error_has(GameConfig.ability_errors(_without_key(raw, "abilities.volley.radius")), "radius"), "missing volley radius fails loudly")
+	var bad_radius: Dictionary = raw.duplicate(true)
+	(bad_radius["abilities"]["volley"] as Dictionary)["radius"] = "wide"
+	_ok(_error_has(GameConfig.ability_errors(bad_radius), "radius"), "radius must be an int")
+	var negative_radius: Dictionary = raw.duplicate(true)
+	(negative_radius["abilities"]["volley"] as Dictionary)["radius"] = -1
+	_ok(_error_has(GameConfig.ability_errors(negative_radius), "radius"), "radius cannot be negative")
 
 
 func _test_hex_neighbors() -> void:
@@ -1513,6 +1542,215 @@ func _test_shield_bash() -> void:
 	_ok(cool_game.ability_cooldown_left(cool_warrior, "shield_bash") == 1, "one End Turn leaves cooldown 1")
 	cool_game.end_turn()
 	_ok(cool_game.ability_cooldown_left(cool_warrior, "shield_bash") == 0 and cool_game.ability_block_reason(cool_warrior, "shield_bash").is_empty(), "cooldown 2 is ready after two End Turns")
+
+
+func _preview_hit(preview: Dictionary, cell: Vector2i) -> Dictionary:
+	for item in preview["hits"]:
+		var hit := item as Dictionary
+		if hit["cell"] == cell:
+			return hit
+	return {}
+
+
+func _test_volley() -> void:
+	print("[volley]")
+	var cfg: GameConfig = GameConfig.load_file()
+	var game := _blank_setup("plains")
+	var origin := Vector2i(8, 8)
+	var archer := game.spawn_unit(0, "archer", origin)
+	var listed := game.unit_abilities(archer)
+	_ok(archer != null and listed.size() == 2 and listed[0] == "shoot" and listed[1] == "volley", "the archer lists Shoot then Volley")
+	var foe := game.spawn_unit(1, "warrior", _step(origin, Hex.EAST, 2))
+	game._refresh_fog()
+	var shot := game.ability_preview(archer, "shoot", foe.cell)
+	_ok(bool(shot["ok"]) and int(shot["damage"]) == 36 and int(shot["counter"]) == 0 and not bool(shot["push"]), "Shoot at range 2 is still 36 and no counter")
+	var shot_hp := foe.hp
+	var archer_hp := archer.hp
+	_ok(game.use_ability(archer, "shoot", foe.cell).is_empty() and foe.hp == shot_hp - 36 and archer.hp == archer_hp and archer.cell == origin and archer.ap == 0, "Shoot still spends the turn and stays put")
+	archer.ap = cfg.unit("archer").ap
+	archer.acted = false
+	archer.used_ability = false
+	var center := _step(origin, Hex.EAST, 1)
+	var east := _step(center, Hex.EAST, 1)
+	var north := _step(center, Hex.NORTHEAST, 1)
+	var friendly_cell := _step(center, Hex.SOUTHEAST, 1)
+	_ok(east == foe.cell, "the first enemy stands in the disk")
+	var second := game.spawn_unit(1, "warrior", north)
+	var friend := game.spawn_unit(0, "scout", friendly_cell)
+	game.map.set_land(north, "hills")
+	game._refresh_fog()
+	_ok(second != null and friend != null, "volley targets spawned")
+	var area := game.ability_area(archer, "volley", center)
+	_ok(area.size() == 7 and area.has(center) and area.has(east) and area.has(north) and area.has(friendly_cell) and area.has(origin), "radius 1 is the in-bounds disk, including empty tiles and the archer")
+	var preview := game.ability_preview(archer, "volley", center)
+	var east_hit := _preview_hit(preview, east)
+	var north_hit := _preview_hit(preview, north)
+	var hill_defense := Combat.defender_strength(cfg, 20.0, true, false)
+	var east_damage := Combat.damage(cfg, 12.5, 20.0)
+	var north_damage := Combat.damage(cfg, 12.5, hill_defense)
+	_ok(bool(preview["ok"]) and int(preview["counter"]) == 0 and not bool(preview["push"]), "volley has no counter and no push")
+	_ok(not east_hit.is_empty() and int(east_hit["damage"]) == east_damage and int(east_hit["counter"]) == 0, "volley on open ground is strength 12.5")
+	_ok(not north_hit.is_empty() and int(north_hit["damage"]) == north_damage and int(north_hit["counter"]) == 0, "volley on hills uses the same formula")
+	_ok((preview["hits"] as Array).size() == 2, "volley plans the two enemies and nobody else")
+	_ok(str(preview["skipped"][friendly_cell]) == "friendly" and str(preview["skipped"][origin]) == "friendly", "the friendly and the archer are skipped")
+	var friend_hp := friend.hp
+	var before_east := foe.hp
+	var before_north := second.hp
+	_ok(game.use_ability(archer, "volley", center).is_empty(), "volley resolves")
+	_ok(foe.hp == before_east - east_damage and second.hp == before_north - north_damage, "each enemy loses the pre-hit damage")
+	_ok(friend.hp == friend_hp and friend.cell == friendly_cell and archer.hp == archer_hp and archer.cell == origin and archer.ap == 0, "the friendly and the archer are untouched and AP is 0")
+	_ok(game.ability_cooldown_left(archer, "volley") == 3 and game.ability_block_reason(archer, "volley") == GameSetup.REASON_COOLDOWN, "volley stores cooldown 3 and the button reads On cooldown")
+	_ok(game.ability_block_reason(archer, "shoot") == GameSetup.REASON_AP, "Shoot on this archer is blocked by AP, not by Volley's clock")
+	var fresh := game.spawn_unit(0, "archer", Vector2i(20, 8))
+	var fresh_foe := game.spawn_unit(1, "warrior", _step(Vector2i(20, 8), Hex.EAST, 1))
+	game._refresh_fog()
+	var fresh_shot := game.ability_preview(fresh, "shoot", fresh_foe.cell)
+	var fresh_hp := fresh.hp
+	_ok(fresh != null and fresh_foe != null and bool(fresh_shot["ok"]) and int(fresh_shot["damage"]) == 36 and int(fresh_shot["counter"]) == 0, "a fresh archer can still preview Shoot for 36 and 0")
+	_ok(game.use_ability(fresh, "shoot", fresh_foe.cell).is_empty() and fresh.hp == fresh_hp and fresh_foe.hp == 100 - 36 and game.ability_cooldown_left(archer, "volley") == 3, "Shoot resolves with no counter while the other Volley is cooling")
+	game.end_turn()
+	_ok(game.ability_cooldown_left(archer, "volley") == 2 and game.ability_block_reason(archer, "volley") == GameSetup.REASON_COOLDOWN, "one End Turn leaves cooldown 2")
+	_ok(game.ability_block_reason(archer, "shoot").is_empty() and game.use_ability(archer, "shoot", foe.cell).is_empty(), "Shoot works on the cooling archer")
+	_ok(game.ability_cooldown_left(archer, "volley") == 2, "Shoot does not clear Volley's cooldown")
+	archer.ap = cfg.unit("archer").ap
+	game.end_turn()
+	_ok(game.ability_cooldown_left(archer, "volley") == 1, "the second End Turn leaves cooldown 1")
+	game.end_turn()
+	_ok(game.ability_cooldown_left(archer, "volley") == 0 and game.ability_block_reason(archer, "volley").is_empty(), "cooldown 3 is ready after three End Turns")
+	var strike_game := _blank_setup("plains")
+	var striker := strike_game.spawn_unit(0, "warrior", Vector2i(8, 8))
+	var strike_foe := strike_game.spawn_unit(1, "warrior", _step(Vector2i(8, 8), Hex.EAST, 1))
+	var strike := strike_game.ability_preview(striker, "strike", strike_foe.cell)
+	var bash := strike_game.ability_preview(striker, "shield_bash", strike_foe.cell)
+	_ok(int(strike["damage"]) == 30 and int(strike["counter"]) == 30 and not bool(strike["push"]), "Strike is still 30 and 30")
+	_ok(int(bash["damage"]) == Combat.damage(cfg, 10.0, 20.0) and int(bash["counter"]) == 0 and bool(bash["push"]) and bool(bash["push_open"]), "Shield Bash is still strength 10, no counter, and a push")
+	var city_game := _blank_setup("plains")
+	var city_archer := city_game.spawn_unit(0, "archer", Vector2i(8, 8))
+	var city_center := _step(Vector2i(8, 8), Hex.EAST, 1)
+	var city_enemy := city_game.spawn_unit(1, "warrior", _step(city_center, Hex.EAST, 1))
+	var friendly_city := city_game.found_city(city_game.spawn_unit(0, "settler", _step(city_center, Hex.NORTHWEST, 1)))
+	var enemy_site := _step(Vector2i(8, 8), Hex.EAST, 6)
+	var enemy_city := city_game.found_city(city_game.spawn_unit(1, "settler", enemy_site))
+	var enemy_aim := _step(enemy_site, Hex.WEST, 1)
+	var enemy_unit := city_game.spawn_unit(1, "scout", _step(enemy_aim, Hex.WEST, 1))
+	city_game._refresh_fog()
+	_ok(friendly_city != null and enemy_city != null and city_enemy != null and enemy_unit != null, "city fixtures spawned")
+	var friendly_preview := city_game.ability_preview(city_archer, "volley", city_center)
+	var friendly_hp := friendly_city.hp
+	var enemy_unit_hp := city_enemy.hp
+	_ok(bool(friendly_preview["ok"]) and str(friendly_preview["skipped"][friendly_city.cell]) == "city", "a friendly city in the disk is skipped")
+	_ok(city_game.use_ability(city_archer, "volley", city_center).is_empty() and friendly_city.hp == friendly_hp and not friendly_city.attacked and city_enemy.hp == enemy_unit_hp - int(_preview_hit(friendly_preview, city_enemy.cell)["damage"]), "volley damages the enemy unit and not the friendly city")
+	var siege := city_game.spawn_unit(0, "archer", _step(enemy_aim, Hex.NORTHEAST, 1))
+	city_game._refresh_fog()
+	var enemy_preview := city_game.ability_preview(siege, "volley", enemy_aim)
+	var enemy_city_hp := enemy_city.hp
+	var enemy_city_cell := enemy_city.cell
+	var scout_hp := enemy_unit.hp
+	var city_defense := Combat.defender_strength(cfg, float(cfg.city_defense), false, false)
+	var city_damage := Combat.damage(cfg, 12.5, city_defense)
+	var city_hit := _preview_hit(enemy_preview, enemy_city.cell)
+	_ok(siege != null and bool(enemy_preview["ok"]) and not city_hit.is_empty() and int(city_hit["damage"]) == city_damage and int(city_hit["counter"]) == 0 and not enemy_preview["skipped"].has(enemy_city.cell), "an enemy city in the disk is a hit at half of Shoot")
+	_ok(city_game.use_ability(siege, "volley", enemy_aim).is_empty() and enemy_city.hp == enemy_city_hp - city_damage and enemy_city.cell == enemy_city_cell and enemy_city.attacked and enemy_unit.hp == scout_hp - int(_preview_hit(enemy_preview, enemy_unit.cell)["damage"]), "volley damages the enemy city and the enemy unit, and the city stays put")
+	var shooter := city_game.spawn_unit(0, "archer", _step(enemy_city.cell, Hex.EAST, 2))
+	city_game._refresh_fog()
+	var city_shot := city_game.ability_preview(shooter, "shoot", enemy_city.cell)
+	var shot_before := enemy_city.hp
+	_ok(bool(city_shot["ok"]) and int(city_shot["counter"]) == 0 and city_game.use_ability(shooter, "shoot", enemy_city.cell).is_empty() and enemy_city.hp == shot_before - int(city_shot["damage"]) and shooter.hp == cfg.unit("archer").hp, "Shoot still damages a city and takes no counter")
+	city_game.config.archers_can_zero_city_hp = false
+	enemy_city.hp = 8
+	shooter.ap = cfg.unit("archer").ap
+	shooter.acted = false
+	shooter.used_ability = false
+	_ok(city_game.use_ability(shooter, "shoot", enemy_city.cell).is_empty() and enemy_city.hp == 1, "Shoot still leaves 1 HP when archers cannot zero a city")
+	var alone := _blank_setup("plains")
+	var alone_archer := alone.spawn_unit(0, "archer", Vector2i(10, 10))
+	var alone_site := _step(Vector2i(10, 10), Hex.EAST, 2)
+	var alone_city := alone.found_city(alone.spawn_unit(1, "settler", alone_site))
+	alone._refresh_fog()
+	var alone_preview := alone.ability_preview(alone_archer, "volley", alone_site)
+	var alone_hit := _preview_hit(alone_preview, alone_site)
+	var alone_hp := alone_city.hp if alone_city != null else 0
+	_ok(alone_city != null and bool(alone_preview["ok"]) and (alone_preview["hits"] as Array).size() == 1 and int(alone_hit["damage"]) == city_damage and int(alone_preview["counter"]) == 0, "an enemy city alone is a legal volley")
+	_ok(alone.use_ability(alone_archer, "volley", alone_site).is_empty() and alone_city.hp == alone_hp - city_damage and alone_city.cell == alone_site and alone_city.attacked, "volley on a city alone deals the preview damage and does not move it")
+	alone.config.archers_can_zero_city_hp = false
+	alone_city.hp = 8
+	var finisher := alone.spawn_unit(0, "archer", _step(alone_site, Hex.WEST, 1))
+	alone._refresh_fog()
+	_ok(finisher != null and alone.use_ability(finisher, "volley", alone_site).is_empty() and alone_city.hp == 1 and alone_city.cell == alone_site, "volley leaves 1 HP when archers cannot zero a city")
+	var held := _blank_setup("plains")
+	var held_archer := held.spawn_unit(0, "archer", Vector2i(12, 12))
+	var held_site := _step(Vector2i(12, 12), Hex.EAST, 2)
+	var held_city := held.found_city(held.spawn_unit(1, "settler", held_site))
+	var guard := held.spawn_unit(1, "warrior", held_site)
+	held._refresh_fog()
+	var held_preview := held.ability_preview(held_archer, "volley", held_site)
+	var held_hp := held_city.hp if held_city != null else 0
+	_ok(guard != null and bool(held_preview["ok"]) and _preview_hit(held_preview, held_site).is_empty() == false and held_preview["hits"].size() == 1 and int(_preview_hit(held_preview, held_site)["damage"]) == Combat.damage(cfg, 12.5, 20.0), "a unit on the city is the hit")
+	_ok(held.use_ability(held_archer, "volley", held_site).is_empty() and held_city.hp == held_hp and not held_city.attacked and held_city.cell == held_site and guard.hp == 100 - Combat.damage(cfg, 12.5, 20.0), "volley does not also damage the city under that unit")
+	var fog_city := _blank_setup("plains")
+	var watcher := fog_city.spawn_unit(0, "archer", Vector2i(6, 8))
+	var far_site := _step(Vector2i(6, 8), Hex.EAST, 3)
+	var far_town := fog_city.found_city(fog_city.spawn_unit(1, "settler", far_site))
+	var near_guard := fog_city.spawn_unit(1, "warrior", _step(Vector2i(6, 8), Hex.EAST, 1))
+	var mid := _step(Vector2i(6, 8), Hex.EAST, 2)
+	fog_city._refresh_fog()
+	var far_hp := far_town.hp if far_town != null else 0
+	var fog_preview := fog_city.ability_preview(watcher, "volley", mid)
+	_ok(far_town != null and near_guard != null and not fog_city.fog.unit_visible(0, far_site) and bool(fog_preview["ok"]) and _preview_hit(fog_preview, far_site).is_empty() and str(fog_preview["skipped"][far_site]) == "unseen", "an unseen enemy city is skipped")
+	_ok(fog_city.use_ability(watcher, "volley", mid).is_empty() and far_town.hp == far_hp and not far_town.attacked and near_guard.hp < 100, "volley does not damage an unseen enemy city")
+	var hidden_game := _blank_setup("plains")
+	var hider := hidden_game.spawn_unit(0, "archer", Vector2i(6, 6))
+	var hidden_center := _step(Vector2i(6, 6), Hex.EAST, 2)
+	var hidden_enemy := hidden_game.spawn_unit(1, "warrior", _step(hidden_center, Hex.EAST, 1))
+	var seen_enemy := hidden_game.spawn_unit(1, "warrior", _step(hidden_center, Hex.WEST, 1))
+	hidden_game._refresh_fog()
+	_ok(hider != null and hidden_enemy != null and seen_enemy != null, "unseen fixture spawned")
+	_ok(Hex.distance(Hex.offset_to_axial(hider.cell), Hex.offset_to_axial(hidden_enemy.cell)) == 3 and not hidden_game.fog.unit_visible(0, hidden_enemy.cell), "the far enemy is outside vision")
+	_ok(hidden_game.fog.unit_visible(0, seen_enemy.cell) and hidden_game.fog.unit_visible(0, hidden_center), "the center and the near enemy are visible")
+	var hidden_area := hidden_game.ability_area(hider, "volley", hidden_center)
+	_ok(hidden_area.has(hidden_enemy.cell) and hidden_area.has(seen_enemy.cell), "both enemies are in the disk")
+	var hidden_preview := hidden_game.ability_preview(hider, "volley", hidden_center)
+	var hidden_hp := hidden_enemy.hp
+	var seen_hp := seen_enemy.hp
+	_ok(bool(hidden_preview["ok"]) and _preview_hit(hidden_preview, hidden_enemy.cell).is_empty() and str(hidden_preview["skipped"][hidden_enemy.cell]) == "unseen", "an unseen enemy is skipped")
+	_ok(hidden_game.use_ability(hider, "volley", hidden_center).is_empty() and hidden_enemy.hp == hidden_hp and seen_enemy.hp == seen_hp - int(_preview_hit(hidden_preview, seen_enemy.cell)["damage"]), "the unseen enemy is not damaged")
+	hidden_game.config.unit_vision = 1
+	hidden_game._refresh_fog()
+	var spare := hidden_game.spawn_unit(0, "archer", Vector2i(14, 6))
+	var far_center := _step(spare.cell, Hex.EAST, 2)
+	hidden_game.spawn_unit(1, "warrior", far_center)
+	hidden_game._refresh_fog()
+	_ok(not hidden_game.fog.unit_visible(0, far_center) and hidden_game.can_use_ability(spare, "volley", far_center) == GameSetup.REASON_UNSEEN_TILE, "a center outside vision is refused")
+	var settler_game := _blank_setup("plains")
+	var hunter := settler_game.spawn_unit(0, "archer", Vector2i(8, 10))
+	var settler_center := _step(hunter.cell, Hex.EAST, 1)
+	var lone := settler_game.spawn_unit(1, "settler", _step(settler_center, Hex.EAST, 1))
+	var spare_settler := settler_game.spawn_unit(1, "settler", Vector2i(2, 2))
+	settler_game._refresh_fog()
+	_ok(lone != null and spare_settler != null and settler_game.use_ability(hunter, "volley", settler_center).is_empty() and not settler_game.players[1].units.has(lone) and settler_game.players[1].units.has(spare_settler) and hunter.cell == Vector2i(8, 10), "a lone settler in the disk is removed and the archer stays put")
+	var edge := _blank_setup("plains")
+	var edge_archer := edge.spawn_unit(0, "archer", Vector2i(4, 4))
+	var corner := Vector2i(0, 0)
+	var corner_area := edge.ability_area(edge_archer, "volley", corner)
+	var corner_count := 0
+	for hex in Hex.disk(Hex.offset_to_axial(corner), 1):
+		if edge.map.in_bounds(Hex.axial_to_offset(hex)):
+			corner_count += 1
+	_ok(corner_area.size() == corner_count and corner_count < 7 and corner_count > 0, "off-map disk tiles are dropped")
+	for hex in Hex.disk(Hex.offset_to_axial(corner), 1):
+		var cell := Hex.axial_to_offset(hex)
+		if edge.map.in_bounds(cell):
+			_ok(corner_area.has(cell), "the corner disk keeps %s" % cell)
+	_ok(edge.can_use_ability(edge_archer, "volley", edge_archer.cell) == GameSetup.REASON_RANGE, "the archer's own tile is not a legal center")
+	_ok(edge.can_use_ability(edge_archer, "volley", _step(edge_archer.cell, Hex.EAST, 3)) == GameSetup.REASON_RANGE, "a center past range 2 is out of range")
+	_ok(edge.can_use_ability(edge_archer, "volley", _step(edge_archer.cell, Hex.WEST, 1)) == GameSetup.REASON_NO_ENEMY, "a center with no hittable enemy is refused")
+	_ok(edge.can_use_ability(edge_archer, "volley", Vector2i(-1, -1)) == GameSetup.REASON_OFF_TARGET, "an off-map center is refused")
+	var aim := _step(edge_archer.cell, Hex.EAST, 1)
+	var aimed_enemy := edge.spawn_unit(1, "warrior", _step(aim, Hex.EAST, 1))
+	edge._refresh_fog()
+	var aims := edge.ability_targets(edge_archer, "volley")
+	_ok(aimed_enemy != null and aims.has(aim) and not aims.has(edge_archer.cell) and not aims.has(_step(edge_archer.cell, Hex.WEST, 1)), "volley targets the legal center and not an empty tile")
+	_ok(edge.ability_area(edge_archer, "volley", Vector2i(-1, -1)).is_empty(), "area drops an off-map center")
 
 
 func _test_ability_targets() -> void:
