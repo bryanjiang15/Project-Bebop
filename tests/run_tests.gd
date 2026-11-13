@@ -27,6 +27,7 @@ func _init() -> void:
 	_test_shield_bash()
 	_test_volley()
 	_test_sprint()
+	_test_turn_done()
 	_test_city_capture()
 	_test_spells()
 	_test_rival_land_updates()
@@ -1977,6 +1978,85 @@ func _test_sprint() -> void:
 	var dashed := _blank_setup("plains", dash_cfg)
 	var dasher := dashed.spawn_unit(0, "scout", Vector2i(8, 2))
 	_ok(dashed.use_ability(dasher, "dash", dasher.cell).is_empty() and dasher.ap == 7 and not dasher.movement_only and dashed.ability_block_reason(dasher, "strike").is_empty(), "ap_bonus and movement_only come from the ability fields")
+
+
+func _test_turn_done() -> void:
+	print("[turn done]")
+	var cfg: GameConfig = GameConfig.load_file()
+	var game := _blank_setup("plains")
+	_ok(not game.unit_turn_done(null), "a missing unit is not done")
+	var origin := Vector2i(4, 4)
+	var walker := game.spawn_unit(0, "warrior", origin)
+	var first := _step(origin, Hex.EAST, 1)
+	var second := _step(first, Hex.EAST, 1)
+	_ok(walker != null and not game.unit_turn_done(walker) and game.move_unit(walker, first) and walker.ap == 1 and walker.acted and not game.unit_turn_done(walker), "a move that leaves AP is not done")
+	var acted_after_step := walker.acted
+	_ok(game.move_unit(walker, second) and walker.ap == 0 and walker.acted and acted_after_step and game.unit_turn_done(walker), "a move that leaves 0 AP is done and stays acted")
+	_ok(not game.has_unordered_moves(0), "a unit with no AP left does not warn")
+	var waiting := game.spawn_unit(0, "warrior", Vector2i(8, 8))
+	_ok(waiting != null and waiting.ap > 0 and waiting.order.is_empty() and game.has_unordered_moves(0), "a unit with AP left and no order still warns")
+	var short := game.spawn_unit(0, "warrior", Vector2i(4, 8))
+	short.ap = 1
+	var forest := _step(short.cell, Hex.EAST, 1)
+	game.map.set_land(forest, "forest")
+	var forest_reach: Dictionary = game.reachable_tiles(short)
+	_ok(forest_reach.has(forest) and int(forest_reach[forest]) == 0 and game.move_unit(short, forest) and short.ap == 0 and short.acted and game.unit_turn_done(short), "an over-budget step that arrives at 0 AP is done")
+	var captor := game.spawn_unit(0, "warrior", Vector2i(12, 4))
+	var captive := game.spawn_unit(1, "settler", _step(Vector2i(12, 4), Hex.EAST, 1))
+	_ok(captive != null and game.move_unit(captor, captive.cell) and captor.ap == 0 and captor.acted and game.unit_turn_done(captor), "a capture that sets AP to 0 is done")
+	var strikers := _blank_setup("plains")
+	var strike_at := Vector2i(4, 12)
+	var striker := strikers.spawn_unit(0, "warrior", strike_at)
+	var strike_foe := strikers.spawn_unit(1, "warrior", _step(strike_at, Hex.EAST, 1))
+	var strike_acted := striker.acted
+	_ok(strikers.use_ability(striker, "strike", strike_foe.cell).is_empty() and striker.ap == 0 and striker.acted and strike_acted == false and strikers.unit_turn_done(striker), "Strike leaves the attacker done and acted")
+	var shooter := strikers.spawn_unit(0, "archer", Vector2i(8, 12))
+	var shot_foe := strikers.spawn_unit(1, "warrior", _step(Vector2i(8, 12), Hex.EAST, 2))
+	strikers._refresh_fog()
+	var shot_acted := shooter.acted
+	_ok(strikers.use_ability(shooter, "shoot", shot_foe.cell).is_empty() and shooter.ap == 0 and shooter.acted and not shot_acted and strikers.unit_turn_done(shooter) and shooter.hp == cfg.unit("archer").hp, "Shoot leaves the attacker done and acted")
+	var basher := strikers.spawn_unit(0, "warrior", Vector2i(14, 12))
+	var bash_foe := strikers.spawn_unit(1, "warrior", _step(Vector2i(14, 12), Hex.EAST, 1))
+	var bash_acted := basher.acted
+	_ok(strikers.use_ability(basher, "shield_bash", bash_foe.cell).is_empty() and basher.ap == 0 and basher.acted and not bash_acted and strikers.unit_turn_done(basher) and basher.hp == cfg.unit("warrior").hp, "Shield Bash leaves the attacker done and acted")
+	var vollier := strikers.spawn_unit(0, "archer", Vector2i(18, 12))
+	var volley_at := _step(Vector2i(18, 12), Hex.EAST, 2)
+	var volley_foe := strikers.spawn_unit(1, "warrior", volley_at)
+	strikers._refresh_fog()
+	var volley_acted := vollier.acted
+	_ok(strikers.use_ability(vollier, "volley", volley_at).is_empty() and vollier.ap == 0 and vollier.acted and not volley_acted and strikers.unit_turn_done(vollier), "Volley leaves the attacker done and acted")
+	var runner := game.spawn_unit(0, "scout", Vector2i(4, 16))
+	_ok(runner != null and not game.unit_turn_done(runner) and game.use_ability(runner, "sprint", runner.cell).is_empty() and runner.ap == 5 and runner.movement_only and runner.acted and not game.unit_turn_done(runner), "Sprint with AP left is not done")
+	var cursor := runner.cell
+	var steps_ok := true
+	for _i in 4:
+		cursor = _step(cursor, Hex.EAST, 1)
+		if not game.move_unit(runner, cursor) or runner.ap <= 0 or not runner.movement_only or game.unit_turn_done(runner):
+			steps_ok = false
+			break
+	_ok(steps_ok and runner.ap == 1, "Sprint steps keep the scout active while AP remains")
+	var last := _step(cursor, Hex.EAST, 1)
+	game.map.set_land(last, "forest")
+	var last_reach: Dictionary = game.reachable_tiles(runner)
+	_ok(runner.ap == 1 and last_reach.has(last) and int(last_reach[last]) == 0 and game.move_unit(runner, last) and runner.ap == 0 and runner.movement_only and runner.acted and game.unit_turn_done(runner), "spending Sprint's last AP, including an over-budget step, finishes the turn")
+	var rival := game.spawn_unit(1, "warrior", Vector2i(24, 4))
+	_ok(not game.unit_turn_done(rival), "a rival with AP left is not done")
+	var rival_step := _step(rival.cell, Hex.EAST, 1)
+	_ok(game.move_unit(rival, rival_step) and rival.ap == 1 and not game.unit_turn_done(rival), "a rival's partial move is not done")
+	_ok(game.move_unit(rival, _step(rival_step, Hex.EAST, 1)) and rival.ap == 0 and game.unit_turn_done(rival), "a rival at 0 AP is done")
+	var skipped := game.spawn_unit(0, "warrior", Vector2i(20, 4))
+	skipped.hp = 40
+	var skipped_acted := skipped.acted
+	_ok(game.skip_unit(skipped) and skipped.ap == 0 and skipped.order == GameSetup.ORDER_SKIP and not skipped.acted and skipped_acted == false and game.unit_turn_done(skipped), "Skip sets AP to 0, leaves acted false, and is done")
+	game.end_turn()
+	_ok(skipped.hp == 50 and skipped.ap == cfg.unit("warrior").ap and skipped.order.is_empty() and not game.unit_turn_done(skipped), "Skip still heals, and the refill clears done")
+	_ok(not runner.movement_only and runner.ap == cfg.unit("scout").ap and not game.unit_turn_done(runner), "End Turn refills the spent scout and clears movement-only")
+	var guard := game.spawn_unit(0, "warrior", Vector2i(22, 8))
+	guard.hp = 40
+	_ok(game.fortify_unit(guard) and guard.ap == 0 and guard.order == GameSetup.ORDER_FORTIFY and guard.fortified and not guard.acted and game.unit_turn_done(guard), "Fortify sets AP to 0, leaves acted false, and is done this turn")
+	game.end_turn()
+	_ok(guard.hp == 50 and guard.fortified and guard.order == GameSetup.ORDER_FORTIFY and guard.ap == cfg.unit("warrior").ap and not game.unit_turn_done(guard), "a fortified unit with AP refilled is not done")
+	_ok(game.has_unordered_moves(0), "refilled units with no order warn again")
 
 
 func _test_city_capture() -> void:

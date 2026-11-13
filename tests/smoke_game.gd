@@ -62,6 +62,8 @@ func _run() -> void:
 		return
 	if not _sprint(game):
 		return
+	if not _auto_finish(game):
+		return
 	(game.get_node("%MenuButton") as Button).pressed.emit()
 	(game.get_node("%RestartButton") as Button).pressed.emit()
 	game = await _wait_for("res://scripts/view/game_view.gd")
@@ -1543,6 +1545,378 @@ func _sprint(game: Node) -> bool:
 	setup._refresh_fog()
 	game._refresh_board()
 	return true
+
+
+## Move, Sprint, and Skip through the real handlers. A unit at 0 AP dims and
+## stays selected. Sprint stays bright until the last AP is spent. Skip still heals.
+func _auto_finish(game: Node) -> bool:
+	var setup := game.get("setup") as GameSetup
+	var line := _sprint_line(setup)
+	if line.size() < 3:
+		print("FAIL no line for the finishing move")
+		quit(1)
+		return false
+	for cell in line:
+		setup.map.set_land(cell, "plains")
+	var home: Vector2i = line[0]
+	var step: Vector2i = line[1]
+	var last: Vector2i = line[2]
+	var warrior := setup.spawn_unit(0, "warrior", home)
+	if warrior == null:
+		print("FAIL auto-finish warrior did not spawn")
+		quit(1)
+		return false
+	var hp_before := warrior.hp
+	game._refresh_board()
+	if not _select_unit_title(game, home, "Warrior"):
+		return false
+	if int(game.get("_selected_id")) != warrior.id or setup.unit_turn_done(warrior):
+		print("FAIL warrior selection ", game.get("_selected_id"))
+		quit(1)
+		return false
+	var detail := (game.get_node("%SelectionDetail") as Label).text
+	if detail.contains("Done") or not detail.contains("Order None") or not _mark_is(game, warrior, 1.0):
+		print("FAIL fresh warrior '", detail, "' alpha ", _done_alpha(game, warrior))
+		quit(1)
+		return false
+	_click_cell(game, step, MOUSE_BUTTON_RIGHT)
+	detail = (game.get_node("%SelectionDetail") as Label).text
+	if warrior.cell != step or warrior.ap != 1 or setup.unit_turn_done(warrior) or int(game.get("_selected_id")) != warrior.id or detail.contains("Done") or not _mark_is(game, warrior, 1.0):
+		print("FAIL partial move ap ", warrior.ap, " detail '", detail, "' alpha ", _done_alpha(game, warrior))
+		quit(1)
+		return false
+	var camera := game.get_node("%Camera") as Camera2D
+	var cam := camera.position
+	_click_cell(game, last, MOUSE_BUTTON_RIGHT)
+	detail = (game.get_node("%SelectionDetail") as Label).text
+	if warrior.cell != last or warrior.ap != 0 or not warrior.acted or not setup.unit_turn_done(warrior):
+		print("FAIL finishing move ap ", warrior.ap, " cell ", warrior.cell)
+		quit(1)
+		return false
+	if int(game.get("_selected_id")) != warrior.id or not camera.position.is_equal_approx(cam):
+		print("FAIL selection or camera moved when AP hit 0")
+		quit(1)
+		return false
+	if not detail.contains("Order Done") or not detail.contains("AP 0 /") or not _mark_is(game, warrior, 0.55) or not _hp_bar_opaque(game, warrior):
+		print("FAIL done warrior '", detail, "' alpha ", _done_alpha(game, warrior))
+		quit(1)
+		return false
+	var strike := _SceneDriver.ability_button(game, "strike")
+	if strike == null or not strike.disabled or strike.tooltip_text != GameSetup.REASON_AP:
+		print("FAIL done bar ", strike.tooltip_text if strike != null else "missing")
+		quit(1)
+		return false
+	_click_cell(game, step, MOUSE_BUTTON_RIGHT)
+	if warrior.cell != last or warrior.ap != 0:
+		print("FAIL right click moved a done warrior")
+		quit(1)
+		return false
+	_click_cell(game, last)
+	if int(game.get("_selected_id")) != warrior.id or not (game.get_node("%SelectionDetail") as Label).text.contains("Order Done"):
+		print("FAIL re-select of a done warrior")
+		quit(1)
+		return false
+	print("PASS move to 0 AP dims, says Done, and stays selected")
+	if not setup.has_unordered_moves(setup.human_index):
+		print("FAIL expected another unit with AP")
+		quit(1)
+		return false
+	var end := game.get_node("%EndTurnButton") as Button
+	end.pressed.emit()
+	var warning := (game.get_node("%EndTurnWarning") as Label).text
+	if end.text != "End anyway (Enter)" or warning.is_empty():
+		print("FAIL warning missing while AP remains '", warning, "' ", end.text)
+		quit(1)
+		return false
+	_click_cell(game, last)
+	if end.text != "End Turn (Enter)" or not (game.get_node("%EndTurnWarning") as Label).text.is_empty():
+		print("FAIL warning stuck after the click")
+		quit(1)
+		return false
+	print("PASS end turn warning while some unit still has AP")
+	var avoid := {}
+	for cell in line:
+		avoid[cell] = true
+	var sline := _sprint_line(setup)
+	if sline.size() < 6:
+		print("FAIL no line for sprint auto-finish")
+		quit(1)
+		return false
+	for cell in sline:
+		setup.map.set_land(cell, "plains")
+		avoid[cell] = true
+	var scout := setup.spawn_unit(0, "scout", sline[0])
+	if scout == null:
+		print("FAIL auto-finish scout did not spawn")
+		quit(1)
+		return false
+	game._refresh_board()
+	if not _select_unit_title(game, sline[0], "Scout"):
+		return false
+	var sprint := _SceneDriver.ability_button(game, "sprint")
+	sprint.pressed.emit()
+	sprint = _SceneDriver.ability_button(game, "sprint")
+	sprint.pressed.emit()
+	detail = (game.get_node("%SelectionDetail") as Label).text
+	if scout.ap != 5 or not scout.movement_only or setup.unit_turn_done(scout) or detail.contains("Done") or not _mark_is(game, scout, 1.0) or int(game.get("_selected_id")) != scout.id:
+		print("FAIL sprint leftover ap ", scout.ap, " detail '", detail, "' alpha ", _done_alpha(game, scout))
+		quit(1)
+		return false
+	print("PASS sprint leftover stays active")
+	for i in range(1, 5):
+		_click_cell(game, sline[i], MOUSE_BUTTON_RIGHT)
+		if scout.cell != sline[i] or scout.ap != 5 - i or setup.unit_turn_done(scout) or not _mark_is(game, scout, 1.0):
+			print("FAIL sprint step ", i, " ap ", scout.ap, " alpha ", _done_alpha(game, scout))
+			quit(1)
+			return false
+	setup.map.set_land(sline[5], "forest")
+	game._refresh_board()
+	cam = camera.position
+	_click_cell(game, sline[5], MOUSE_BUTTON_RIGHT)
+	detail = (game.get_node("%SelectionDetail") as Label).text
+	strike = _SceneDriver.ability_button(game, "strike")
+	if scout.cell != sline[5] or scout.ap != 0 or not scout.movement_only or not setup.unit_turn_done(scout):
+		print("FAIL sprint spent ap ", scout.ap, " cell ", scout.cell)
+		quit(1)
+		return false
+	if int(game.get("_selected_id")) != scout.id or not camera.position.is_equal_approx(cam):
+		print("FAIL sprint selection or camera moved")
+		quit(1)
+		return false
+	if not detail.contains("Order Done") or not _mark_is(game, scout, 0.55) or strike == null or not strike.disabled or strike.tooltip_text != GameSetup.REASON_MOVE_ONLY:
+		print("FAIL sprint done '", detail, "' tip ", strike.tooltip_text if strike != null else "missing", " alpha ", _done_alpha(game, scout))
+		quit(1)
+		return false
+	_click_cell(game, sline[4], MOUSE_BUTTON_RIGHT)
+	if scout.cell != sline[5]:
+		print("FAIL right click moved a done scout")
+		quit(1)
+		return false
+	print("PASS sprint dims only after the last AP")
+	var healer_cell := _free_cell(setup, avoid)
+	if healer_cell.x < 0:
+		print("FAIL no tile for the skipped unit")
+		quit(1)
+		return false
+	setup.map.set_land(healer_cell, "plains")
+	avoid[healer_cell] = true
+	var healer := setup.spawn_unit(0, "warrior", healer_cell)
+	if healer == null:
+		print("FAIL skipped warrior did not spawn")
+		quit(1)
+		return false
+	healer.hp = 40
+	game._refresh_board()
+	if not _select_unit_title(game, healer_cell, "Warrior"):
+		return false
+	var skip := _SceneDriver.order_button(game, "skip")
+	skip.pressed.emit()
+	detail = (game.get_node("%SelectionDetail") as Label).text
+	if healer.ap != 0 or healer.acted or healer.order != GameSetup.ORDER_SKIP or not setup.unit_turn_done(healer):
+		print("FAIL skip ap ", healer.ap, " acted ", healer.acted)
+		quit(1)
+		return false
+	if not detail.contains("Skip") or detail.contains("Order Done") or not _mark_is(game, healer, 0.55):
+		print("FAIL skip mark '", detail, "' alpha ", _done_alpha(game, healer))
+		quit(1)
+		return false
+	print("PASS skip dims without counting as acted")
+	var guard_cell := _free_cell(setup, avoid)
+	if guard_cell.x < 0:
+		print("FAIL no tile for fortify")
+		quit(1)
+		return false
+	setup.map.set_land(guard_cell, "plains")
+	avoid[guard_cell] = true
+	var guard := setup.spawn_unit(0, "warrior", guard_cell)
+	if guard == null:
+		print("FAIL fortify warrior did not spawn")
+		quit(1)
+		return false
+	guard.hp = 40
+	game._refresh_board()
+	if not _select_unit_title(game, guard_cell, "Warrior"):
+		return false
+	_SceneDriver.order_button(game, "fortify").pressed.emit()
+	detail = (game.get_node("%SelectionDetail") as Label).text
+	if guard.ap != 0 or guard.acted or not guard.fortified or not setup.unit_turn_done(guard) or not detail.contains("Order Fortify") or detail.contains("Done") or not _mark_is(game, guard, 0.55):
+		print("FAIL fortify mark '", detail, "' ap ", guard.ap, " alpha ", _done_alpha(game, guard))
+		quit(1)
+		return false
+	var pair := _rival_pair(setup, last, avoid)
+	if pair.is_empty():
+		print("FAIL no visible tiles for a rival")
+		quit(1)
+		return false
+	var near: Vector2i = pair[0]
+	var beside: Vector2i = pair[1]
+	setup.map.set_land(near, "plains")
+	setup.map.set_land(beside, "plains")
+	var rival := setup.spawn_unit(1, "warrior", near)
+	if rival == null:
+		print("FAIL rival did not spawn")
+		quit(1)
+		return false
+	if not setup.move_unit(rival, beside) or rival.ap != 1 or setup.unit_turn_done(rival):
+		print("FAIL rival partial ap ", rival.ap)
+		quit(1)
+		return false
+	if not setup.move_unit(rival, near) or rival.ap != 0 or not setup.unit_turn_done(rival):
+		print("FAIL rival did not finish")
+		quit(1)
+		return false
+	game._refresh_board()
+	if not setup.fog.unit_visible(setup.human_index, rival.cell) or not _mark_is(game, rival, 0.55):
+		print("FAIL rival dim visible ", setup.fog.unit_visible(setup.human_index, rival.cell), " alpha ", _done_alpha(game, rival))
+		quit(1)
+		return false
+	print("PASS a visible rival at 0 AP is dimmed")
+	if not _skip_unordered(game, setup):
+		return false
+	if setup.has_unordered_moves(setup.human_index):
+		print("FAIL unordered moves remained")
+		quit(1)
+		return false
+	_spare_settlers(setup)
+	var turn_before := setup.turn
+	end.pressed.emit()
+	if end.text == "End anyway (Enter)":
+		print("FAIL warning stayed with no AP left")
+		quit(1)
+		return false
+	if setup.result != null or setup.turn != turn_before + 1:
+		print("FAIL end turn result ", setup.result, " turn ", setup.turn)
+		quit(1)
+		return false
+	if healer.hp != 50 or warrior.hp != hp_before or warrior.ap != setup.config.unit("warrior").ap or setup.unit_turn_done(warrior):
+		print("FAIL after turn healer ", healer.hp, " warrior hp ", warrior.hp, " ap ", warrior.ap)
+		quit(1)
+		return false
+	if guard.hp != 50 or not guard.fortified or guard.ap != setup.config.unit("warrior").ap or setup.unit_turn_done(guard):
+		print("FAIL fortify refill hp ", guard.hp, " ap ", guard.ap, " done ", setup.unit_turn_done(guard))
+		quit(1)
+		return false
+	if scout.movement_only or scout.ap != setup.config.unit("scout").ap or setup.unit_turn_done(scout):
+		print("FAIL scout refill ap ", scout.ap, " only ", scout.movement_only)
+		quit(1)
+		return false
+	game._refresh_board()
+	if not _mark_is(game, warrior, 1.0) or not _mark_is(game, scout, 1.0) or not _mark_is(game, healer, 1.0) or not _mark_is(game, guard, 1.0) or not _mark_is(game, rival, 1.0):
+		print("FAIL dimming stayed warrior ", _done_alpha(game, warrior), " scout ", _done_alpha(game, scout), " guard ", _done_alpha(game, guard))
+		quit(1)
+		return false
+	if not _select_unit_title(game, warrior.cell, "Warrior"):
+		return false
+	detail = (game.get_node("%SelectionDetail") as Label).text
+	if detail.contains("Done") or not detail.contains("Order None") or not detail.contains("AP %d / %d" % [warrior.ap, setup.config.unit("warrior").ap]):
+		print("FAIL refilled panel '", detail, "'")
+		quit(1)
+		return false
+	if not _select_unit_title(game, guard.cell, "Warrior"):
+		return false
+	detail = (game.get_node("%SelectionDetail") as Label).text
+	if not detail.contains("Order Fortify") or detail.contains("Done") or not _mark_is(game, guard, 1.0):
+		print("FAIL fortified refill '", detail, "' alpha ", _done_alpha(game, guard))
+		quit(1)
+		return false
+	print("PASS end turn clears the dim and still heals Skip and Fortify")
+	return true
+
+
+func _skip_unordered(game: Node, setup: GameSetup) -> bool:
+	var human := setup.human_index
+	var pending: Array[PlayerState.UnitState] = []
+	for unit in setup.players[human].units:
+		if unit.ap > 0 and unit.order.is_empty():
+			pending.append(unit)
+	for unit in pending:
+		if unit.movement_only:
+			if not _spend_movement_only(game, setup, unit):
+				return false
+			continue
+		var title := unit.unit_type.capitalize()
+		if (game.get_node("%SelectionTitle") as Label).text != title or int(game.get("_selected_id")) != unit.id:
+			if not _select_unit_title(game, unit.cell, title):
+				return false
+		var skip := _SceneDriver.order_button(game, "skip")
+		if skip == null or skip.disabled:
+			print("FAIL cannot skip ", unit.unit_type, " ", skip.tooltip_text if skip != null else "missing")
+			quit(1)
+			return false
+		skip.pressed.emit()
+		if unit.ap != 0 or unit.acted:
+			print("FAIL skip left ", unit.unit_type, " ap ", unit.ap, " acted ", unit.acted)
+			quit(1)
+			return false
+	return true
+
+
+func _spend_movement_only(game: Node, setup: GameSetup, unit: PlayerState.UnitState) -> bool:
+	var guard := 0
+	while unit.ap > 0 and guard < 12:
+		guard += 1
+		var tiles: Dictionary = setup.reachable_tiles(unit)
+		if tiles.is_empty():
+			print("FAIL movement-only unit cannot spend ", unit.ap)
+			quit(1)
+			return false
+		var dest: Vector2i = tiles.keys()[0]
+		setup.map.set_land(dest, "plains")
+		if not setup.move_unit(unit, dest):
+			print("FAIL movement-only step failed")
+			quit(1)
+			return false
+	game._refresh_board()
+	if unit.ap != 0:
+		print("FAIL movement-only AP remained ", unit.ap)
+		quit(1)
+		return false
+	return true
+
+
+func _free_cell(setup: GameSetup, avoid: Dictionary) -> Vector2i:
+	for row in range(1, setup.map.height - 1):
+		for col in range(1, setup.map.width - 1):
+			var cell := Vector2i(col, row)
+			if avoid.has(cell) or _cell_taken(setup, cell):
+				continue
+			return cell
+	return Vector2i(-1, -1)
+
+
+func _rival_pair(setup: GameSetup, anchor: Vector2i, avoid: Dictionary) -> Array:
+	var axial := Hex.offset_to_axial(anchor)
+	for dir in 6:
+		var n1 := Hex.axial_to_offset(Hex.neighbor(axial, dir))
+		var n2_axial := Hex.neighbor(Hex.offset_to_axial(n1), (dir + 1) % 6)
+		var n2 := Hex.axial_to_offset(n2_axial)
+		if not setup.map.in_bounds(n1) or not setup.map.in_bounds(n2):
+			continue
+		if avoid.has(n1) or avoid.has(n2) or _cell_taken(setup, n1) or _cell_taken(setup, n2):
+			continue
+		if Hex.distance(axial, Hex.offset_to_axial(n1)) > 2 or Hex.distance(axial, n2_axial) > 2:
+			continue
+		return [n1, n2]
+	return []
+
+
+func _done_alpha(game: Node, unit: PlayerState.UnitState) -> float:
+	var sprite := game.get_node("%Actors").get_node_or_null("Unit_%d" % unit.id) as CanvasItem
+	if sprite == null:
+		return -1.0
+	return sprite.self_modulate.a
+
+
+func _mark_is(game: Node, unit: PlayerState.UnitState, alpha: float) -> bool:
+	return is_equal_approx(_done_alpha(game, unit), alpha)
+
+
+func _hp_bar_opaque(game: Node, unit: PlayerState.UnitState) -> bool:
+	var sprite := game.get_node("%Actors").get_node_or_null("Unit_%d" % unit.id) as Node
+	if sprite == null:
+		return false
+	var bar := sprite.get_node_or_null("HpBar") as CanvasItem
+	return bar != null and bar.visible and is_equal_approx(bar.modulate.a, 1.0) and is_equal_approx(bar.self_modulate.a, 1.0)
 
 
 func _open_pair(setup: GameSetup, avoid: Dictionary) -> Array:

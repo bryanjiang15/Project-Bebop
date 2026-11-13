@@ -933,6 +933,13 @@ func fortify_unit(unit: PlayerState.UnitState) -> bool:
 	return true
 
 
+## Done for the turn exactly when no AP remains. Skip and Fortify reach that
+## by setting AP to 0. A Fortify order does not keep the unit done once End
+## Turn refills AP. Calling this does not change acted or order.
+func unit_turn_done(unit: PlayerState.UnitState) -> bool:
+	return unit != null and unit.ap == 0
+
+
 ## True when a unit still has AP and no order. Skip and Fortify set AP to 0,
 ## so they clear the warning without counting as acted.
 func has_unordered_moves(player: int) -> bool:

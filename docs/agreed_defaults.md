@@ -46,6 +46,13 @@ Bryan decided that Volley damages enemy cities in its radius. The damage is the 
     - D5. Skip, Fortify, and Found stay refused after Sprint. The shared reason is `Can only move`. The player spends leftover AP by moving, or ends it with End Turn. There is no Done control, and Skip is not an exception.
     - D6. Sprint sets `acted`, so the scout does not idle-heal. The bar's existing cooldown line is the only clock. After Sprint it reads `Cooldown 3`, then `Cooldown 2`, then `Cooldown 1`, then ready.
 
+19. Auto-finish (ticket 31). These are the spec gaps that were built. The Notion acceptance text was still draft; this is the working rule:
+    - D1. A unit is done exactly when `ap == 0`. `GameSetup.unit_turn_done` is that check. There is no second flag and no extra "cannot use an ability" test. A Fortify order with AP refilled on the next turn is not done.
+    - D2. Selection stays on the unit that just finished. The camera does not move. Jumping to the next unit, a Next Unit control, and an orders count on End Turn are ticket 32.
+    - D3. A movement-only scout with AP left is not done and is not dimmed. It becomes done when a later move spends the last AP, including an over-budget step that arrives at 0. `movement_only` stays until End Turn.
+    - D4. The mark is the sprite's `self_modulate` alpha 0.55, so the HP bar stays fully opaque, plus `Order Done` on the selection summary when the order is none. Skip still reads Skip and Fortify still reads Fortify. No new art. The done mark does not assign Skip, so heal and Fortify stay as they are.
+    - D5. A done unit can be selected again. Its bar stays grey (`Needs at least 1 AP`, or `Can only move` when Sprint left it movement-only at 0 AP). Right-click does not move it.
+
 Also: volcanic damage uses the brief's flat value, not the design doc's chance-based proposal.
 
 Decided by Bryan: engine Godot (use 4.7 stable), art is isometric 2D (2D art that reads as 3D), Civ 6-style hex map. Bryan is on macOS and plays a downloadable macOS build each milestone.
