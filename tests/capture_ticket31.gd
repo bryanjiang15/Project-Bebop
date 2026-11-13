@@ -85,7 +85,9 @@ func _run() -> void:
 		await process_frame
 	if not await _save("/opt/cursor/artifacts/ticket31_after_zero_ap.png"):
 		return
-	var scout_home := _step(home, Hex.NORTH, 3)
+	# Northwest, not north: pointy-top hexes have no north step. Two steps keeps
+	# the later five-tile east walk inside the painted disk.
+	var scout_home := _step(home, Hex.NORTHWEST, 2)
 	var scout := setup.spawn_unit(0, "scout", scout_home)
 	if scout == null:
 		print("FAIL scout did not spawn")
