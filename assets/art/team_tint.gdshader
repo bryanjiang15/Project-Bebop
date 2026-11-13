@@ -7,5 +7,6 @@ void fragment() {
 	vec4 c = texture(TEXTURE, UV);
 	float m = texture(team_mask, UV).a;
 	c.rgb = mix(c.rgb, clamp(c.rgb * team_color.rgb * (255.0 / 184.0), 0.0, 1.0), m);
-	COLOR = c;
+	// Keep the canvas color so a done unit's self_modulate alpha actually fades the sprite.
+	COLOR = c * COLOR;
 }

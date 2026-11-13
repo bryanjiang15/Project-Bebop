@@ -18,6 +18,8 @@ const _LAND_TINT := {
 	"water": Color(0.38, 0.62, 0.86, 0.95),
 	"volcanic": Color(0.92, 0.42, 0.28, 0.95),
 }
+## A done unit dims only its own sprite. The HP bar is a child and stays opaque.
+const _DONE_ALPHA := 0.55
 const _HP_FULL := 48.0
 const _HP_LEFT := -24.0
 const _HP_TOP := -52.0
@@ -259,6 +261,7 @@ func _on_skip_pressed() -> void:
 	_spell_id = ""
 	_ability_id = ""
 	_cancel_end_confirm()
+	_refresh_actors()
 	_refresh_spells()
 	_refresh_selection()
 
@@ -273,6 +276,7 @@ func _on_fortify_pressed() -> void:
 	_spell_id = ""
 	_ability_id = ""
 	_cancel_end_confirm()
+	_refresh_actors()
 	_refresh_spells()
 	_refresh_selection()
 
@@ -529,6 +533,8 @@ func _order_label(unit: PlayerState.UnitState) -> String:
 		return "Fortify"
 	if unit.order == GameSetup.ORDER_SKIP:
 		return "Skip"
+	if setup.unit_turn_done(unit):
+		return "Done"
 	return "None"
 
 
@@ -644,6 +650,7 @@ func _refresh_actors() -> void:
 				shift = Vector2(lerpf(-36.0, 36.0, along), 0.0)
 			sprite.position = _map.map_to_local(cell) + shift
 			_paint_hp(sprite, unit)
+			_paint_done(sprite, unit)
 			_actors.add_child(sprite)
 
 
@@ -898,6 +905,11 @@ func _paint_hp(sprite: Sprite2D, unit: PlayerState.UnitState) -> void:
 		fill.color = Color(0.92, 0.76, 0.28, 1)
 	else:
 		fill.color = Color(0.9, 0.32, 0.28, 1)
+
+
+func _paint_done(sprite: Sprite2D, unit: PlayerState.UnitState) -> void:
+	var alpha := _DONE_ALPHA if setup.unit_turn_done(unit) else 1.0
+	sprite.self_modulate = Color(1, 1, 1, alpha)
 
 
 func _clear_hover() -> void:
