@@ -26,6 +26,7 @@ func _init() -> void:
 	_test_ability_targets()
 	_test_shield_bash()
 	_test_volley()
+	_test_sprint()
 	_test_city_capture()
 	_test_spells()
 	_test_rival_land_updates()
@@ -92,7 +93,7 @@ func _test_config() -> void:
 	_ok(cfg.unit("archer").attack == 25 and cfg.unit("archer").defense == 12 and cfg.unit("archer").ap == 2, "archer")
 	_ok(cfg.unit("warrior").ap == 2 and cfg.unit("settler").ap == 2 and cfg.unit("scout").ap == 3, "AP is scout 3 and 2 for every other unit")
 	_ok(cfg.unit("settler").abilities.is_empty(), "the settler has no abilities")
-	_ok(cfg.unit("warrior").abilities.size() == 2 and cfg.unit("warrior").abilities[0] == "strike" and cfg.unit("warrior").abilities[1] == "shield_bash" and cfg.unit("scout").abilities.size() == 1 and cfg.unit("scout").abilities[0] == "strike", "warrior opens with Strike then Shield Bash, and the scout keeps Strike")
+	_ok(cfg.unit("warrior").abilities.size() == 2 and cfg.unit("warrior").abilities[0] == "strike" and cfg.unit("warrior").abilities[1] == "shield_bash" and cfg.unit("scout").abilities.size() == 2 and cfg.unit("scout").abilities[0] == "strike" and cfg.unit("scout").abilities[1] == "sprint", "warrior opens with Strike then Shield Bash, and the scout opens with Strike then Sprint")
 	_ok(cfg.unit("archer").abilities.size() == 2 and cfg.unit("archer").abilities[0] == "shoot" and cfg.unit("archer").abilities[1] == "volley", "archer opens with Shoot then Volley")
 	_ok(cfg.ability("strike").ability_name == "Strike" and cfg.ability("strike").target == "enemy" and cfg.ability("strike").area == "single" and cfg.ability("strike").melee and cfg.ability("strike").range == 1 and cfg.ability("strike").ap_cost == 1 and cfg.ability("strike").cooldown == 0 and cfg.ability("strike").effect == "damage" and is_equal_approx(cfg.ability("strike").damage_multiplier, 1.0) and cfg.ability("strike").deals_counter and cfg.ability("strike").push_distance == 0, "strike")
 	_ok(not cfg.ability("shoot").melee and cfg.ability("shoot").range == 2 and cfg.ability("shoot").ability_name == "Shoot" and cfg.ability("shoot").ap_cost == 1 and not cfg.ability("shoot").deals_counter and cfg.ability("shoot").push_distance == 0, "shoot")
@@ -100,6 +101,9 @@ func _test_config() -> void:
 	_ok(bash.ability_name == "Shield Bash" and bash.target == "enemy" and bash.area == "single" and bash.melee and bash.range == 1 and bash.ap_cost == 1 and bash.cooldown == 2 and bash.effect == "damage" and is_equal_approx(bash.damage_multiplier, 0.5) and not bash.deals_counter and bash.push_distance == 1, "shield bash")
 	var volley := cfg.ability("volley")
 	_ok(volley.ability_name == "Volley" and volley.target == "tile" and volley.area == "radius" and volley.radius == 1 and not volley.melee and volley.range == 2 and volley.ap_cost == 1 and volley.cooldown == 3 and volley.effect == "damage" and is_equal_approx(volley.damage_multiplier, 0.5) and not volley.deals_counter and volley.push_distance == 0, "volley")
+	var sprint := cfg.ability("sprint")
+	_ok(sprint.ability_name == "Sprint" and sprint.target == "self" and sprint.range == 0 and sprint.area == "single" and sprint.ap_cost == 1 and sprint.cooldown == 3 and sprint.effect == "move" and sprint.ap_bonus == 2 and sprint.movement_only, "sprint")
+	_ok(cfg.ability("strike").ap_bonus == 0 and not cfg.ability("strike").movement_only and volley.ap_bonus == 0 and not volley.movement_only, "damage abilities omit the move fields")
 	_ok(cfg.ability("strike").radius == 0 and cfg.ability("shoot").radius == 0 and bash.radius == 0, "single abilities omit radius")
 	_ok(GameConfig.ability_errors(raw).is_empty(), "the shipped ability table validates")
 	_ok(not cfg.unit("settler").combatant and cfg.unit("settler").population_cost == 1 and cfg.unit("settler").min_city_size == 2, "settler")
@@ -206,6 +210,15 @@ func _test_config() -> void:
 		"abilities.volley.melee",
 		"abilities.volley.deals_counter",
 		"abilities.volley.push_distance",
+		"abilities.sprint.name",
+		"abilities.sprint.target",
+		"abilities.sprint.range",
+		"abilities.sprint.area",
+		"abilities.sprint.ap_cost",
+		"abilities.sprint.cooldown",
+		"abilities.sprint.effect",
+		"abilities.sprint.ap_bonus",
+		"abilities.sprint.movement_only",
 		"units.scout.ap",
 		"units.scout.abilities",
 		"units.warrior.ap",
@@ -235,6 +248,9 @@ func _test_config() -> void:
 	var unknown_archer: Dictionary = raw.duplicate(true)
 	(unknown_archer["units"]["archer"] as Dictionary)["abilities"] = ["nope"]
 	_ok(_error_has(GameConfig.ability_errors(unknown_archer), "unknown id"), "an archer ability id that does not exist fails loudly")
+	var unknown_scout: Dictionary = raw.duplicate(true)
+	(unknown_scout["units"]["scout"] as Dictionary)["abilities"] = ["nope"]
+	_ok(_error_has(GameConfig.ability_errors(unknown_scout), "unknown id"), "a scout ability id that does not exist fails loudly")
 	_ok(_error_has(GameConfig.ability_errors(_without_key(raw, "abilities.shield_bash.deals_counter")), "deals_counter"), "missing deals_counter fails loudly")
 	_ok(_error_has(GameConfig.ability_errors(_without_key(raw, "abilities.shield_bash.push_distance")), "push_distance"), "missing push_distance fails loudly")
 	var bad_counter: Dictionary = raw.duplicate(true)
@@ -250,6 +266,27 @@ func _test_config() -> void:
 	var negative_radius: Dictionary = raw.duplicate(true)
 	(negative_radius["abilities"]["volley"] as Dictionary)["radius"] = -1
 	_ok(_error_has(GameConfig.ability_errors(negative_radius), "radius"), "radius cannot be negative")
+	var move_missing: Dictionary = raw.duplicate(true)
+	move_missing["abilities"]["dash"] = {
+		"name": "Dash",
+		"target": "self",
+		"range": 0,
+		"area": "single",
+		"ap_cost": 1,
+		"cooldown": 0,
+		"effect": "move",
+	}
+	_ok(_error_has(GameConfig.ability_errors(move_missing), "ap_bonus"), "a move ability requires ap_bonus")
+	(move_missing["abilities"]["dash"] as Dictionary)["ap_bonus"] = 2
+	_ok(_error_has(GameConfig.ability_errors(move_missing), "movement_only"), "a move ability requires movement_only")
+	var bad_bonus: Dictionary = raw.duplicate(true)
+	(bad_bonus["abilities"]["sprint"] as Dictionary)["ap_bonus"] = "two"
+	_ok(_error_has(GameConfig.ability_errors(bad_bonus), "ap_bonus"), "ap_bonus must be an int")
+	var bad_only: Dictionary = raw.duplicate(true)
+	(bad_only["abilities"]["sprint"] as Dictionary)["movement_only"] = "yes"
+	_ok(_error_has(GameConfig.ability_errors(bad_only), "movement_only"), "movement_only must be a bool")
+	_ok(_error_has(GameConfig.ability_errors(_without_key(raw, "abilities.sprint.ap_bonus")), "ap_bonus"), "missing sprint ap_bonus fails loudly")
+	_ok(_error_has(GameConfig.ability_errors(_without_key(raw, "abilities.sprint.movement_only")), "movement_only"), "missing sprint movement_only fails loudly")
 
 
 func _test_hex_neighbors() -> void:
@@ -1314,7 +1351,7 @@ func _test_ap_and_abilities() -> void:
 	_ok(cooled.ability_cooldown_left(caster, "slow_strike") == 1, "End Turn ticks the ability cooldown once")
 	cooled.end_turn()
 	_ok(cooled.ability_cooldown_left(caster, "slow_strike") == 0 and cooled.can_use_ability(caster, "slow_strike", dummy.cell).is_empty(), "cooldown 2 is ready after two ticks")
-	for effect in ["status", "move", "terraform"]:
+	for effect in ["status", "terraform"]:
 		var hook_data := GameConfig.read_json(GameConfig.PATH).duplicate(true)
 		hook_data["abilities"]["hook"] = {
 			"name": "Hook",
@@ -1360,7 +1397,7 @@ func _test_shield_bash() -> void:
 	_ok(listed.size() == 2 and listed[0] == "strike" and listed[1] == "shield_bash", "the warrior lists Strike then Shield Bash")
 	var scout := sample_game.spawn_unit(0, "scout", Vector2i(4, 4))
 	var scout_ids := sample_game.unit_abilities(scout)
-	_ok(scout != null and scout_ids.size() == 1 and scout_ids[0] == "strike", "the scout still has only Strike")
+	_ok(scout != null and scout_ids.size() == 2 and scout_ids[0] == "strike" and scout_ids[1] == "sprint", "the scout lists Strike then Sprint")
 	var strike := sample_game.ability_preview(sample_warrior, "strike", sample_foe.cell)
 	_ok(bool(strike["ok"]) and int(strike["damage"]) == 30 and int(strike["counter"]) == 30 and not bool(strike["push"]), "strike on open ground is still 30 and 30 and does not push")
 	sample_game.map.set_land(sample_foe.cell, "hills")
@@ -1837,6 +1874,109 @@ func _test_ability_targets() -> void:
 	_ok(founder != null and game.can_found(founder) == GameSetup.REASON_AP, "Found at 0 AP is unchanged")
 	founder.ap = game.config.unit("settler").ap
 	_ok(game.can_found(founder).is_empty(), "Found with AP is legal on open plains")
+
+
+func _test_sprint() -> void:
+	print("[sprint]")
+	var cfg: GameConfig = GameConfig.load_file()
+	var game := _blank_setup("plains")
+	var origin := Vector2i(8, 8)
+	# The counter kills the scout. A spare settler keeps that from ending the match.
+	var spare := game.spawn_unit(0, "settler", Vector2i(2, 2))
+	var striker := game.spawn_unit(0, "scout", origin)
+	var foe := game.spawn_unit(1, "warrior", _step(origin, Hex.EAST, 1))
+	var hit := game.ability_preview(striker, "strike", foe.cell)
+	_ok(spare != null and bool(hit["ok"]) and int(hit["damage"]) == 17 and int(hit["counter"]) == 54, "scout Strike into a warrior is still 17 and 54")
+	var foe_hp := foe.hp
+	_ok(game.use_ability(striker, "strike", foe.cell).is_empty(), "scout Strike resolves")
+	_ok(striker.ap == 0 and striker.acted and striker.used_ability and not striker.movement_only and foe.hp == foe_hp - 17 and striker.hp == 0 and not game.players[0].units.has(striker), "scout Strike still zeroes AP and applies both sides")
+	_ok(game.can_found(striker) == GameSetup.REASON_SETTLER, "a scout has no Found")
+	var runner := game.spawn_unit(0, "scout", Vector2i(4, 4))
+	var before_reach := game.reachable_tiles(runner)
+	var preview := game.move_reach_preview(runner, "sprint")
+	var far := _step(runner.cell, Hex.EAST, 4)
+	_ok(runner.ap == 3 and not before_reach.has(far) and preview.has(far) and runner.ap == 3, "the sprint preview reaches farther and does not grant AP yet")
+	_ok(bool(game.ability_preview(runner, "sprint", runner.cell)["ok"]), "sprint on the scout's tile is legal")
+	_ok(game.use_ability(runner, "sprint", far) == GameSetup.REASON_RANGE and runner.ap == 3 and not runner.movement_only and runner.cell == Vector2i(4, 4), "another tile does not sprint and does not move")
+	_ok(game.use_ability(runner, "sprint", runner.cell).is_empty(), "sprint confirms on the scout")
+	_ok(runner.ap == 5 and runner.movement_only and runner.acted and runner.used_ability and game.ability_cooldown_left(runner, "sprint") == 3, "sprint at 3 AP leaves AP 5, cooldown 3, and movement-only")
+	_ok(game.ability_block_reason(runner, "strike") == GameSetup.REASON_MOVE_ONLY and game.can_use_ability(runner, "strike", foe.cell) == GameSetup.REASON_MOVE_ONLY, "Strike is refused with the movement-only reason")
+	_ok(game.ability_block_reason(runner, "sprint") == GameSetup.REASON_MOVE_ONLY and game.use_ability(runner, "sprint", runner.cell) == GameSetup.REASON_MOVE_ONLY and runner.ap == 5, "a second Sprint is refused with the same reason")
+	_ok(game.skip_reason(runner) == GameSetup.REASON_MOVE_ONLY and not game.skip_unit(runner) and runner.ap == 5, "Skip is refused with the same reason")
+	_ok(game.fortify_reason(runner) == GameSetup.REASON_MOVE_ONLY and not game.fortify_unit(runner) and not runner.fortified, "Fortify is refused with the same reason")
+	_ok(game.can_found(runner) == GameSetup.REASON_MOVE_ONLY and game.found_city(runner) == null and game.players[0].units.has(runner), "Found asked of a scout after Sprint uses the same reason")
+	var step := _step(runner.cell, Hex.EAST, 1)
+	_ok(game.move_unit(runner, step) and runner.cell == step and runner.ap == 4 and runner.movement_only, "a post-sprint move spends bonus AP")
+	var walks := 0
+	while runner.ap > 0 and walks < 8:
+		var dest := _step(runner.cell, Hex.EAST, 1)
+		if not game.move_unit(runner, dest):
+			break
+		walks += 1
+	_ok(runner.ap == 0 and runner.movement_only and walks == 4, "the flag stays when AP reaches 0")
+	_ok(game.reachable_tiles(runner).is_empty() and not game.move_unit(runner, _step(runner.cell, Hex.EAST, 1)), "the scout cannot move further")
+	_ok(game.ability_block_reason(runner, "strike") == GameSetup.REASON_MOVE_ONLY and game.skip_reason(runner) == GameSetup.REASON_MOVE_ONLY and game.fortify_reason(runner) == GameSetup.REASON_MOVE_ONLY and game.can_found(runner) == GameSetup.REASON_MOVE_ONLY, "abilities and orders stay refused at 0 AP")
+	runner.hp = 30
+	game.end_turn()
+	_ok(not runner.movement_only and not runner.acted and not runner.used_ability and runner.ap == 3 and runner.hp == 30, "End Turn clears the flag, refills to 3, and does not heal a scout that sprinted")
+	_ok(game.ability_cooldown_left(runner, "sprint") == 2, "one End Turn leaves cooldown 2")
+	game.end_turn()
+	_ok(game.ability_cooldown_left(runner, "sprint") == 1, "the second End Turn leaves cooldown 1")
+	game.end_turn()
+	_ok(game.ability_cooldown_left(runner, "sprint") == 0 and game.ability_block_reason(runner, "sprint").is_empty(), "cooldown 3 is ready after the third tick")
+	var partial := game.spawn_unit(0, "scout", Vector2i(8, 12))
+	_ok(game.move_unit(partial, _step(partial.cell, Hex.EAST, 1)) and game.move_unit(partial, _step(partial.cell, Hex.EAST, 1)) and partial.ap == 1, "two plains steps leave 1 AP")
+	_ok(game.use_ability(partial, "sprint", partial.cell).is_empty() and partial.ap == 3 and partial.movement_only, "a scout that spends 2 AP then Sprints ends at AP 3")
+	var hunter := game.spawn_unit(0, "scout", Vector2i(14, 4))
+	# Keep the rival in the match after the settler is captured.
+	var rival_spare := game.spawn_unit(1, "settler", Vector2i(24, 16))
+	var captive := game.spawn_unit(1, "settler", _step(hunter.cell, Hex.EAST, 1))
+	_ok(rival_spare != null, "the rival keeps a settler off the capture")
+	_ok(game.use_ability(hunter, "sprint", hunter.cell).is_empty(), "sprint before a capture")
+	_ok(game.can_use_ability(hunter, "strike", captive.cell) == GameSetup.REASON_MOVE_ONLY, "attacking after Sprint is refused")
+	_ok(game.move_unit(hunter, captive.cell) and captive.owner == 0 and hunter.cell == captive.cell, "a capture move onto a lone settler still works")
+	var fallen := game.found_city(game.spawn_unit(1, "settler", Vector2i(20, 10)))
+	fallen.hp = 0
+	var looker := game.spawn_unit(0, "scout", _step(fallen.cell, Hex.WEST, 1))
+	_ok(game.use_ability(looker, "sprint", looker.cell).is_empty() and not game.reachable_tiles(looker).has(fallen.cell) and not game.move_unit(looker, fallen.cell) and fallen.player == 1, "a scout still cannot capture a 0 HP city")
+	var only := game.spawn_unit(0, "scout", Vector2i(10, 14))
+	only.hp = 20
+	_ok(game.use_ability(only, "sprint", only.cell).is_empty() and only.acted and only.ap == 5, "a scout that only Sprints has acted")
+	game.end_turn()
+	_ok(only.hp == 20 and only.ap == 3 and not only.movement_only, "a scout that only Sprints does not idle-heal")
+	var founder := game.spawn_unit(0, "settler", Vector2i(2, 14))
+	_ok(game.unit_abilities(founder).is_empty() and game.can_found(founder).is_empty(), "a settler has no Sprint and can still found")
+	founder.ap = 0
+	_ok(game.can_found(founder) == GameSetup.REASON_AP and game.found_city(founder) == null, "Found still needs 1 AP")
+	founder.ap = 2
+	# Distance 2 is inside the rule and outside the new city's starting border.
+	var near := game.found_city(game.spawn_unit(1, "settler", _step(founder.cell, Hex.EAST, 2)))
+	_ok(near != null and game.can_found(founder) == GameSetup.REASON_DISTANCE, "Found still enforces city distance")
+	var far_settler := game.spawn_unit(0, "settler", _step(near.cell, Hex.EAST, cfg.city_min_distance))
+	_ok(far_settler != null and game.can_found(far_settler).is_empty() and game.found_city(far_settler) != null and not game.players[0].units.has(far_settler), "Found at the minimum distance still ends the settler's turn")
+	founder.movement_only = true
+	_ok(game.can_found(founder) == GameSetup.REASON_MOVE_ONLY and game.skip_reason(founder) == GameSetup.REASON_MOVE_ONLY and game.fortify_reason(founder) == GameSetup.REASON_MOVE_ONLY, "orders on a movement-only settler use the same reason")
+	var tired := game.spawn_unit(0, "scout", Vector2i(6, 2))
+	tired.ap = 0
+	_ok(game.use_ability(tired, "sprint", tired.cell) == GameSetup.REASON_AP and tired.ap == 0 and not tired.movement_only, "sprint needs at least 1 AP")
+	var dash_data := GameConfig.read_json(GameConfig.PATH).duplicate(true)
+	dash_data["abilities"]["dash"] = {
+		"name": "Dash",
+		"target": "self",
+		"range": 0,
+		"area": "single",
+		"ap_cost": 1,
+		"cooldown": 0,
+		"effect": "move",
+		"ap_bonus": 4,
+		"movement_only": false,
+	}
+	var dash_list: Array = (dash_data["units"]["scout"] as Dictionary)["abilities"]
+	dash_list.append("dash")
+	var dash_cfg: GameConfig = GameConfig.from_dict(dash_data)
+	var dashed := _blank_setup("plains", dash_cfg)
+	var dasher := dashed.spawn_unit(0, "scout", Vector2i(8, 2))
+	_ok(dashed.use_ability(dasher, "dash", dasher.cell).is_empty() and dasher.ap == 7 and not dasher.movement_only and dashed.ability_block_reason(dasher, "strike").is_empty(), "ap_bonus and movement_only come from the ability fields")
 
 
 func _test_city_capture() -> void:
@@ -3349,6 +3489,14 @@ func _test_soak_invariants() -> void:
 	unit.ap = 1
 	unit.used_ability = true
 	_ok(SoakInvariants.check(game).contains("ability"), "an ability with AP left fails the soak invariants")
+	unit.movement_only = true
+	unit.ap = cfg.unit(unit.unit_type).ap + 2
+	_ok(SoakInvariants.check(game).is_empty(), "movement-only may keep bonus AP after an ability")
+	unit.ap = -1
+	_ok(SoakInvariants.check(game).contains("ap"), "negative AP still fails while movement-only")
+	unit.movement_only = false
 	unit.used_ability = false
+	unit.ap = cfg.unit(unit.unit_type).ap + 1
+	_ok(SoakInvariants.check(game).contains("above"), "AP above the pool fails when the unit is not movement-only")
 	unit.ap = cfg.unit(unit.unit_type).ap
 	_ok(SoakInvariants.check(game).is_empty(), "restoring the tile and the pool clears the invariants")

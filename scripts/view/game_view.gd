@@ -843,6 +843,8 @@ func _combat_hover_text() -> String:
 	if unit == null or setup == null or setup.map == null or not setup.map.in_bounds(_hovered):
 		return ""
 	if not _ability_id.is_empty():
+		if _config.ability(_ability_id).effect == "move":
+			return ""
 		return _preview_line(setup.ability_preview(unit, _ability_id, _hovered))
 	if not setup.fog.unit_visible(unit.owner, _hovered):
 		return ""
@@ -905,7 +907,8 @@ func _clear_hover() -> void:
 	_tooltip_panel.visible = false
 	if _combat_preview != null:
 		_combat_preview.text = ""
-	if _armed():
+	# A move ability's reach is not a hover preview. Leave it up when the cursor leaves the map.
+	if _armed() and (_ability_id.is_empty() or _config.ability(_ability_id).effect != "move"):
 		_clear(_moves)
 
 
@@ -1277,6 +1280,12 @@ func _rebuild_ability_highlights() -> void:
 	var unit := _selected_unit()
 	if unit == null or setup == null or _ability_id.is_empty():
 		return
+	var ability := _config.ability(_ability_id)
+	if ability.effect == "move":
+		_add_highlight(unit.cell, _SELECTED)
+		for cell in setup.move_reach_preview(unit, _ability_id).keys():
+			_add_highlight(cell as Vector2i, _REACHABLE)
+		return
 	var targets := setup.ability_targets(unit, _ability_id)
 	var area: Array[Vector2i] = []
 	var reason := ""
@@ -1412,7 +1421,8 @@ func _rebuild_ability_buttons(unit: PlayerState.UnitState) -> void:
 		_add_order_button("skip", "Skip", "S", "No AP", setup.skip_reason(unit), _on_skip_pressed)
 	if _config.fortify_enabled:
 		_add_order_button("fortify", "Fortify", "F", "1 AP", setup.fortify_reason(unit), _on_fortify_pressed)
-	if setup.can_found(unit) != GameSetup.REASON_SETTLER:
+	# Found is a settler order. A movement-only reason must not put it on a scout.
+	if unit.unit_type == "settler":
 		_add_order_button("found", "Found", "B", "1 AP", setup.can_found(unit), _on_found_city_pressed)
 
 
@@ -1491,6 +1501,13 @@ func _on_ability_pressed(ability_id: String) -> void:
 	_placing = ""
 	_spell_id = ""
 	if _ability_id == ability_id:
+		if _config.ability(ability_id).target == "self":
+			var reason := setup.use_ability(unit, ability_id, unit.cell)
+			if reason.is_empty():
+				_ability_id = ""
+				_cancel_end_confirm()
+				_refresh_board()
+			return
 		_ability_id = ""
 	else:
 		_ability_id = ability_id

@@ -60,6 +60,8 @@ func _run() -> void:
 		return
 	if not await _construction_markers(game):
 		return
+	if not _sprint(game):
+		return
 	(game.get_node("%MenuButton") as Button).pressed.emit()
 	(game.get_node("%RestartButton") as Button).pressed.emit()
 	game = await _wait_for("res://scripts/view/game_view.gd")
@@ -1374,6 +1376,204 @@ func _open_neighbor(setup: GameSetup, origin: Vector2i) -> Vector2i:
 		if not occupied:
 			return cell
 	return Vector2i(-1, -1)
+
+
+func _sprint(game: Node) -> bool:
+	var setup := game.get("setup") as GameSetup
+	var line := _sprint_line(setup)
+	if line.is_empty():
+		print("FAIL no open line for sprint")
+		quit(1)
+		return false
+	var saved := {}
+	for cell in line:
+		saved[cell] = setup.map.land_at(cell)
+		setup.map.set_land(cell, "plains")
+	var home: Vector2i = line[0]
+	var step: Vector2i = line[1]
+	var far: Vector2i = line[4]
+	var scout := setup.spawn_unit(0, "scout", home)
+	if scout == null:
+		print("FAIL sprint scout did not spawn")
+		quit(1)
+		return false
+	game._refresh_board()
+	if not _select_unit_title(game, home, "Scout"):
+		return false
+	var names: PackedStringArray = []
+	for child in game.get_node("%AbilityButtons").get_children():
+		names.append(str(child.name))
+	var expected := PackedStringArray(["Ability_strike", "Ability_sprint", "OrderGap", "Order_skip", "Order_fortify"])
+	if names != expected:
+		print("FAIL scout bar ", names)
+		quit(1)
+		return false
+	var sprint := _SceneDriver.ability_button(game, "sprint")
+	var strike := _SceneDriver.ability_button(game, "strike")
+	if sprint == null or strike == null or sprint.disabled or (sprint.get_node("Column/NameLabel") as Label).text != "Sprint" or (sprint.get_node("Column/CooldownLabel") as Label).text != "3":
+		print("FAIL sprint button")
+		quit(1)
+		return false
+	if game.get_node("%AbilityButtons").get_node_or_null("Order_found") != null:
+		print("FAIL scout bar shows Found")
+		quit(1)
+		return false
+	print("PASS scout bar Strike then Sprint")
+	var before := setup.reachable_tiles(scout)
+	if before.has(far):
+		print("FAIL far tile was already reachable")
+		quit(1)
+		return false
+	sprint.pressed.emit()
+	sprint = _SceneDriver.ability_button(game, "sprint")
+	var ap_text := (game.get_node("%AbilityApLabel") as Label).text
+	var preview := setup.move_reach_preview(scout, "sprint")
+	var green := Color(0.45, 0.95, 0.55, 0.95)
+	if ap_text != "AP 3 / 3" or scout.ap != 3 or not preview.has(far) or not _highlight_tint(game, far).is_equal_approx(green):
+		print("FAIL sprint preview ", ap_text, " tint ", _highlight_tint(game, far), " ap ", scout.ap)
+		quit(1)
+		return false
+	if sprint == null or (sprint.get_node("Column/StateLabel") as Label).text != "Targeting":
+		print("FAIL sprint was not targeting")
+		quit(1)
+		return false
+	print("PASS sprint preview ", ap_text)
+	_click_cell(game, step)
+	if str(game.get("_ability_id")) != "sprint" or scout.cell != home or scout.ap != 3:
+		print("FAIL another tile moved or cancelled sprint")
+		quit(1)
+		return false
+	_click_cell(game, home, MOUSE_BUTTON_RIGHT)
+	if str(game.get("_ability_id")) != "" or scout.cell != home:
+		print("FAIL right click did not cancel sprint")
+		quit(1)
+		return false
+	sprint = _SceneDriver.ability_button(game, "sprint")
+	sprint.pressed.emit()
+	sprint = _SceneDriver.ability_button(game, "sprint")
+	sprint.pressed.emit()
+	if scout.ap != 5 or not scout.movement_only or str(game.get("_ability_id")) != "":
+		print("FAIL button confirm ap ", scout.ap, " only ", scout.movement_only)
+		quit(1)
+		return false
+	ap_text = (game.get_node("%AbilityApLabel") as Label).text
+	strike = _SceneDriver.ability_button(game, "strike")
+	sprint = _SceneDriver.ability_button(game, "sprint")
+	var skip := _SceneDriver.order_button(game, "skip")
+	var fortify := _SceneDriver.order_button(game, "fortify")
+	if game.get_node("%AbilityButtons").get_node_or_null("Order_found") != null:
+		print("FAIL Found appeared on the scout after Sprint")
+		quit(1)
+		return false
+	if ap_text != "AP 5 / 3" or not strike.disabled or strike.tooltip_text != GameSetup.REASON_MOVE_ONLY or not skip.disabled or skip.tooltip_text != GameSetup.REASON_MOVE_ONLY or not fortify.disabled or fortify.tooltip_text != GameSetup.REASON_MOVE_ONLY or not sprint.disabled or sprint.tooltip_text != GameSetup.REASON_MOVE_ONLY:
+		print("FAIL after sprint ", ap_text, " strike ", strike.tooltip_text, " skip ", skip.tooltip_text, " fortify ", fortify.tooltip_text)
+		quit(1)
+		return false
+	if not setup.reachable_tiles(scout).has(far) or not _highlight_tint(game, far).is_equal_approx(green):
+		print("FAIL reach did not expand after sprint")
+		quit(1)
+		return false
+	print("PASS sprint granted ", ap_text)
+	_click_cell(game, step, MOUSE_BUTTON_RIGHT)
+	if scout.cell != step or scout.ap != 4 or not scout.movement_only:
+		print("FAIL post-sprint move cell ", scout.cell, " ap ", scout.ap)
+		quit(1)
+		return false
+	ap_text = (game.get_node("%AbilityApLabel") as Label).text
+	if ap_text != "AP 4 / 3":
+		print("FAIL AP after the step ", ap_text)
+		quit(1)
+		return false
+	print("PASS post-sprint move ", ap_text)
+	_spare_settlers(setup)
+	var end := game.get_node("%EndTurnButton") as Button
+	end.pressed.emit()
+	if end.text == "End anyway (Enter)":
+		end.pressed.emit()
+	if setup.result != null:
+		print("FAIL sprint end turn ended the match")
+		quit(1)
+		return false
+	if not _select_unit_title(game, step, "Scout"):
+		return false
+	sprint = _SceneDriver.ability_button(game, "sprint")
+	strike = _SceneDriver.ability_button(game, "strike")
+	if scout.movement_only or scout.ap != 3 or (sprint.get_node("Column/CooldownLabel") as Label).text != "Cooldown 2" or not sprint.disabled or sprint.tooltip_text != GameSetup.REASON_COOLDOWN or strike.disabled:
+		print("FAIL cooldown '", (sprint.get_node("Column/CooldownLabel") as Label).text, "' tip ", sprint.tooltip_text, " strike ", strike.disabled, " ap ", scout.ap)
+		quit(1)
+		return false
+	print("PASS sprint cooldown 2")
+	var avoid := {}
+	for cell in line:
+		avoid[cell] = true
+	var pair := _open_pair(setup, avoid)
+	if pair.is_empty():
+		print("FAIL no tile for the fresh strike")
+		quit(1)
+		return false
+	var bow: Vector2i = pair[0]
+	var rival_cell: Vector2i = pair[1]
+	saved[bow] = setup.map.land_at(bow)
+	saved[rival_cell] = setup.map.land_at(rival_cell)
+	setup.map.set_land(bow, "plains")
+	setup.map.set_land(rival_cell, "plains")
+	var fresh := setup.spawn_unit(0, "scout", bow)
+	var rival := setup.spawn_unit(1, "warrior", rival_cell)
+	if fresh == null or rival == null:
+		print("FAIL fresh strike units did not spawn")
+		quit(1)
+		return false
+	game._refresh_board()
+	if not _select_unit_title(game, bow, "Scout"):
+		return false
+	var fresh_strike := _SceneDriver.ability_button(game, "strike")
+	fresh_strike.pressed.emit()
+	var shot: Dictionary = setup.ability_preview(fresh, "strike", rival.cell)
+	_click_cell(game, rival.cell)
+	if not bool(shot["ok"]) or int(shot["damage"]) != 17 or int(shot["counter"]) != 54 or fresh.ap != 0 or not fresh.used_ability or fresh.movement_only or rival.hp != 100 - 17 or fresh.hp != 0:
+		print("FAIL fresh scout strike ap ", fresh.ap, " rival ", rival.hp, " scout ", fresh.hp)
+		quit(1)
+		return false
+	print("PASS fresh scout Strike 17 54")
+	for unit in [scout, fresh, rival]:
+		if setup.players[unit.owner].units.has(unit):
+			setup.players[unit.owner].units.erase(unit)
+	for cell in saved.keys():
+		setup.map.set_land(cell, saved[cell])
+	setup._refresh_fog()
+	game._refresh_board()
+	return true
+
+
+func _open_pair(setup: GameSetup, avoid: Dictionary) -> Array:
+	for row in range(1, setup.map.height - 1):
+		for col in range(1, setup.map.width - 2):
+			var origin := Vector2i(col, row)
+			var foe := _step_smoke(origin, Hex.EAST, 1)
+			if avoid.has(origin) or avoid.has(foe):
+				continue
+			if not setup.map.in_bounds(foe) or _cell_taken(setup, origin) or _cell_taken(setup, foe):
+				continue
+			return [origin, foe]
+	return []
+
+
+func _sprint_line(setup: GameSetup) -> Array:
+	for row in range(2, setup.map.height - 2):
+		for col in range(2, setup.map.width - 8):
+			var origin := Vector2i(col, row)
+			var cells: Array[Vector2i] = [origin]
+			var open := true
+			var cursor := origin
+			for _i in 6:
+				cursor = _step_smoke(cursor, Hex.EAST, 1)
+				if not setup.map.in_bounds(cursor) or _cell_taken(setup, cursor):
+					open = false
+					break
+				cells.append(cursor)
+			if open and not _cell_taken(setup, origin):
+				return cells
+	return []
 
 
 func _train_scout(game: Node) -> bool:

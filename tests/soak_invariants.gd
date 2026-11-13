@@ -39,10 +39,13 @@ static func check(setup: GameSetup) -> String:
 			bag[unit.cell] = unit.id
 			if unit.max_hp > 0 and (unit.hp < 0 or unit.hp > unit.max_hp):
 				return "unit %d hp %d / %d" % [unit.id, unit.hp, unit.max_hp]
+			if unit.ap < 0:
+				return "unit %d ap %d is below 0" % [unit.id, unit.ap]
 			var max_ap := setup.config.unit(unit.unit_type).ap
-			if unit.ap < 0 or unit.ap > max_ap:
-				return "unit %d ap %d is outside 0..%d" % [unit.id, unit.ap, max_ap]
-			if unit.used_ability and unit.ap != 0:
+			# Sprint adds AP above the pool for this turn. The flag is what makes that legal.
+			if unit.ap > max_ap and not unit.movement_only:
+				return "unit %d ap %d is above %d" % [unit.id, unit.ap, max_ap]
+			if unit.used_ability and unit.ap != 0 and not unit.movement_only:
 				return "unit %d used an ability and still has %d AP" % [unit.id, unit.ap]
 	for city in setup.cities:
 		if city.player < 0 or city.player >= setup.players.size():

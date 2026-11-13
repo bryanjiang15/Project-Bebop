@@ -6,7 +6,7 @@ Engineering record for the settler-movement and founding rules. Design still liv
 
 Player ids are `0 .. players.count - 1`. The human is `players.human_index` (0). **End Turn** and the Enter key advance one global turn and refill every unit's AP from `units.<type>.ap`. Scout is 3. Every other unit is 2. Enter does nothing while the in-game menu is open. Rivals do not take a turn.
 
-`players.starting_units` is `["settler", "warrior"]`. The settler takes the start tile. The warrior takes the nearest free passable tile. Combat, healing, and Skip/Fortify are in `docs/combat.md`.
+`players.starting_units` is `["settler", "warrior"]`. The settler takes the start tile. The warrior takes the nearest free passable tile. Combat, healing, Skip/Fortify, and Sprint are in `docs/combat.md`. End Turn refills every unit from `units.<type>.ap` and discards Sprint's leftover bonus.
 
 ## Units
 
@@ -20,18 +20,21 @@ A tile holds one unit when `units.one_unit_per_tile` is true. Another player's u
 
 The cost is the land of the tile being entered. Water (`passable` false, `move_cost` -1) is impassable for the settler, scout, warrior, and archer. They cannot enter it, path through it, or see it in the move highlights. A spell that would turn their tile into water skips that tile, so the unit is not stranded. Forest, hills, volcanic ground, and plains still change under a unit, and the unit stays on that tile. When `movement.allow_enter_over_budget_if_mp_left` is true and the unit still has AP, it may enter a more expensive tile, arrives with 0, and does not keep searching from there. The flag name is unchanged.
 
-A move sets the unit as having acted and clears Fortify. A left click selects the human unit on that cell, or clears the selection when the cell is empty. The city on that cell comes after the unit. Highlight sprites mark the selected cell and every reachable cell. A right click on a reachable cell moves, including a capture. It does not use an ability. Attacks come from the ability bar; see `docs/combat.md`. A left click does not move. A left drag farther than 8 px pans, as do middle drag and the arrow keys. Found needs at least 1 AP. The settler is then removed, so a settler at 0 AP is refused before the distance check. Fog recomputes after every move.
+A move sets the unit as having acted and clears Fortify. A left click selects the human unit on that cell, or clears the selection when the cell is empty. The city on that cell comes after the unit. Highlight sprites mark the selected cell and every reachable cell. A right click on a reachable cell moves, including a capture. It does not use an ability. Attacks come from the ability bar; see `docs/combat.md`. A left click does not move. A left drag farther than 8 px pans, as do middle drag and the arrow keys. Found needs at least 1 AP. The settler is then removed, so a settler at 0 AP is refused before the distance check. After Sprint the scout can still move, and a capture of a lone settler is still that move. Fog recomputes after every move.
 
 ## Founding
 
 Found sits on `%AbilityBar` with Skip and Fortify. The button and the B key call `GameSetup.found_city` for the selected unit. The button tooltip is the reason while it is disabled. An empty reason means the action is legal. Otherwise the reason is one of:
 
+- `Can only move`
 - `Select a settler`
 - `Cannot found on water`
 - `Cannot found on another player's tile`
 - `Needs at least 1 AP`
 - `Too close to another city`
 - `Cannot found off the map`
+
+`Can only move` is the movement-only reason, shared with abilities, Skip, and Fortify. It wins over the settler check, so a scout that has Sprinted and is asked to found gets that reason. A settler who has not Sprinted never sees it. Found still needs at least 1 AP, still rejects a city closer than `city.min_distance`, and still removes the settler.
 
 Distance is center to center against every city, including cities the founder has never seen. A distance below `city.min_distance` rejects. A distance equal to it accepts. The UI does not reveal the hidden city. Volcanic ground can be founded on. A unit that later stands on that city tile still takes volcanic damage; the city is not.
 
