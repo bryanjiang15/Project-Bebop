@@ -136,28 +136,32 @@ size_flags_horizontal = 3
 
 [node name="EndTurnWarning" type="Label" parent="UI/TopBar/Row"]
 unique_name_in_owner = true
+custom_minimum_size = Vector2(520, 0)
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.78, 0.42, 1)
-theme_override_font_sizes/font_size = 32
+theme_override_font_sizes/font_size = 28
+autowrap_mode = 3
 text = ""
 vertical_alignment = 1
 
 [node name="MenuButton" parent="UI/TopBar/Row" instance=ExtResource("3_button")]
 unique_name_in_owner = true
+custom_minimum_size = Vector2(180, 88)
 layout_mode = 2
 text = "Menu"
 
 [node name="NextUnitButton" parent="UI/TopBar/Row" instance=ExtResource("3_button")]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(420, 88)
+custom_minimum_size = Vector2(300, 88)
 layout_mode = 2
 focus_mode = 0
 text = "Next Unit (.)"
 
 [node name="EndTurnButton" parent="UI/TopBar/Row" instance=ExtResource("3_button")]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(640, 88)
+custom_minimum_size = Vector2(480, 88)
 layout_mode = 2
+theme_override_font_sizes/font_size = 28
 text = "End Turn (Enter)"
 
 [node name="SpellBar" type="PanelContainer" parent="UI"]
