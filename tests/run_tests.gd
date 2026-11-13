@@ -28,6 +28,7 @@ func _init() -> void:
 	_test_volley()
 	_test_sprint()
 	_test_turn_done()
+	_test_orders_queue()
 	_test_city_capture()
 	_test_spells()
 	_test_rival_land_updates()
@@ -2057,6 +2058,74 @@ func _test_turn_done() -> void:
 	game.end_turn()
 	_ok(guard.hp == 50 and guard.fortified and guard.order == GameSetup.ORDER_FORTIFY and guard.ap == cfg.unit("warrior").ap and not game.unit_turn_done(guard), "a fortified unit with AP refilled is not done")
 	_ok(game.has_unordered_moves(0), "refilled units with no order warn again")
+
+
+func _test_orders_queue() -> void:
+	print("[orders queue]")
+	var cfg: GameConfig = GameConfig.load_file()
+	var game := _blank_setup("plains")
+	var origin := Vector2i(6, 6)
+	var alpha := game.spawn_unit(0, "warrior", origin)
+	var settler := game.spawn_unit(0, "settler", Vector2i(10, 6))
+	var beta := game.spawn_unit(0, "warrior", Vector2i(14, 6))
+	_ok(alpha != null and settler != null and beta != null, "three human units spawn in list order")
+	_ok(game.unit_needs_orders(alpha) and game.unit_needs_orders(settler) and game.unit_needs_orders(beta), "AP left and no order needs orders")
+	var queued := game.units_needing_orders(0)
+	_ok(queued.size() == 3 and queued[0] == alpha and queued[1] == settler and queued[2] == beta, "the list is array order")
+	_ok(game.units_needing_orders(1).is_empty(), "rivals are not in the human list")
+	_ok(game.has_unordered_moves(0), "the warning matches a non-empty orders list")
+	_ok(game.next_unit_needing_orders(0, alpha.id) == beta or game.next_unit_needing_orders(0, alpha.id) == settler, "next after the first is later in the list")
+	_ok(game.next_unit_needing_orders(0, alpha.id) == settler, "next after A is B")
+	_ok(game.next_unit_needing_orders(0, settler.id) == beta, "next after B is C")
+	_ok(game.next_unit_needing_orders(0, beta.id) == alpha, "next after C wraps to A")
+	_ok(game.next_unit_needing_orders(0, -1) == alpha, "nothing selected picks the first")
+	alpha.ap = 0
+	_ok(not game.unit_needs_orders(alpha) and game.unit_turn_done(alpha), "a unit at 0 AP does not need orders and is done")
+	_ok(game.next_unit_needing_orders(0, beta.id) == settler, "a done unit is skipped when the list wraps")
+	alpha.ap = cfg.unit("warrior").ap
+	_ok(game.skip_unit(alpha) and not game.unit_needs_orders(alpha) and not alpha.acted and alpha.order == GameSetup.ORDER_SKIP, "Skip drops the unit out and leaves acted false")
+	_ok(not game.next_unit_needing_orders(0, beta.id) == alpha, "a skipped unit is not next")
+	var skipped_hp := alpha.hp
+	alpha.hp = 40
+	game.end_turn()
+	_ok(alpha.hp == 50 and alpha.order.is_empty() and alpha.ap == cfg.unit("warrior").ap and game.unit_needs_orders(alpha), "after End Turn a Skip is back in the list and still healed")
+	_ok(not game.unit_turn_done(alpha), "the refill clears done")
+	_ok(skipped_hp == cfg.unit("warrior").hp, "the heal check started from a full bar")
+	_ok(game.fortify_unit(beta) and not beta.acted and not game.unit_needs_orders(beta) and game.unit_turn_done(beta), "Fortify drops the unit out, leaves acted false, and is done this turn")
+	var guarded_hp := beta.hp
+	beta.hp = 40
+	game.end_turn()
+	_ok(beta.hp == 50 and beta.fortified and beta.order == GameSetup.ORDER_FORTIFY and beta.ap == cfg.unit("warrior").ap, "Fortify still heals and persists with AP refilled")
+	_ok(not game.unit_needs_orders(beta) and not game.unit_turn_done(beta), "a fortified unit next turn is out of the queue and is not done")
+	_ok(game.next_unit_needing_orders(0, alpha.id) != beta, "next skips the fortified unit")
+	_ok(game.unit_needs_orders(alpha) and game.has_unordered_moves(0), "has_unordered_moves stays true while another unit needs orders")
+	game.config.end_turn_warns_if_unordered = false
+	_ok(not game.has_unordered_moves(0) and game.unit_needs_orders(alpha), "the warning flag can turn the check off without emptying the queue")
+	game.config.end_turn_warns_if_unordered = true
+	var only := game.spawn_unit(0, "scout", Vector2i(18, 6))
+	only.ap = 0
+	only.order = ""
+	_ok(not game.unit_needs_orders(only), "the fresh zero-AP scout does not need orders")
+	var runner := game.spawn_unit(0, "scout", Vector2i(4, 10))
+	_ok(game.use_ability(runner, "sprint", runner.cell).is_empty() and runner.ap == 5 and game.unit_needs_orders(runner) and not game.unit_turn_done(runner), "Sprint with leftover AP stays in the queue and is not done")
+	var cursor := runner.cell
+	var spent := true
+	for _i in 4:
+		cursor = _step(cursor, Hex.EAST, 1)
+		if not game.move_unit(runner, cursor) or not game.unit_needs_orders(runner):
+			spent = false
+			break
+	_ok(spent and runner.ap == 1, "the scout stays in the queue while bonus AP remains")
+	var last := _step(cursor, Hex.EAST, 1)
+	game.map.set_land(last, "forest")
+	_ok(game.move_unit(runner, last) and runner.ap == 0 and not game.unit_needs_orders(runner) and game.unit_turn_done(runner), "spending the last Sprint AP drops the scout out")
+	var before_found := game.units_needing_orders(0).size()
+	var following := game.next_unit_needing_orders(0, settler.id)
+	_ok(following != null and following != settler and game.found_city(settler) != null and not game.players[0].units.has(settler), "Found removes the settler")
+	var after_found := game.next_unit_needing_orders(0, settler.id)
+	_ok(after_found == following and game.units_needing_orders(0).size() == before_found - 1, "after Found, next is the following living unit that needs orders")
+	var rival := game.spawn_unit(1, "warrior", Vector2i(22, 12))
+	_ok(rival != null and game.unit_needs_orders(rival) and not game.units_needing_orders(0).has(rival), "a rival that needs orders is only in that rival's list")
 
 
 func _test_city_capture() -> void:

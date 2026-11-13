@@ -940,17 +940,64 @@ func unit_turn_done(unit: PlayerState.UnitState) -> bool:
 	return unit != null and unit.ap == 0
 
 
-## True when a unit still has AP and no order. Skip and Fortify set AP to 0,
-## so they clear the warning without counting as acted.
+## True when this unit still has AP and no order. Skip and Fortify set AP to 0,
+## so they leave the orders list. A Fortify order that End Turn refills stays
+## out until a move clears it. Skip does not persist, so that unit is back
+## next turn. This does not change the unit.
+func unit_needs_orders(unit: PlayerState.UnitState) -> bool:
+	return unit != null and unit.ap > 0 and unit.order.is_empty()
+
+
+## That player's units, in array order, that still need orders. Derived from
+## `ap` and `order` on each call. Rivals are a different player index.
+func units_needing_orders(player: int) -> Array[PlayerState.UnitState]:
+	var out: Array[PlayerState.UnitState] = []
+	if player < 0 or player >= players.size():
+		return out
+	for unit in players[player].units:
+		if unit_needs_orders(unit):
+			out.append(unit)
+	return out
+
+
+## The next unit after `after_id` that needs orders, wrapping the list.
+## `-1` and any other missing id start at the first unit. A removed id starts
+## at the first later id still in the list, which is the following unit while
+## ids are issued in list order, then wraps. The same unit is returned only
+## when it is the only one that still needs orders.
+func next_unit_needing_orders(player: int, after_id: int) -> PlayerState.UnitState:
+	if player < 0 or player >= players.size():
+		return null
+	var units: Array[PlayerState.UnitState] = players[player].units
+	if units.is_empty():
+		return null
+	var start := 0
+	if after_id >= 0:
+		var found := false
+		for i in units.size():
+			if units[i].id == after_id:
+				start = i + 1
+				found = true
+				break
+		if not found:
+			for i in units.size():
+				if units[i].id > after_id:
+					start = i
+					break
+	for offset in units.size():
+		var unit := units[(start + offset) % units.size()]
+		if unit_needs_orders(unit):
+			return unit
+	return null
+
+
+## True when a unit still has AP and no order, and the warning key is on.
+## Skip and Fortify set AP to 0, so they clear the warning without counting
+## as acted. This stays in step with `units_needing_orders`.
 func has_unordered_moves(player: int) -> bool:
 	if config == null or not config.end_turn_warns_if_unordered:
 		return false
-	if player < 0 or player >= players.size():
-		return false
-	for unit in players[player].units:
-		if unit.ap > 0 and unit.order.is_empty():
-			return true
-	return false
+	return not units_needing_orders(player).is_empty()
 
 
 func end_turn() -> void:
