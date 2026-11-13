@@ -385,7 +385,9 @@ func _end_turn(game: Node, setup: GameSetup) -> String:
 	button.pressed.emit()
 	if setup.result != null:
 		return _finish_ended(game, setup)
-	if not (game.get_node("%EndTurnWarning") as Label).text.is_empty():
+	# The first press jumps to the next unit that needs orders and arms
+	# End anyway. The second press, with no state change, ends the turn.
+	if setup.turn == before:
 		last_action = "confirm end turn"
 		button.pressed.emit()
 	if setup.result != null:

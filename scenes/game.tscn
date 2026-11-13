@@ -147,9 +147,16 @@ unique_name_in_owner = true
 layout_mode = 2
 text = "Menu"
 
+[node name="NextUnitButton" parent="UI/TopBar/Row" instance=ExtResource("3_button")]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(420, 88)
+layout_mode = 2
+focus_mode = 0
+text = "Next Unit (.)"
+
 [node name="EndTurnButton" parent="UI/TopBar/Row" instance=ExtResource("3_button")]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(560, 88)
+custom_minimum_size = Vector2(640, 88)
 layout_mode = 2
 text = "End Turn (Enter)"
 
@@ -487,6 +494,7 @@ theme_override_font_sizes/font_size = 32
 text = "Cancel placement"
 
 [connection signal="pressed" from="UI/TopBar/Row/MenuButton" to="." method="_on_menu_pressed"]
+[connection signal="pressed" from="UI/TopBar/Row/NextUnitButton" to="." method="_on_next_unit_pressed"]
 [connection signal="pressed" from="UI/TopBar/Row/EndTurnButton" to="." method="_on_end_turn_pressed"]
 [connection signal="pressed" from="UI/InGameMenu/Column/RestartButton" to="." method="_on_restart_pressed"]
 [connection signal="pressed" from="UI/InGameMenu/Column/MainMenuButton" to="." method="_on_main_menu_pressed"]

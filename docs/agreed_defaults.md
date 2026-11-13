@@ -48,10 +48,20 @@ Bryan decided that Volley damages enemy cities in its radius. The damage is the 
 
 19. Auto-finish (ticket 31). These are the spec gaps that were built. The Notion acceptance text was still draft; this is the working rule:
     - D1. A unit is done exactly when `ap == 0`. `GameSetup.unit_turn_done` is that check. There is no second flag and no extra "cannot use an ability" test. A Fortify order with AP refilled on the next turn is not done.
-    - D2. Selection stays on the unit that just finished. The camera does not move. Jumping to the next unit, a Next Unit control, and an orders count on End Turn are ticket 32.
+    - D2. Replaced by ticket 32. Finishing the selected unit jumps to the next unit that still needs orders and centers the camera.
     - D3. A movement-only scout with AP left is not done and is not dimmed. It becomes done when a later move spends the last AP, including an over-budget step that arrives at 0. `movement_only` stays until End Turn.
     - D4. The mark is the sprite's `self_modulate` alpha 0.55, so the HP bar stays fully opaque, plus `Order Done` on the selection summary when the order is none. Skip still reads Skip and Fortify still reads Fortify. No new art. The done mark does not assign Skip, so heal and Fortify stay as they are.
-    - D5. A done unit can be selected again. Its bar stays grey (`Needs at least 1 AP`, or `Can only move` when Sprint left it movement-only at 0 AP). Right-click does not move it.
+    - D5. A done unit can be selected again. Its bar stays grey (`Needs at least 1 AP`, or `Can only move` when Sprint left it movement-only at 0 AP). Right-click does not move it. Clicking it does not advance the queue.
+
+20. Orders queue (ticket 32). Bryan decided (a) finishing a unit auto-advances, and (b) Enter jumps to the next unit that still needs orders before it ends the turn. The Notion acceptance was still draft. One override of the ticket's D5: the two-press End anyway confirm stays, so a Sprinted scout that cannot spend its leftover AP can still end the turn.
+    - D1. A unit needs orders exactly when `ap > 0` and `order` is empty. Skip and Fortify leave the list this turn. There is no sentry order. Fortify persists after End Turn with AP refilled, so that unit stays out until a move clears Fortify. Skip does not persist.
+    - D2. The list is `players[human].units` in array order. Next is the first unit after the current id that needs orders, then it wraps. If only the selected unit needs orders, Next Unit and the first Enter stay on it. If nothing is selected, the first unit is chosen. A removed id continues at the first later id still in the list.
+    - D3. Auto-advance, Next Unit, the Enter jump, and the start-of-turn pick snap `_camera.position` to the unit's tile, call `_clamp_camera()`, and keep the current zoom. They always center. There is no animated pan, and they do not call `_frame_on_human`.
+    - D4. `%NextUnitButton` is authored beside `%EndTurnButton`. `next_unit` is Period. The label is `Next Unit (.)`. The button is disabled when the list is empty. It never ends the turn.
+    - D5. Enter and End Turn first jump to the next unit that needs orders and arm the existing confirm. The button and `%EndTurnWarning` show `N units need orders (Enter)` until that press, then `End anyway (Enter)` and `Units still have AP. End Turn again to continue.` A second press on that same unit, with no state change, ends the turn. When the count is 0, they read `End Turn (Enter)` and one press ends the turn. `units.end_turn_warns_if_unordered` is kept. When it is false, End Turn ends immediately and the count is hidden.
+    - D6. After a successful End Turn, select the first unit that needs orders and center the camera. If none do, leave the selection and the camera alone. If the selected unit was removed and nobody needs orders, clear the selection.
+    - D7. Auto-advance runs only after the selected unit becomes done or is removed. Clicking a unit that was already done does not advance.
+    - D8. No multi-turn move orders. A unit does not keep walking toward a far target on later turns.
 
 Also: volcanic damage uses the brief's flat value, not the design doc's chance-based proposal.
 
