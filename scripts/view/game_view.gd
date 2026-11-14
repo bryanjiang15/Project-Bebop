@@ -74,6 +74,15 @@ var _selected_city_id: int = -1
 var _panel_city_id: int = -1
 var _placing: String = ""
 var _end_confirm: bool = false
+## The unit End Turn landed on. A second press ends the turn only while the
+## selection is still this unit and nothing has cleared the confirm.
+var _end_anchor_id: int = -1
+## Bumped to drop a pause or pan that the player interrupted.
+var _advance_serial: int = 0
+var _pan_tween: Tween
+## Headless play stays instant so the suite does not wait. A test sets this to
+## use camera.auto_advance_delay_sec and camera.pan_sec.
+var honor_timing_in_headless: bool = false
 var _spell_id: String = ""
 var _ability_id: String = ""
 var _spell_direction: int = Hex.EAST
@@ -105,6 +114,7 @@ var _leaving: bool = false
 @onready var _volcanic_label: Label = %VolcanicWarning
 @onready var _combat_preview: Label = %CombatPreview
 @onready var _end_button: Button = %EndTurnButton
+@onready var _next_button: Button = %NextUnitButton
 @onready var _end_warning: Label = %EndTurnWarning
 @onready var _city_panel: PanelContainer = %CityPanel
 @onready var _city_name: Label = %CityName
@@ -163,6 +173,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event.is_action_pressed("fortify_unit") and not event.is_echo():
 		_on_fortify_pressed()
+		return
+	if event.is_action_pressed("next_unit") and not event.is_echo():
+		if not _menu.visible:
+			_on_next_unit_pressed()
 		return
 	if event.is_action_pressed("end_turn"):
 		if not event.is_echo() and not _menu.visible:
@@ -234,20 +248,52 @@ func _process(delta: float) -> void:
 func _on_end_turn_pressed() -> void:
 	if setup == null or _leaving or setup.result != null:
 		return
-	var armed := _armed()
+	_cancel_advance()
 	_spell_id = ""
 	_ability_id = ""
-	if _config.end_turn_warns_if_unordered and setup.has_unordered_moves(setup.human_index) and not _end_confirm:
-		_end_confirm = true
-		_refresh_end_warning()
-		if armed:
-			_refresh_spells()
-			_refresh_abilities()
-			_rebuild_move_highlights()
-			_apply_combat_preview()
+	var count := setup.units_needing_orders(setup.human_index).size()
+	if count == 0 or not _config.end_turn_warns_if_unordered:
+		_finish_end_turn()
 		return
+	# Second press on the unit this button just landed on, with no click,
+	# move, or order in between. That is the End anyway escape, including a
+	# movement-only scout that cannot spend its leftover AP.
+	if _end_confirm and _selected_id == _end_anchor_id:
+		_finish_end_turn()
+		return
+	var next := setup.next_unit_needing_orders(setup.human_index, _selected_id)
+	if next != null:
+		_selected_id = next.id
+		_selected_city_id = -1
+		_focus_cell(next.cell)
+		_end_anchor_id = next.id
+	else:
+		_end_anchor_id = _selected_id
+	_end_confirm = true
+	_refresh_board()
+
+
+func _finish_end_turn() -> void:
 	_end_confirm = false
+	_end_anchor_id = -1
 	setup.end_turn()
+	if setup.result == null:
+		_select_opening_unit()
+	_refresh_board()
+
+
+func _on_next_unit_pressed() -> void:
+	if setup == null or _menu.visible or _leaving or setup.result != null:
+		return
+	var next := setup.next_unit_needing_orders(setup.human_index, _selected_id)
+	if next == null:
+		return
+	_cancel_advance()
+	_cancel_targeting()
+	_cancel_end_confirm()
+	_selected_id = next.id
+	_selected_city_id = -1
+	_focus_cell(next.cell)
 	_refresh_board()
 
 
@@ -255,12 +301,18 @@ func _on_skip_pressed() -> void:
 	if setup == null or _menu.visible or _leaving or setup.result != null:
 		return
 	var unit := _selected_unit()
-	if unit == null or not setup.skip_unit(unit):
+	if unit == null:
+		_refresh_selection()
+		return
+	# Skip at 0 AP does not newly finish the unit. Read this before the call.
+	var needed := setup.unit_needs_orders(unit)
+	if not setup.skip_unit(unit):
 		_refresh_selection()
 		return
 	_spell_id = ""
 	_ability_id = ""
 	_cancel_end_confirm()
+	_advance_after(unit, needed)
 	_refresh_actors()
 	_refresh_spells()
 	_refresh_selection()
@@ -270,12 +322,17 @@ func _on_fortify_pressed() -> void:
 	if setup == null or _menu.visible or _leaving or setup.result != null:
 		return
 	var unit := _selected_unit()
-	if unit == null or not setup.fortify_unit(unit):
+	if unit == null:
+		_refresh_selection()
+		return
+	var needed := setup.unit_needs_orders(unit)
+	if not setup.fortify_unit(unit):
 		_refresh_selection()
 		return
 	_spell_id = ""
 	_ability_id = ""
 	_cancel_end_confirm()
+	_advance_after(unit, needed)
 	_refresh_actors()
 	_refresh_spells()
 	_refresh_selection()
@@ -288,6 +345,8 @@ func _on_found_city_pressed() -> void:
 	if unit == null or not setup.can_found(unit).is_empty():
 		_refresh_selection()
 		return
+	var needed := setup.unit_needs_orders(unit)
+	var follow_id := _follow_id(unit)
 	setup.found_city(unit)
 	_selected_id = -1
 	_selected_city_id = -1
@@ -296,6 +355,7 @@ func _on_found_city_pressed() -> void:
 	_spell_id = ""
 	_ability_id = ""
 	_cancel_end_confirm()
+	_take_follow(unit, needed, follow_id)
 	_refresh_board()
 
 
@@ -318,6 +378,7 @@ func _on_main_menu_pressed() -> void:
 func _select_at_screen(screen: Vector2) -> void:
 	if _menu.visible:
 		return
+	_cancel_advance()
 	var cell := _cell_at_screen(screen)
 	var axial := Hex.offset_to_axial(cell)
 	if not Hex.in_map(axial, _config.map_width, _config.map_height):
@@ -366,8 +427,13 @@ func _move_at_screen(screen: Vector2) -> void:
 		return
 	if not setup.reachable_tiles(unit).has(cell):
 		return
+	var needed := setup.unit_needs_orders(unit)
+	var follow_id := _follow_id(unit)
 	setup.move_unit(unit, cell)
+	_spell_id = ""
+	_ability_id = ""
 	_cancel_end_confirm()
+	_take_follow(unit, needed, follow_id)
 	_refresh_board()
 
 
@@ -539,19 +605,206 @@ func _order_label(unit: PlayerState.UnitState) -> String:
 
 
 func _refresh_end_warning() -> void:
+	var count := 0
+	if setup != null:
+		count = setup.units_needing_orders(setup.human_index).size()
+	_next_button.disabled = count == 0
 	if _end_confirm:
 		_end_button.text = "End anyway (Enter)"
 		_end_warning.text = "Units still have AP. End Turn again to continue."
-	else:
-		_end_button.text = "End Turn (Enter)"
-		_end_warning.text = ""
+		return
+	if count > 0 and _config.end_turn_warns_if_unordered:
+		var phrase := _orders_phrase(count)
+		_end_button.text = phrase
+		_end_warning.text = phrase
+		return
+	_end_button.text = "End Turn (Enter)"
+	_end_warning.text = ""
+
+
+func _orders_phrase(count: int) -> String:
+	if count == 1:
+		return "1 unit needs orders (Enter)"
+	return "%d units need orders (Enter)" % count
 
 
 func _cancel_end_confirm() -> void:
 	if not _end_confirm:
 		return
 	_end_confirm = false
+	_end_anchor_id = -1
 	_refresh_end_warning()
+
+
+## Id of the unit that would be next, captured before an action removes this one.
+## -2 means the unit did not need orders. -1 means nothing else does.
+func _follow_id(unit: PlayerState.UnitState) -> int:
+	if unit == null or not setup.unit_needs_orders(unit):
+		return -2
+	var follow := setup.next_unit_needing_orders(setup.human_index, unit.id)
+	if follow == null or follow.id == unit.id:
+		return -1
+	return follow.id
+
+
+func _human_by_id(unit_id: int) -> PlayerState.UnitState:
+	if unit_id < 0 or setup == null:
+		return null
+	for unit in setup.players[setup.human_index].units:
+		if unit.id == unit_id:
+			return unit
+	return null
+
+
+## After the selected unit finishes or is removed, select the next one that
+## needs orders and center the camera. A unit that still needs orders stays put.
+func _advance_after(unit: PlayerState.UnitState, needed_before: bool) -> void:
+	# Skip and Fortify leave the unit in the list, so the follow id is recomputed.
+	_take_follow(unit, needed_before, -1)
+
+
+func _take_follow(unit: PlayerState.UnitState, needed_before: bool, follow_id: int) -> void:
+	if not needed_before or unit == null:
+		return
+	var still := setup.players[setup.human_index].units.has(unit)
+	if still and setup.unit_needs_orders(unit):
+		return
+	var next: PlayerState.UnitState = null
+	if still:
+		next = setup.next_unit_needing_orders(setup.human_index, unit.id)
+		if next != null and next.id == unit.id:
+			next = null
+	elif follow_id >= 0:
+		next = _human_by_id(follow_id)
+	if next != null and not setup.unit_needs_orders(next):
+		next = null
+	if next != null:
+		if _delay_seconds() <= 0.0 and _pan_seconds() <= 0.0:
+			_cancel_advance()
+			_selected_id = next.id
+			_selected_city_id = -1
+			_center_on_cell(next.cell)
+			return
+		# The finished unit stays selected through the pause. The pan selects.
+		_advance_serial += 1
+		_play_advance(_advance_serial, next.id)
+		return
+	_cancel_advance()
+	if not still:
+		_selected_id = -1
+		_selected_city_id = -1
+
+
+func _select_opening_unit() -> void:
+	if setup == null or setup.result != null:
+		return
+	var needing := setup.units_needing_orders(setup.human_index)
+	if needing.is_empty():
+		# A unit removed this turn leaves a stale id. Fortified units stay selected.
+		if _selected_unit() == null:
+			_selected_id = -1
+			_selected_city_id = -1
+		return
+	var first := needing[0]
+	_selected_id = first.id
+	_selected_city_id = -1
+	_focus_cell(first.cell)
+
+
+func _center_on_cell(cell: Vector2i) -> void:
+	_camera.position = _map.map_to_local(cell)
+	_clamp_camera()
+
+
+## Where the camera rests after centering on a cell, without leaving it there.
+func _camera_goal(cell: Vector2i) -> Vector2:
+	var saved := _camera.position
+	_center_on_cell(cell)
+	var goal := _camera.position
+	_camera.position = saved
+	return goal
+
+
+func _delay_seconds() -> float:
+	return _timing_seconds(_config.camera_auto_advance_delay_sec if _config != null else 0.0)
+
+
+func _pan_seconds() -> float:
+	return _timing_seconds(_config.camera_pan_sec if _config != null else 0.0)
+
+
+func _timing_seconds(configured: float) -> float:
+	if DisplayServer.get_name() == "headless" and not honor_timing_in_headless:
+		return 0.0
+	return maxf(configured, 0.0)
+
+
+func _kill_pan() -> void:
+	if _pan_tween != null and is_instance_valid(_pan_tween):
+		_pan_tween.kill()
+	_pan_tween = null
+
+
+func _cancel_advance() -> void:
+	_advance_serial += 1
+	_kill_pan()
+
+
+## Manual Next Unit, the Enter jump, and the unit picked at the start of a turn.
+## Selection is already set. The camera pans, or snaps when the duration is 0.
+func _focus_cell(cell: Vector2i) -> void:
+	var goal := _camera_goal(cell)
+	var seconds := _pan_seconds()
+	if seconds <= 0.0 or _camera.position.is_equal_approx(goal):
+		_camera.position = goal
+		return
+	_kill_pan()
+	_pan_tween = create_tween()
+	_pan_tween.set_trans(Tween.TRANS_CUBIC)
+	_pan_tween.set_ease(Tween.EASE_IN_OUT)
+	_pan_tween.tween_property(_camera, "position", goal, seconds)
+
+
+## Units resolve in place. The only motion to wait for is a camera pan already
+## running, so the pause starts after that pan instead of overlapping it.
+func _wait_for_motion(serial: int) -> void:
+	while serial == _advance_serial and _pan_tween != null and is_instance_valid(_pan_tween) and _pan_tween.is_running():
+		await get_tree().process_frame
+
+
+func _play_advance(serial: int, unit_id: int) -> void:
+	await _wait_for_motion(serial)
+	if serial != _advance_serial or setup == null or setup.result != null:
+		return
+	var delay := _delay_seconds()
+	if delay > 0.0:
+		await get_tree().create_timer(delay).timeout
+	if serial != _advance_serial or setup == null or setup.result != null:
+		return
+	var next := _human_by_id(unit_id)
+	if next == null or not setup.unit_needs_orders(next):
+		return
+	var goal := _camera_goal(next.cell)
+	var seconds := _pan_seconds()
+	if seconds > 0.0 and not _camera.position.is_equal_approx(goal):
+		_kill_pan()
+		if serial != _advance_serial:
+			return
+		_pan_tween = create_tween()
+		_pan_tween.set_trans(Tween.TRANS_CUBIC)
+		_pan_tween.set_ease(Tween.EASE_IN_OUT)
+		_pan_tween.tween_property(_camera, "position", goal, seconds)
+		await _pan_tween.finished
+	else:
+		_camera.position = goal
+	if serial != _advance_serial or setup == null or setup.result != null:
+		return
+	next = _human_by_id(unit_id)
+	if next == null or not setup.unit_needs_orders(next):
+		return
+	_selected_id = next.id
+	_selected_city_id = -1
+	_refresh_board()
 
 
 func _paint_map() -> void:
@@ -1370,10 +1623,13 @@ func _use_ability_at_screen(screen: Vector2) -> void:
 	var cell := _cell_at_screen(screen)
 	var world: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * screen
 	var local := _map.to_local(world)
+	var needed := setup.unit_needs_orders(unit)
+	var follow_id := _follow_id(unit)
 	var reason := setup.use_ability(unit, _ability_id, cell)
 	if reason.is_empty():
 		_ability_id = ""
 		_cancel_end_confirm()
+		_take_follow(unit, needed, follow_id)
 		if setup.map.in_bounds(cell):
 			_hovered = cell
 			_hover_local = local
@@ -1514,10 +1770,13 @@ func _on_ability_pressed(ability_id: String) -> void:
 	_spell_id = ""
 	if _ability_id == ability_id:
 		if _config.ability(ability_id).target == "self":
+			var needed := setup.unit_needs_orders(unit)
+			var follow_id := _follow_id(unit)
 			var reason := setup.use_ability(unit, ability_id, unit.cell)
 			if reason.is_empty():
 				_ability_id = ""
 				_cancel_end_confirm()
+				_take_follow(unit, needed, follow_id)
 				_refresh_board()
 			return
 		_ability_id = ""

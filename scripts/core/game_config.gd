@@ -134,6 +134,8 @@ var camera_zoom_step: float
 var camera_pan_margin: float
 var camera_key_pan_speed: float
 var camera_default_zoom: float
+var camera_auto_advance_delay_sec: float
+var camera_pan_sec: float
 var log_enabled: bool
 var log_directory: String = ""
 
@@ -423,6 +425,8 @@ static func required_paths() -> PackedStringArray:
 		"camera.pan_margin",
 		"camera.key_pan_speed",
 		"camera.default_zoom",
+		"camera.auto_advance_delay_sec",
+		"camera.pan_sec",
 		"log.enabled",
 		"log.directory",
 	]))
@@ -769,6 +773,8 @@ func to_dict() -> Dictionary:
 			"pan_margin": camera_pan_margin,
 			"key_pan_speed": camera_key_pan_speed,
 			"default_zoom": camera_default_zoom,
+			"auto_advance_delay_sec": camera_auto_advance_delay_sec,
+			"pan_sec": camera_pan_sec,
 		},
 		"log": {
 			"enabled": log_enabled,
@@ -961,6 +967,8 @@ func _read(data: Dictionary) -> void:
 	camera_pan_margin = _float(data, "camera.pan_margin")
 	camera_key_pan_speed = _float(data, "camera.key_pan_speed")
 	camera_default_zoom = _float(data, "camera.default_zoom")
+	camera_auto_advance_delay_sec = _float(data, "camera.auto_advance_delay_sec")
+	camera_pan_sec = _float(data, "camera.pan_sec")
 	log_enabled = _bool(data, "log.enabled")
 	log_directory = _string(data, "log.directory")
 
