@@ -1,6 +1,6 @@
 # Stability soak
 
-Ticket 20. Five full games, back to back, with no crash and no soft-lock. There is no AI yet, so a full game is the human playing until `GameSetup.result` is set: conquest, the human eliminated, or End Turn on turn `turn_limit` (50). Rivals do not take a turn. The same harness is what ticket 16 should re-run once rivals act, and what tickets 25–29 should re-run once abilities exist.
+Ticket 20. Five full games, back to back, with no crash and no soft-lock. The human plays until `GameSetup.result` is set: conquest, the human eliminated, or End Turn on turn `turn_limit` (50). After each successful End Turn, both living rivals take a turn (`docs/ai.md`) before the shared clock. Tickets 25–29 already re-ran this harness once abilities existed.
 
 ## What it plays
 
@@ -10,7 +10,7 @@ The scripted human is `tests/soak_policy.gd`. It uses the view handlers the smok
 
 Three calls go to core because no handler exists for them:
 
-- The conquest game moves the two rival settlers onto plains beside the human warrior. Rivals never walk, and the start-distance gap is too far for a short hunt. The captures themselves are right-clicks. Attacks go through the ability bar.
+- The conquest game moves the two rival settlers onto plains beside the human warrior before their turn. A capture spends the warrior's AP, so the harness refills that AP once for the second capture. That refill is only this fixture. The captures themselves are right-clicks. Attacks go through the ability bar.
 - Each score game founds one rival city at `city.min_distance` so a spell can target rival-owned land. The human cannot found a city for someone else.
 - Ticket 30, below.
 
@@ -26,7 +26,7 @@ Seeds, in order, and the ending the run must produce:
 
 On a score seed the human founds, queues units and buildings, casts (including Carve River through a building, and a spell on the rival city), moves and sometimes attacks, and orders Skip or Fortify. One unit is left idle on odd turns so End Turn warns and the second press confirms. The menu is opened first: Enter must not end the turn, and the End Turn button must still end it. Spell targeting and building placement are left armed on some turns so those modes cannot block End Turn.
 
-The conquest seed founds the human city, then the warrior captures both rival settlers. That is a conquest on turn 2.
+The conquest seed founds the human city, then the warrior captures both rival settlers before either rival acts. That is a conquest on turn 2. The warrior's AP is refilled between those two captures, and only there. Score seeds leave `ai.enabled` true, so rivals found, produce, move, and cast while the scripted human plays.
 
 These five seeds did not place a starting settler on volcanic ground, so the ticket 30 paint did not fire. The paint is still in the loop.
 
@@ -72,8 +72,11 @@ From the repo root, after `godot --headless --path . --import` on a fresh checko
 
 ```bash
 godot --headless --path . --script res://tests/soak_games.gd
+godot --headless --path . --script res://tests/soak_ai.gd
 ```
 
 Exit 0 and a final `SOAK OK` line. Locally the five games take about 2.5 seconds plus engine startup. Three runs in a row produce the same `RESULT` lines (the log file names use the clock, so those differ). CI runs this as "Run stability soak" and greps the log like the other steps.
+
+`tests/soak_ai.gd` is the AI-vs-AI soak. Seed 16016, logging off. Every living player, including index 0, is `RivalAI` for 20 turns or until `GameSetup.result`. It checks `SoakInvariants` after each round and prints `AI SOAK OK`. CI runs it as "Run AI soak".
 
 `tests/capture_ticket20.gd` is not in CI. It plays seed 12345 with the real renderer at 2560×1440 and writes `ticket20_turn1.png`, `ticket20_turn25.png`, `ticket20_turn50_board.png`, `ticket20_end_screen.png`, and `ticket20_after_restart.png`.

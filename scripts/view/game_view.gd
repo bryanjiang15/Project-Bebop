@@ -77,6 +77,8 @@ var _end_confirm: bool = false
 ## The unit End Turn landed on. A second press ends the turn only while the
 ## selection is still this unit and nothing has cleared the confirm.
 var _end_anchor_id: int = -1
+## True while rival turns run. Input and buttons do nothing until they finish.
+var _rivals_acting: bool = false
 ## Bumped to drop a pause or pan that the player interrupted.
 var _advance_serial: int = 0
 var _pan_tween: Tween
@@ -157,7 +159,7 @@ func _ready() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if _config == null or setup == null or _leaving or setup.result != null:
+	if _config == null or setup == null or _leaving or _rivals_acting or setup.result != null:
 		return
 	if event.is_action_pressed("toggle_menu"):
 		if _armed():
@@ -229,7 +231,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _process(delta: float) -> void:
-	if _config == null or setup == null:
+	if _config == null or setup == null or _rivals_acting:
 		return
 	var dir := Vector2.ZERO
 	if Input.is_action_pressed("pan_left"):
@@ -246,7 +248,7 @@ func _process(delta: float) -> void:
 
 
 func _on_end_turn_pressed() -> void:
-	if setup == null or _leaving or setup.result != null:
+	if setup == null or _leaving or _rivals_acting or setup.result != null:
 		return
 	_cancel_advance()
 	_spell_id = ""
@@ -276,14 +278,20 @@ func _on_end_turn_pressed() -> void:
 func _finish_end_turn() -> void:
 	_end_confirm = false
 	_end_anchor_id = -1
-	setup.end_turn()
+	# Headless and the live game both apply rival actions in this call.
+	# The start-of-turn pick below is the only camera motion.
+	_rivals_acting = true
+	setup.play_rivals()
+	_rivals_acting = false
+	if setup.result == null:
+		setup.end_turn()
 	if setup.result == null:
 		_select_opening_unit()
 	_refresh_board()
 
 
 func _on_next_unit_pressed() -> void:
-	if setup == null or _menu.visible or _leaving or setup.result != null:
+	if setup == null or _menu.visible or _leaving or _rivals_acting or setup.result != null:
 		return
 	var next := setup.next_unit_needing_orders(setup.human_index, _selected_id)
 	if next == null:
@@ -298,7 +306,7 @@ func _on_next_unit_pressed() -> void:
 
 
 func _on_skip_pressed() -> void:
-	if setup == null or _menu.visible or _leaving or setup.result != null:
+	if setup == null or _menu.visible or _leaving or _rivals_acting or setup.result != null:
 		return
 	var unit := _selected_unit()
 	if unit == null:
@@ -319,7 +327,7 @@ func _on_skip_pressed() -> void:
 
 
 func _on_fortify_pressed() -> void:
-	if setup == null or _menu.visible or _leaving or setup.result != null:
+	if setup == null or _menu.visible or _leaving or _rivals_acting or setup.result != null:
 		return
 	var unit := _selected_unit()
 	if unit == null:
@@ -339,7 +347,7 @@ func _on_fortify_pressed() -> void:
 
 
 func _on_found_city_pressed() -> void:
-	if setup == null or _menu.visible or _leaving or setup.result != null:
+	if setup == null or _menu.visible or _leaving or _rivals_acting or setup.result != null:
 		return
 	var unit := _selected_unit()
 	if unit == null or not setup.can_found(unit).is_empty():
@@ -1239,7 +1247,7 @@ func _on_cancel_place_pressed() -> void:
 
 
 func _choose_build(item_id: String) -> void:
-	if setup == null or _menu.visible:
+	if setup == null or _menu.visible or _rivals_acting:
 		return
 	_cancel_targeting()
 	var city := _selected_city()
@@ -1272,14 +1280,14 @@ func _try_place(cell: Vector2i) -> void:
 
 
 func _on_queue_move(index: int, delta: int) -> void:
-	if setup == null or _menu.visible:
+	if setup == null or _menu.visible or _rivals_acting:
 		return
 	setup.move_queue(_panel_city(), index, delta)
 	call_deferred("_refresh_after_queue")
 
 
 func _on_queue_cancel(index: int) -> void:
-	if setup == null or _menu.visible:
+	if setup == null or _menu.visible or _rivals_acting:
 		return
 	setup.cancel_queue(_panel_city(), index)
 	call_deferred("_refresh_after_queue")
@@ -1423,7 +1431,7 @@ func _paint_spell_button(button: Button, spell_id: String) -> void:
 
 
 func _on_spell_pressed(spell_id: String) -> void:
-	if setup == null or _menu.visible:
+	if setup == null or _menu.visible or _rivals_acting:
 		return
 	if not setup.spell_block_reason(setup.human_index, spell_id).is_empty():
 		return
@@ -1761,7 +1769,7 @@ func _paint_bar_button(button: Button, state: String, reason: String, targeting:
 
 
 func _on_ability_pressed(ability_id: String) -> void:
-	if setup == null or _menu.visible:
+	if setup == null or _menu.visible or _rivals_acting:
 		return
 	var unit := _selected_unit()
 	if unit == null or not setup.ability_block_reason(unit, ability_id).is_empty():

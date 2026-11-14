@@ -138,6 +138,24 @@ var camera_auto_advance_delay_sec: float
 var camera_pan_sec: float
 var log_enabled: bool
 var log_directory: String = ""
+var ai_enabled: bool
+var ai_military_target: int
+var ai_explore_radius: int
+var ai_settle_threat: int
+var ai_weight_damage: int
+var ai_weight_kill: int
+var ai_weight_city_damage: int
+var ai_weight_counter: int
+var ai_weight_open_push: int
+var ai_weight_capture: int
+var ai_weight_found: int
+var ai_weight_closer: int
+var ai_weight_explore: int
+var ai_weight_sprint: int
+var ai_weight_improve: int
+var ai_weight_worsen: int
+var ai_weight_volcanic: int
+var ai_min_spell_score: int
 
 ## Tests point load_file() at a copy of the config. Empty uses PATH.
 static var path_override: String = ""
@@ -427,6 +445,24 @@ static func required_paths() -> PackedStringArray:
 		"camera.default_zoom",
 		"camera.auto_advance_delay_sec",
 		"camera.pan_sec",
+		"ai.enabled",
+		"ai.military_target",
+		"ai.explore_radius",
+		"ai.settle_threat",
+		"ai.weight_damage",
+		"ai.weight_kill",
+		"ai.weight_city_damage",
+		"ai.weight_counter",
+		"ai.weight_open_push",
+		"ai.weight_capture",
+		"ai.weight_found",
+		"ai.weight_closer",
+		"ai.weight_explore",
+		"ai.weight_sprint",
+		"ai.weight_improve",
+		"ai.weight_worsen",
+		"ai.weight_volcanic",
+		"ai.min_spell_score",
 		"log.enabled",
 		"log.directory",
 	]))
@@ -776,6 +812,26 @@ func to_dict() -> Dictionary:
 			"auto_advance_delay_sec": camera_auto_advance_delay_sec,
 			"pan_sec": camera_pan_sec,
 		},
+		"ai": {
+			"enabled": ai_enabled,
+			"military_target": ai_military_target,
+			"explore_radius": ai_explore_radius,
+			"settle_threat": ai_settle_threat,
+			"weight_damage": ai_weight_damage,
+			"weight_kill": ai_weight_kill,
+			"weight_city_damage": ai_weight_city_damage,
+			"weight_counter": ai_weight_counter,
+			"weight_open_push": ai_weight_open_push,
+			"weight_capture": ai_weight_capture,
+			"weight_found": ai_weight_found,
+			"weight_closer": ai_weight_closer,
+			"weight_explore": ai_weight_explore,
+			"weight_sprint": ai_weight_sprint,
+			"weight_improve": ai_weight_improve,
+			"weight_worsen": ai_weight_worsen,
+			"weight_volcanic": ai_weight_volcanic,
+			"min_spell_score": ai_min_spell_score,
+		},
 		"log": {
 			"enabled": log_enabled,
 			"directory": log_directory,
@@ -969,6 +1025,24 @@ func _read(data: Dictionary) -> void:
 	camera_default_zoom = _float(data, "camera.default_zoom")
 	camera_auto_advance_delay_sec = _float(data, "camera.auto_advance_delay_sec")
 	camera_pan_sec = _float(data, "camera.pan_sec")
+	ai_enabled = _bool(data, "ai.enabled")
+	ai_military_target = _int(data, "ai.military_target")
+	ai_explore_radius = _int(data, "ai.explore_radius")
+	ai_settle_threat = _int(data, "ai.settle_threat")
+	ai_weight_damage = _int(data, "ai.weight_damage")
+	ai_weight_kill = _int(data, "ai.weight_kill")
+	ai_weight_city_damage = _int(data, "ai.weight_city_damage")
+	ai_weight_counter = _int(data, "ai.weight_counter")
+	ai_weight_open_push = _int(data, "ai.weight_open_push")
+	ai_weight_capture = _int(data, "ai.weight_capture")
+	ai_weight_found = _int(data, "ai.weight_found")
+	ai_weight_closer = _int(data, "ai.weight_closer")
+	ai_weight_explore = _int(data, "ai.weight_explore")
+	ai_weight_sprint = _int(data, "ai.weight_sprint")
+	ai_weight_improve = _int(data, "ai.weight_improve")
+	ai_weight_worsen = _int(data, "ai.weight_worsen")
+	ai_weight_volcanic = _int(data, "ai.weight_volcanic")
+	ai_min_spell_score = _int(data, "ai.min_spell_score")
 	log_enabled = _bool(data, "log.enabled")
 	log_directory = _string(data, "log.directory")
 

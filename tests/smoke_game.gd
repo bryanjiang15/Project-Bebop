@@ -953,6 +953,17 @@ func _move_settler(game: Node) -> bool:
 
 func _end_turn_with_enter(game: Node) -> bool:
 	var setup := game.get("setup") as GameSetup
+	game.set("_rivals_acting", true)
+	var frozen := setup.turn
+	var frozen_cell := setup.human_settler_cell()
+	_press_action(game, "end_turn")
+	(game.get_node("%EndTurnButton") as Button).pressed.emit()
+	if setup.turn != frozen or setup.human_settler_cell() != frozen_cell:
+		print("FAIL input during rival turns changed the board")
+		quit(1)
+		return false
+	game.set("_rivals_acting", false)
+	print("PASS input ignored while rivals act")
 	var during := "%d / 50" % setup.turn
 	(game.get_node("%MenuButton") as Button).pressed.emit()
 	_press_action(game, "end_turn")
@@ -2280,6 +2291,16 @@ func _auto_finish(game: Node) -> bool:
 		print("FAIL unordered moves remained")
 		quit(1)
 		return false
+	# Rivals have had enough turns to walk into this scripted heal check.
+	# Freeze them for the rest of this game so the HP numbers stay the human's.
+	# A restart loads the file again and turns the AI back on.
+	for player in setup.players:
+		if player.human:
+			continue
+		for unit in player.units:
+			unit.ap = 0
+			unit.movement_only = false
+	setup.config.ai_enabled = false
 	_spare_settlers(setup)
 	var turn_before := setup.turn
 	end.pressed.emit()
@@ -2459,7 +2480,11 @@ func _train_scout(game: Node) -> bool:
 		print("FAIL no city to open")
 		quit(1)
 		return false
-	var city: MapCity = setup.cities[0]
+	var city := _human_city(setup)
+	if city == null:
+		print("FAIL no human city to open")
+		quit(1)
+		return false
 	_click_cell(game, city.cell)
 	var panel := game.get_node("%CityPanel") as PanelContainer
 	if not panel.visible:
@@ -2531,7 +2556,11 @@ func _cast_spell(game: Node) -> bool:
 		print("FAIL spell cast has no city")
 		quit(1)
 		return false
-	var city: MapCity = setup.cities[0]
+	var city := _human_city(setup)
+	if city == null:
+		print("FAIL spell cast has no human city")
+		quit(1)
+		return false
 	if setup.players[setup.human_index].mana < setup.config.spell("restore_plains").mana:
 		print("FAIL starting mana ", setup.players[setup.human_index].mana)
 		quit(1)
@@ -2899,6 +2928,15 @@ func _land_effects(game: Node) -> bool:
 		return false
 	print("PASS volcanic warning")
 	_SceneDriver.order_button(game, "skip").pressed.emit()
+	# This game's rivals have walked into range. The next numbers are the
+	# volcanic formula, so they do not get another action on this game.
+	for player in setup.players:
+		if player.human:
+			continue
+		for unit in player.units:
+			unit.ap = 0
+			unit.movement_only = false
+	setup.config.ai_enabled = false
 	if not _press_end_turn(game):
 		return false
 	if warrior.hp != warrior.max_hp - setup.config.volcanic_damage:
@@ -3059,8 +3097,8 @@ func _found_city(game: Node) -> bool:
 	_click_cell(game, cell)
 	_press_action(game, "found_city")
 	var found := _SceneDriver.order_button(game, "found")
-	if setup.cities.size() != 0 or found.tooltip_text != GameSetup.REASON_AP or not found.disabled:
-		print("FAIL found at 0 AP '", found.tooltip_text, "' cities ", setup.cities.size())
+	if setup.city_count(setup.human_index) != 0 or found.tooltip_text != GameSetup.REASON_AP or not found.disabled:
+		print("FAIL found at 0 AP '", found.tooltip_text, "' cities ", setup.city_count(setup.human_index))
 		quit(1)
 		return false
 	print("PASS found refused without AP")
@@ -3083,8 +3121,8 @@ func _found_city(game: Node) -> bool:
 	for unit in setup.players[setup.human_index].units:
 		if unit.unit_type == "warrior":
 			human_warriors += 1
-	if human_settlers != 0 or human_warriors != 1 or setup.cities.size() != 1:
-		print("FAIL founded city settlers=", human_settlers, " warriors=", human_warriors, " cities=", setup.cities.size(), " units=", setup.unit_total())
+	if human_settlers != 0 or human_warriors != 1 or setup.city_count(setup.human_index) != 1:
+		print("FAIL founded city settlers=", human_settlers, " warriors=", human_warriors, " cities=", setup.city_count(setup.human_index), " units=", setup.unit_total())
 		quit(1)
 		return false
 	var city_nodes := 0
@@ -3101,7 +3139,8 @@ func _found_city(game: Node) -> bool:
 		print("FAIL city view cities=", city_nodes, " units=", unit_nodes, " name='", city_name, "'")
 		quit(1)
 		return false
-	if setup.cities[0].population != 1:
+	var founded := _human_city(setup)
+	if founded == null or founded.population != 1:
 		print("FAIL city population")
 		quit(1)
 		return false
@@ -3111,8 +3150,8 @@ func _found_city(game: Node) -> bool:
 
 func _assert_mana_before_turns(game: Node) -> bool:
 	var setup := game.get("setup") as GameSetup
-	var city: MapCity = setup.cities[0]
-	if not _select_city(game, city):
+	var city := _human_city(setup)
+	if city == null or not _select_city(game, city):
 		return false
 	var city_mana := int(setup.city_yields(city)["mana"])
 	if setup.mana_per_turn(setup.human_index) != city_mana:
@@ -3148,7 +3187,7 @@ func _assert_mana_paid(game: Node) -> bool:
 	for player in setup.players:
 		if player.index == setup.human_index:
 			continue
-		if player.mana != setup.config.starting_mana:
+		if player.mana < 0:
 			print("FAIL rival mana ", player.index, " ", player.mana)
 			quit(1)
 			return false
@@ -3162,7 +3201,11 @@ func _finish_mana_well(game: Node) -> bool:
 		print("FAIL no city for the mana well")
 		quit(1)
 		return false
-	var city: MapCity = setup.cities[0]
+	var city := _human_city(setup)
+	if city == null:
+		print("FAIL no human city for the mana well")
+		quit(1)
+		return false
 	if not _mana_matches(game):
 		return false
 	if not _select_city(game, city):

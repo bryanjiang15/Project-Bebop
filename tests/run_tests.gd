@@ -37,6 +37,7 @@ func _init() -> void:
 	_test_win_loss()
 	_test_game_log()
 	_test_soak_invariants()
+	_test_rival_ai()
 	print("\nPassed: %d  Failed: %d" % [_passed, _failed])
 	quit(1 if _failed > 0 else 0)
 
@@ -167,6 +168,29 @@ func _test_config() -> void:
 	var missing_dir: Dictionary = raw.duplicate(true)
 	(missing_dir["log"] as Dictionary).erase("directory")
 	_ok(GameConfig.missing_paths(missing_dir).has("log.directory"), "missing log.directory is reported")
+	var ai_keys: PackedStringArray = [
+		"ai.enabled",
+		"ai.military_target",
+		"ai.explore_radius",
+		"ai.settle_threat",
+		"ai.weight_damage",
+		"ai.weight_kill",
+		"ai.weight_city_damage",
+		"ai.weight_counter",
+		"ai.weight_open_push",
+		"ai.weight_capture",
+		"ai.weight_found",
+		"ai.weight_closer",
+		"ai.weight_explore",
+		"ai.weight_sprint",
+		"ai.weight_improve",
+		"ai.weight_worsen",
+		"ai.weight_volcanic",
+		"ai.min_spell_score",
+	]
+	for path in ai_keys:
+		_ok(GameConfig.missing_paths(_without_key(raw, path)).has(path), "missing %s is reported" % path)
+	_ok(cfg.ai_enabled and cfg.ai_military_target == 3 and cfg.ai_explore_radius == 4, "ai defaults")
 	var ability_keys: PackedStringArray = [
 		"abilities.strike.name",
 		"abilities.strike.target",
@@ -3650,3 +3674,311 @@ func _test_soak_invariants() -> void:
 	_ok(SoakInvariants.check(game).contains("above"), "AP above the pool fails when the unit is not movement-only")
 	unit.ap = cfg.unit(unit.unit_type).ap
 	_ok(SoakInvariants.check(game).is_empty(), "restoring the tile and the pool clears the invariants")
+
+
+func _test_rival_ai() -> void:
+	print("[rival ai]")
+	_ai_determinism()
+	_ai_opening_and_orders()
+	_ai_combat()
+	_ai_spells_and_fog()
+	_ai_hazards_and_finish()
+
+
+func _ai_cfg() -> GameConfig:
+	var cfg: GameConfig = GameConfig.load_file()
+	cfg.log_enabled = false
+	return cfg
+
+
+func _ai_fingerprint(game: GameSetup) -> String:
+	var parts: PackedStringArray = []
+	for player in game.players:
+		parts.append("p %d score %d cities %d mana %d" % [player.index, game.score(player.index), game.city_count(player.index), player.mana])
+		var units: Array[PlayerState.UnitState] = player.units.duplicate()
+		units.sort_custom(func(a: PlayerState.UnitState, b: PlayerState.UnitState) -> bool: return a.id < b.id)
+		for unit in units:
+			parts.append("u %d %s %s hp %d" % [unit.id, unit.unit_type, unit.cell, unit.hp])
+	for city in game.cities:
+		var queued := ""
+		for item in city.queue:
+			queued += "%s%s," % [item.item_id, item.cell]
+		parts.append("c %d owner %d %s pop %d [%s]" % [city.id, city.player, city.cell, city.population, queued])
+	return "\n".join(parts)
+
+
+func _ai_rounds(game: GameSetup, rounds: int) -> void:
+	for _round in rounds:
+		if game.result != null:
+			return
+		for player in game.players:
+			if game.result != null:
+				return
+			RivalAI.play(game, player.index)
+		if game.result == null:
+			game.end_turn()
+
+
+func _ai_determinism() -> void:
+	var cfg := _ai_cfg()
+	var first := GameSetup.start_with_seed(cfg, 12345)
+	var second := GameSetup.start_with_seed(cfg, 12345)
+	_ok(first != null and second != null, "two games share the seed")
+	if first == null or second == null:
+		return
+	_ai_rounds(first, 4)
+	_ai_rounds(second, 4)
+	_ok(_ai_fingerprint(first) == _ai_fingerprint(second), "the same seed plays the same four rounds")
+	_ok(SoakInvariants.check(first).is_empty(), "the auto-played game still matches the soak invariants")
+
+
+func _ai_opening_and_orders() -> void:
+	var cfg := _ai_cfg()
+	var opened := GameSetup.start_with_seed(cfg, 12345)
+	_ok(opened != null, "opening game built")
+	if opened == null:
+		return
+	opened.play_rivals()
+	var founded := 0
+	for player in opened.players:
+		if not player.human:
+			founded += opened.city_count(player.index)
+	_ok(founded >= 1, "a starting settler founds in a normal opening")
+	var legal := _blank_setup("plains")
+	var settler := legal.spawn_unit(1, "settler", Vector2i(10, 10))
+	_ok(settler != null and legal.can_found(settler).is_empty(), "the fixture settler may found")
+	RivalAI.play(legal, 1)
+	_ok(legal.city_count(1) == 1 and legal.players[1].units.is_empty(), "a settler on a legal tile founds")
+	var volcanic := _blank_setup("plains")
+	var hot := Vector2i(10, 10)
+	volcanic.map.set_land(hot, "volcanic")
+	var walker := volcanic.spawn_unit(1, "settler", hot)
+	RivalAI.play(volcanic, 1)
+	var off_lava := volcanic.city_count(1) == 1 and volcanic.map.land_at(volcanic.cities[0].cell) != "volcanic"
+	if volcanic.city_count(1) == 0 and walker != null:
+		off_lava = walker.cell != hot and volcanic.map.land_at(walker.cell) != "volcanic"
+	_ok(off_lava, "a settler walks off volcanic ground instead of founding there")
+	var crowded := _blank_setup("plains")
+	var origin := Vector2i(10, 10)
+	var home := crowded.found_city(crowded.spawn_unit(0, "settler", origin))
+	# Distance 1 is already inside the new border, so the reason would be ownership.
+	# Distance 2 is unowned and still inside city.min_distance.
+	var too_close := crowded.spawn_unit(1, "settler", _step(origin, Hex.EAST, 2))
+	too_close.ap = 1
+	_ok(home != null and too_close != null and crowded.can_found(too_close) == GameSetup.REASON_DISTANCE, "can_found still rejects a close tile")
+	RivalAI.play(crowded, 1)
+	_ok(crowded.city_count(1) == 0, "too-close land is not founded")
+	crowded.end_turn()
+	RivalAI.play(crowded, 1)
+	var legal_city := true
+	for city in crowded.cities:
+		if city.player != 1:
+			continue
+		legal_city = Hex.distance(Hex.offset_to_axial(origin), Hex.offset_to_axial(city.cell)) >= crowded.config.city_min_distance
+	_ok(crowded.city_count(1) == 1 and legal_city, "the settler founds on the next turn once it has walked clear")
+	var produced := _blank_setup("plains")
+	var camp := produced.found_city(produced.spawn_unit(1, "settler", Vector2i(8, 8)))
+	RivalAI.play(produced, 1)
+	_ok(camp != null and camp.queue.size() == 1 and camp.queue[0].item_id == "warrior", "an empty city queues a warrior")
+	var growing := _blank_setup("plains")
+	var town := growing.found_city(growing.spawn_unit(1, "settler", Vector2i(8, 8)))
+	town.population = 2
+	for index in 3:
+		var parked := growing.spawn_unit(1, "warrior", Vector2i(3 + index, 3))
+		parked.ap = 0
+	RivalAI.play(growing, 1)
+	RivalAI.play(growing, 1)
+	var settler_items := 0
+	for item in town.queue:
+		if item.item_id == "settler":
+			settler_items += 1
+	_ok(settler_items == 1, "a second call does not queue another settler")
+	var staged := _blank_setup("plains")
+	staged.spawn_unit(0, "settler", Vector2i(20, 14))
+	staged.spawn_unit(1, "settler", Vector2i(6, 6))
+	var fighter := staged.spawn_unit(1, "warrior", Vector2i(12, 12))
+	var victim := staged.spawn_unit(0, "scout", _step(Vector2i(12, 12), Hex.EAST, 1))
+	var victim_hp := victim.hp
+	RivalAI.play(staged, 1)
+	var queued := false
+	for city in staged.cities:
+		if city.player == 1 and not city.queue.is_empty():
+			queued = true
+	var fought := victim == null or not staged.players[0].units.has(victim) or victim.hp < victim_hp
+	_ok(staged.city_count(1) == 1 and queued and fought and fighter.used_ability, "one turn founds, enqueues, and uses a damage ability")
+
+
+func _ai_combat() -> void:
+	var melee := _blank_setup("plains")
+	var warrior := melee.spawn_unit(1, "warrior", Vector2i(10, 10))
+	var scout := melee.spawn_unit(0, "scout", _step(Vector2i(10, 10), Hex.EAST, 1))
+	var before := scout.hp
+	RivalAI.play(melee, 1)
+	_ok((not melee.players[0].units.has(scout) or scout.hp < before) and warrior.used_ability, "a visible weak enemy is hit by an ability")
+	var cooled := _blank_setup("plains")
+	var waiting := cooled.spawn_unit(1, "warrior", Vector2i(10, 10))
+	var held := cooled.spawn_unit(0, "scout", _step(Vector2i(10, 10), Hex.EAST, 1))
+	waiting.ability_cooldowns["strike"] = 2
+	waiting.ability_cooldowns["shield_bash"] = 2
+	var held_hp := held.hp
+	RivalAI.play(cooled, 1)
+	_ok(held.hp == held_hp and not waiting.used_ability, "cooldown and a missing ability are respected")
+	var ranged := _blank_setup("plains")
+	var closer := ranged.spawn_unit(1, "warrior", Vector2i(8, 8))
+	closer.ap = 1
+	var far := ranged.spawn_unit(0, "warrior", _step(Vector2i(8, 8), Hex.EAST, 2))
+	var far_hp := far.hp
+	var far_dist := Hex.distance(Hex.offset_to_axial(closer.cell), Hex.offset_to_axial(far.cell))
+	RivalAI.play(ranged, 1)
+	var after_dist := Hex.distance(Hex.offset_to_axial(closer.cell), Hex.offset_to_axial(far.cell))
+	_ok(far.hp == far_hp and after_dist < far_dist, "out of range closes in instead of striking")
+	var bash := _blank_setup("plains")
+	var stand := Vector2i(10, 10)
+	var foe_cell := _step(stand, Hex.EAST, 1)
+	bash.map.set_land(_step(foe_cell, Hex.EAST, 1), "water")
+	var basher := bash.spawn_unit(1, "warrior", stand)
+	var blocker := bash.spawn_unit(0, "warrior", foe_cell)
+	var blocked_hp := blocker.hp
+	RivalAI.play(bash, 1)
+	_ok(basher.used_ability and blocker.hp < blocked_hp and blocker.cell == foe_cell, "shield bash still damages when the push is blocked")
+	var volley := _blank_setup("plains")
+	var archer := volley.spawn_unit(1, "archer", Vector2i(8, 8))
+	archer.ability_cooldowns["shoot"] = 3
+	var site := _step(Vector2i(8, 8), Hex.EAST, 2)
+	var town := volley.found_city(volley.spawn_unit(0, "settler", site))
+	var town_hp := town.hp
+	RivalAI.play(volley, 1)
+	_ok(town.hp < town_hp and archer.used_ability, "volley may hit an enemy city")
+	var sprint := _blank_setup("plains")
+	sprint.config.ai_obeys_fog = false
+	var runner := sprint.spawn_unit(1, "scout", Vector2i(4, 8))
+	var quarry := sprint.spawn_unit(0, "warrior", _step(Vector2i(4, 8), Hex.EAST, 6))
+	var start_dist := Hex.distance(Hex.offset_to_axial(runner.cell), Hex.offset_to_axial(quarry.cell))
+	RivalAI.play(sprint, 1)
+	var end_dist := Hex.distance(Hex.offset_to_axial(runner.cell), Hex.offset_to_axial(quarry.cell))
+	_ok(runner.movement_only and runner.used_ability and end_dist < start_dist - 3, "sprint is used to reach past the current AP, then the leftover AP moves")
+
+
+func _ai_spells_and_fog() -> void:
+	var caster := _blank_setup("plains")
+	var home := caster.found_city(caster.spawn_unit(1, "settler", Vector2i(10, 10)))
+	caster.players[1].mana = 80
+	RivalAI.play(caster, 1)
+	var improved := false
+	for row in caster.map.height:
+		for col in caster.map.width:
+			if caster.map.land_at(Vector2i(col, row)) == "forest":
+				improved = true
+	_ok(caster.players[1].casts_this_turn == 1 and caster.players[1].mana == 65 and improved, "the AI casts once and improves land it can reach")
+	var spent := caster.players[1].mana
+	RivalAI.play(caster, 1)
+	_ok(caster.players[1].mana == spent and caster.players[1].casts_this_turn == 1, "casts_per_turn stays 1")
+	var logged := _blank_setup("plains")
+	logged.seed_used = 16016
+	logged.config.log_enabled = true
+	var log_dir := _fresh_log_dir("ai-cast")
+	logged.config.log_directory = log_dir
+	GameLog.directory_override = log_dir
+	logged.found_city(logged.spawn_unit(1, "settler", Vector2i(10, 10)))
+	logged.players[1].mana = 80
+	logged.open_log()
+	RivalAI.play(logged, 1)
+	var events := SceneDriver.log_events(logged.log.absolute_path)
+	var saw := false
+	for event in events:
+		if str(event.get("event", "")) == "cast" and int(event.get("player", -1)) == 1:
+			saw = true
+	GameLog.directory_override = ""
+	_ok(saw, "a rival cast is a cast line in the game log")
+	var suicide := _blank_setup("plains")
+	suicide.config.ai_weight_improve = 0
+	suicide.config.ai_weight_worsen = 30
+	suicide.config.ai_min_spell_score = 1
+	var ours := suicide.found_city(suicide.spawn_unit(1, "settler", Vector2i(8, 8)))
+	var rival_home := _step(Vector2i(8, 8), Hex.EAST, 3)
+	var rival_city := suicide.found_city(suicide.spawn_unit(0, "settler", rival_home))
+	_ok(ours != null and rival_city != null, "suicide fixture has two cities")
+	for hex in Hex.neighbors(Hex.offset_to_axial(rival_home)):
+		var cell := Hex.axial_to_offset(hex)
+		var guard := suicide.spawn_unit(1, "warrior", cell)
+		if guard == null:
+			continue
+		guard.ap = 0
+		guard.acted = true
+		guard.hp = 1
+	suicide.players[1].mana = 100
+	RivalAI.play(suicide, 1)
+	var safe := suicide.players[1].mana == 100
+	for unit in suicide.players[1].units:
+		if unit.unit_type != "warrior":
+			continue
+		if unit.hp <= 0 or suicide.map.land_at(unit.cell) == "water" or suicide.map.land_at(unit.cell) == "volcanic":
+			safe = false
+	_ok(safe, "a suicidal carve river or ignite is refused")
+	var hidden := _blank_setup("plains")
+	var seeker := hidden.spawn_unit(1, "warrior", Vector2i(4, 6))
+	var unseen := hidden.spawn_unit(0, "warrior", _step(Vector2i(4, 6), Hex.EAST, 5))
+	hidden._refresh_fog()
+	var unseen_hp := unseen.hp
+	_ok(not hidden.fog.unit_visible(1, unseen.cell), "the enemy starts outside vision")
+	RivalAI.play(hidden, 1)
+	_ok(unseen.hp == unseen_hp, "fog hides an unrevealed enemy from attacks")
+	var known := _blank_setup("plains")
+	known.config.ai_obeys_fog = false
+	var hunter := known.spawn_unit(1, "warrior", Vector2i(4, 6))
+	var marked := known.spawn_unit(0, "warrior", _step(Vector2i(4, 6), Hex.EAST, 5))
+	var marked_dist := Hex.distance(Hex.offset_to_axial(hunter.cell), Hex.offset_to_axial(marked.cell))
+	RivalAI.play(known, 1)
+	var closed := Hex.distance(Hex.offset_to_axial(hunter.cell), Hex.offset_to_axial(marked.cell))
+	_ok(marked.hp == marked.max_hp and closed < marked_dist, "with fog off the warrior walks toward an unseen enemy and still cannot strike out of range")
+
+
+func _ai_hazards_and_finish() -> void:
+	var water := _blank_setup("plains")
+	var shore := Vector2i(6, 6)
+	var swimmer := water.spawn_unit(1, "settler", shore)
+	water.map.set_land(shore, "water")
+	for dir in 6:
+		water.map.set_land(_step(shore, dir, 1), "water")
+	_ok(water.can_found(swimmer) == GameSetup.REASON_WATER, "can_found still rejects water")
+	RivalAI.play(water, 1)
+	_ok(water.city_count(1) == 0, "the AI does not found on water")
+	var dry := _blank_setup("plains")
+	var pad := Vector2i(6, 8)
+	dry.map.set_land(_step(pad, Hex.EAST, 1), "water")
+	var walker := dry.spawn_unit(1, "warrior", pad)
+	dry.config.ai_obeys_fog = false
+	RivalAI.play(dry, 1)
+	_ok(dry.map.land_at(walker.cell) != "water", "the AI does not walk onto water")
+	var lava := _blank_setup("plains")
+	var camp := Vector2i(8, 8)
+	var only := _step(camp, Hex.EAST, 1)
+	lava.map.set_land(only, "volcanic")
+	for dir in 6:
+		var neighbor := _step(camp, dir, 1)
+		if neighbor != only:
+			lava.map.set_land(neighbor, "water")
+	var wounded := lava.spawn_unit(1, "warrior", camp)
+	wounded.hp = 8
+	lava.config.ai_obeys_fog = false
+	RivalAI.play(lava, 1)
+	_ok(wounded.cell == camp and wounded.ap == 0, "a lethal volcanic step is refused and the turn still finishes")
+	var idle := _blank_setup("plains")
+	idle.config.ai_obeys_fog = false
+	var loner := idle.spawn_unit(1, "warrior", Vector2i(9, 9))
+	RivalAI.play(idle, 1)
+	_ok(loner.ap == 0 and loner.order == GameSetup.ORDER_FORTIFY, "no fight still fortifies instead of stalling")
+	var ended := _blank_setup("plains")
+	ended.spawn_unit(0, "settler", Vector2i(8, 8))
+	var killer := ended.spawn_unit(1, "warrior", _step(Vector2i(8, 8), Hex.EAST, 1))
+	var later := ended.spawn_unit(2, "settler", Vector2i(16, 12))
+	var later_cell := later.cell
+	ended.play_rivals()
+	_ok(ended.result != null and ended.players[0].eliminated and ended.city_count(2) == 0 and later.cell == later_cell, "eliminating the human stops the later rival")
+	var frozen := _blank_setup("plains")
+	frozen.config.ai_enabled = false
+	var parked := frozen.spawn_unit(1, "settler", Vector2i(7, 7))
+	var parked_cell := parked.cell
+	frozen.play_rivals()
+	_ok(parked.cell == parked_cell and frozen.city_count(1) == 0 and frozen.result == null, "ai.enabled false leaves rivals idle")
+

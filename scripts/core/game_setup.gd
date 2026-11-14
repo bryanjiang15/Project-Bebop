@@ -1000,10 +1000,26 @@ func has_unordered_moves(player: int) -> bool:
 	return not units_needing_orders(player).is_empty()
 
 
+## Each living rival plays, in index order, on the AP they already have.
+## Eliminated players are skipped. A result mid-turn stops the rest.
+## The human is not played here. `ai.enabled` false leaves every rival idle.
+func play_rivals() -> void:
+	if result != null or config == null or not config.ai_enabled:
+		return
+	for player in players:
+		if player.human or player.eliminated:
+			continue
+		RivalAI.play(self, player.index)
+		if result != null:
+			return
+
+
 func end_turn() -> void:
 	if result != null:
 		return
-	# One global clock: every city resolves here. Rivals have no turn of their own yet.
+	# One global clock: every city resolves here. Rival turns, when enabled,
+	# already ran in play_rivals. Heal, mana, volcanic damage, and cooldowns
+	# stay on this shared tick. A cooldown of C cast on turn N is ready on N+C.
 	# Growth uses this turn's yields, then production (a settler sees the post-growth pop),
 	# then the border clock. Mana paid is that same snapshot, summed per player after
 	# every city has resolved, so a building finished this turn is paid next End Turn.
@@ -1013,8 +1029,8 @@ func end_turn() -> void:
 	# (a wounded unit is not removed by damage it would have healed through).
 	# The city itself is not damaged by that hit. A volcanic death can eliminate
 	# its owner; conquest is judged there, before the turn-limit ranking.
-	# Spell cooldowns then tick once for every player — this End Turn is each
-	# player's turn until turns are sequential. When this turn is `turn_limit`,
+	# Spell cooldowns then tick once for every player. The tick is still global:
+	# it is not yet one clock per player. When this turn is `turn_limit`,
 	# the match ends after that resolution and the counter does not advance.
 	# Otherwise the turn counter advances and AP refills to the pool.
 	# A move ability's leftover bonus is discarded there, and movement_only clears.

@@ -135,6 +135,19 @@ jobs:
             exit 1
           fi
 
+      - name: Run AI soak
+        run: |
+          set -o pipefail
+          godot --headless --path . --script res://tests/soak_ai.gd 2>&1 | tee test_soak_ai.log
+          if grep -E "SCRIPT ERROR|^ERROR:" test_soak_ai.log; then
+            echo "AI soak produced errors"
+            exit 1
+          fi
+          if ! grep -q "AI SOAK OK" test_soak_ai.log; then
+            echo "AI soak did not finish"
+            exit 1
+          fi
+
       - name: Export macOS build
         run: |
           set -o pipefail

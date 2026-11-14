@@ -8,8 +8,9 @@ extends RefCounted
 ## reorder, Cancel Place, End Turn, the menu button, and Restart.
 ##
 ## Core calls, because no handler exists for them:
-## - The conquest fixture repositions units. Rivals have no turn of their own,
-##   and a warrior cannot walk the start-distance gap inside a short game.
+## - The conquest fixture repositions units. The hunter then captures both
+##   settlers before End Turn, refilling AP after the first capture, because
+##   a living rival would move on that End Turn.
 ## - One rival city is founded so a spell can target rival-owned land. The
 ##   human cannot found a city for someone else.
 ## - Ticket 30 paints plains under a settler who has no city. See spare_settlers.
@@ -142,10 +143,33 @@ func _act(game: Node, setup: GameSetup, unit: PlayerState.UnitState) -> String:
 
 
 func _hunt(game: Node, setup: GameSetup, unit: PlayerState.UnitState) -> String:
-	var capture := _capture_cell(setup, unit)
-	if capture != _NO_CELL:
+	# Both rival settlers have to be taken before their turn. A capture spends
+	# the warrior's AP, so the second one refills it. That refill is only this
+	# fixture. A rival who lived would walk away and the hunt would miss turn 2.
+	var taken := 0
+	while taken < 2:
+		setup = game.get("setup") as GameSetup
+		if setup.result != null:
+			return _finish_ended(game, setup)
+		unit = _unit_by_id(setup, unit.id)
+		if unit == null:
+			return ""
+		if unit.ap <= 0:
+			unit.ap = setup.config.unit(unit.unit_type).ap
+		var capture := _capture_cell(setup, unit)
+		if capture == _NO_CELL:
+			break
 		captures += 1
-		return _right_click(game, setup, unit, capture, "capture")
+		taken += 1
+		var status := _right_click(game, setup, unit, capture, "capture")
+		if status == ENDED or status.begins_with("FAIL"):
+			return status
+		if setup.result != null:
+			return _finish_ended(game, setup)
+	setup = game.get("setup") as GameSetup
+	unit = _unit_by_id(setup, unit.id)
+	if unit == null or setup.result != null:
+		return "" if unit == null else _finish_ended(game, setup)
 	var step := _step_toward(setup, unit, true)
 	if step != _NO_CELL:
 		return _right_click(game, setup, unit, step, "move")
