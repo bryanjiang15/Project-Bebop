@@ -23,7 +23,11 @@ func _init() -> void:
 
 func _run() -> void:
 	# The suite must not write into the real user://logs folder.
+	# Seed stays fixed so a rival founding or a conquest on a random map
+	# cannot abort the scripted sequence. Rivals still play.
 	GameLog.directory_override = "/tmp/bebop-smoke-logs"
+	if not _pin_smoke_seed():
+		return
 	change_scene_to_file("res://scenes/main_menu.tscn")
 	var menu := await _wait_for("res://scripts/view/main_menu.gd")
 	if menu == null:
@@ -3125,26 +3129,45 @@ func _found_city(game: Node) -> bool:
 		print("FAIL founded city settlers=", human_settlers, " warriors=", human_warriors, " cities=", setup.city_count(setup.human_index), " units=", setup.unit_total())
 		quit(1)
 		return false
-	var city_nodes := 0
-	var unit_nodes := 0
-	var city_name := ""
-	for child in game.get_node("%Actors").get_children():
-		var node_name := str(child.name)
-		if node_name.begins_with("City_"):
-			city_nodes += 1
-			city_name = (child.get_node("Name") as Label).text
-		elif node_name.begins_with("Unit_"):
-			unit_nodes += 1
-	if city_nodes != 1 or unit_nodes < 1 or city_name == "":
-		print("FAIL city view cities=", city_nodes, " units=", unit_nodes, " name='", city_name, "'")
-		quit(1)
-		return false
 	var founded := _human_city(setup)
 	if founded == null or founded.population != 1:
 		print("FAIL city population")
 		quit(1)
 		return false
-	print("PASS founded ", city_name)
+	var city_nodes := 0
+	var unit_nodes := 0
+	var saw_human := false
+	for child in game.get_node("%Actors").get_children():
+		var node_name := str(child.name)
+		if node_name.begins_with("City_"):
+			city_nodes += 1
+			if (child.get_node("Name") as Label).text == founded.city_name:
+				saw_human = true
+		elif node_name.begins_with("Unit_"):
+			unit_nodes += 1
+	if city_nodes < 1 or unit_nodes < 1 or not saw_human:
+		print("FAIL city view cities=", city_nodes, " units=", unit_nodes, " human=", saw_human)
+		quit(1)
+		return false
+	print("PASS founded ", founded.city_name)
+	return true
+
+
+func _pin_smoke_seed() -> bool:
+	var data := GameConfig.read_json(GameConfig.PATH)
+	if data.is_empty():
+		print("FAIL could not read config")
+		quit(1)
+		return false
+	var map: Dictionary = data["map"]
+	map["seed"] = 727142661
+	data["map"] = map
+	var err := _SceneDriver.write_json("/tmp/bebop-smoke-config.json", data)
+	if not err.is_empty():
+		print("FAIL ", err)
+		quit(1)
+		return false
+	GameConfig.path_override = "/tmp/bebop-smoke-config.json"
 	return true
 
 
