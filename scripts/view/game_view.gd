@@ -77,6 +77,12 @@ var _end_confirm: bool = false
 ## The unit End Turn landed on. A second press ends the turn only while the
 ## selection is still this unit and nothing has cleared the confirm.
 var _end_anchor_id: int = -1
+## Bumped to drop a pause or pan that the player interrupted.
+var _advance_serial: int = 0
+var _pan_tween: Tween
+## Headless play stays instant so the suite does not wait. A test sets this to
+## use camera.auto_advance_delay_sec and camera.pan_sec.
+var honor_timing_in_headless: bool = false
 var _spell_id: String = ""
 var _ability_id: String = ""
 var _spell_direction: int = Hex.EAST
@@ -242,6 +248,7 @@ func _process(delta: float) -> void:
 func _on_end_turn_pressed() -> void:
 	if setup == null or _leaving or setup.result != null:
 		return
+	_cancel_advance()
 	_spell_id = ""
 	_ability_id = ""
 	var count := setup.units_needing_orders(setup.human_index).size()
@@ -258,7 +265,7 @@ func _on_end_turn_pressed() -> void:
 	if next != null:
 		_selected_id = next.id
 		_selected_city_id = -1
-		_center_on_cell(next.cell)
+		_focus_cell(next.cell)
 		_end_anchor_id = next.id
 	else:
 		_end_anchor_id = _selected_id
@@ -281,11 +288,12 @@ func _on_next_unit_pressed() -> void:
 	var next := setup.next_unit_needing_orders(setup.human_index, _selected_id)
 	if next == null:
 		return
+	_cancel_advance()
 	_cancel_targeting()
 	_cancel_end_confirm()
 	_selected_id = next.id
 	_selected_city_id = -1
-	_center_on_cell(next.cell)
+	_focus_cell(next.cell)
 	_refresh_board()
 
 
@@ -370,6 +378,7 @@ func _on_main_menu_pressed() -> void:
 func _select_at_screen(screen: Vector2) -> void:
 	if _menu.visible:
 		return
+	_cancel_advance()
 	var cell := _cell_at_screen(screen)
 	var axial := Hex.offset_to_axial(cell)
 	if not Hex.in_map(axial, _config.map_width, _config.map_height):
@@ -670,10 +679,17 @@ func _take_follow(unit: PlayerState.UnitState, needed_before: bool, follow_id: i
 	if next != null and not setup.unit_needs_orders(next):
 		next = null
 	if next != null:
-		_selected_id = next.id
-		_selected_city_id = -1
-		_center_on_cell(next.cell)
+		if _delay_seconds() <= 0.0 and _pan_seconds() <= 0.0:
+			_cancel_advance()
+			_selected_id = next.id
+			_selected_city_id = -1
+			_center_on_cell(next.cell)
+			return
+		# The finished unit stays selected through the pause. The pan selects.
+		_advance_serial += 1
+		_play_advance(_advance_serial, next.id)
 		return
+	_cancel_advance()
 	if not still:
 		_selected_id = -1
 		_selected_city_id = -1
@@ -692,12 +708,103 @@ func _select_opening_unit() -> void:
 	var first := needing[0]
 	_selected_id = first.id
 	_selected_city_id = -1
-	_center_on_cell(first.cell)
+	_focus_cell(first.cell)
 
 
 func _center_on_cell(cell: Vector2i) -> void:
 	_camera.position = _map.map_to_local(cell)
 	_clamp_camera()
+
+
+## Where the camera rests after centering on a cell, without leaving it there.
+func _camera_goal(cell: Vector2i) -> Vector2:
+	var saved := _camera.position
+	_center_on_cell(cell)
+	var goal := _camera.position
+	_camera.position = saved
+	return goal
+
+
+func _delay_seconds() -> float:
+	return _timing_seconds(_config.camera_auto_advance_delay_sec if _config != null else 0.0)
+
+
+func _pan_seconds() -> float:
+	return _timing_seconds(_config.camera_pan_sec if _config != null else 0.0)
+
+
+func _timing_seconds(configured: float) -> float:
+	if DisplayServer.get_name() == "headless" and not honor_timing_in_headless:
+		return 0.0
+	return maxf(configured, 0.0)
+
+
+func _kill_pan() -> void:
+	if _pan_tween != null and is_instance_valid(_pan_tween):
+		_pan_tween.kill()
+	_pan_tween = null
+
+
+func _cancel_advance() -> void:
+	_advance_serial += 1
+	_kill_pan()
+
+
+## Manual Next Unit, the Enter jump, and the unit picked at the start of a turn.
+## Selection is already set. The camera pans, or snaps when the duration is 0.
+func _focus_cell(cell: Vector2i) -> void:
+	var goal := _camera_goal(cell)
+	var seconds := _pan_seconds()
+	if seconds <= 0.0 or _camera.position.is_equal_approx(goal):
+		_camera.position = goal
+		return
+	_kill_pan()
+	_pan_tween = create_tween()
+	_pan_tween.set_trans(Tween.TRANS_CUBIC)
+	_pan_tween.set_ease(Tween.EASE_IN_OUT)
+	_pan_tween.tween_property(_camera, "position", goal, seconds)
+
+
+## Units resolve in place. The only motion to wait for is a camera pan already
+## running, so the pause starts after that pan instead of overlapping it.
+func _wait_for_motion(serial: int) -> void:
+	while serial == _advance_serial and _pan_tween != null and is_instance_valid(_pan_tween) and _pan_tween.is_running():
+		await get_tree().process_frame
+
+
+func _play_advance(serial: int, unit_id: int) -> void:
+	await _wait_for_motion(serial)
+	if serial != _advance_serial or setup == null or setup.result != null:
+		return
+	var delay := _delay_seconds()
+	if delay > 0.0:
+		await get_tree().create_timer(delay).timeout
+	if serial != _advance_serial or setup == null or setup.result != null:
+		return
+	var next := _human_by_id(unit_id)
+	if next == null or not setup.unit_needs_orders(next):
+		return
+	var goal := _camera_goal(next.cell)
+	var seconds := _pan_seconds()
+	if seconds > 0.0 and not _camera.position.is_equal_approx(goal):
+		_kill_pan()
+		if serial != _advance_serial:
+			return
+		_pan_tween = create_tween()
+		_pan_tween.set_trans(Tween.TRANS_CUBIC)
+		_pan_tween.set_ease(Tween.EASE_IN_OUT)
+		_pan_tween.tween_property(_camera, "position", goal, seconds)
+		await _pan_tween.finished
+	else:
+		_camera.position = goal
+	if serial != _advance_serial or setup == null or setup.result != null:
+		return
+	next = _human_by_id(unit_id)
+	if next == null or not setup.unit_needs_orders(next):
+		return
+	_selected_id = next.id
+	_selected_city_id = -1
+	_refresh_board()
 
 
 func _paint_map() -> void:

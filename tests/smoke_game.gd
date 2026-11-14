@@ -64,7 +64,7 @@ func _run() -> void:
 		return
 	if not _auto_finish(game):
 		return
-	if not _orders_queue(game):
+	if not await _orders_queue(game):
 		return
 	(game.get_node("%MenuButton") as Button).pressed.emit()
 	(game.get_node("%RestartButton") as Button).pressed.emit()
@@ -1579,6 +1579,116 @@ func _zoom_in(game: Node) -> void:
 	game._clamp_camera()
 
 
+## Finishing the selected unit waits out the config delay before the next
+## selection. A click during that wait keeps the clicked unit.
+func _advance_timing(game: Node, setup: GameSetup, first: PlayerState.UnitState, other: PlayerState.UnitState, settler: PlayerState.UnitState, home: Vector2i, east: Vector2i) -> bool:
+	var delay_was := setup.config.camera_auto_advance_delay_sec
+	var pan_was := setup.config.camera_pan_sec
+	var other_home := other.cell
+	game.honor_timing_in_headless = true
+	setup.config.camera_auto_advance_delay_sec = 0.2
+	setup.config.camera_pan_sec = 0.0
+	var step2 := _offset_step(east, Hex.EAST, 1)
+	setup.map.set_land(step2, "plains")
+	if not _select_unit_title(game, home, "Warrior"):
+		return false
+	_click_cell(game, east, MOUSE_BUTTON_RIGHT)
+	if first.ap != 1 or int(game.get("_selected_id")) != first.id:
+		print("FAIL partial move advanced selected ", game.get("_selected_id"), " ap ", first.ap)
+		quit(1)
+		return false
+	await create_timer(0.3).timeout
+	if int(game.get("_selected_id")) != first.id:
+		print("FAIL partial move advanced after the delay")
+		quit(1)
+		return false
+	_click_cell(game, step2, MOUSE_BUTTON_RIGHT)
+	if first.ap != 0 or int(game.get("_selected_id")) != first.id:
+		print("FAIL finish advanced before the delay selected ", game.get("_selected_id"), " ap ", first.ap)
+		quit(1)
+		return false
+	await create_timer(0.08).timeout
+	if int(game.get("_selected_id")) != first.id:
+		print("FAIL finish advanced during the delay selected ", game.get("_selected_id"))
+		quit(1)
+		return false
+	await create_timer(0.25).timeout
+	if int(game.get("_selected_id")) != other.id:
+		print("FAIL finish did not advance after the delay selected ", game.get("_selected_id"))
+		quit(1)
+		return false
+	print("PASS auto-advance waits for the delay")
+	first.cell = home
+	first.ap = 2
+	first.order = ""
+	first.acted = false
+	setup.config.camera_auto_advance_delay_sec = 0.35
+	var away := _offset_step(other_home, Hex.EAST, 1)
+	var away2 := _offset_step(other_home, Hex.EAST, 2)
+	setup.map.set_land(away, "plains")
+	setup.map.set_land(away2, "plains")
+	game._refresh_board()
+	if not _select_unit_title(game, other.cell, "Warrior"):
+		return false
+	_click_cell(game, away, MOUSE_BUTTON_RIGHT)
+	_click_cell(game, away2, MOUSE_BUTTON_RIGHT)
+	if other.ap != 0 or int(game.get("_selected_id")) != other.id:
+		print("FAIL cancel setup selected ", game.get("_selected_id"), " ap ", other.ap)
+		quit(1)
+		return false
+	_click_cell(game, settler.cell)
+	if int(game.get("_selected_id")) != settler.id:
+		print("FAIL click during the delay selected ", game.get("_selected_id"))
+		quit(1)
+		return false
+	await create_timer(0.5).timeout
+	if int(game.get("_selected_id")) != settler.id:
+		print("FAIL the delay still advanced after a click selected ", game.get("_selected_id"))
+		quit(1)
+		return false
+	print("PASS a click during the delay cancels auto-advance")
+	other.cell = other_home
+	other.ap = 2
+	other.order = ""
+	other.acted = false
+	first.cell = home
+	first.ap = 2
+	first.order = ""
+	first.acted = false
+	game._refresh_board()
+	if not _select_unit_title(game, home, "Warrior"):
+		return false
+	_click_cell(game, east, MOUSE_BUTTON_RIGHT)
+	_click_cell(game, step2, MOUSE_BUTTON_RIGHT)
+	if first.ap != 0 or int(game.get("_selected_id")) != first.id:
+		print("FAIL end-turn setup selected ", game.get("_selected_id"), " ap ", first.ap)
+		quit(1)
+		return false
+	var turn := setup.turn
+	var end := game.get_node("%EndTurnButton") as Button
+	end.pressed.emit()
+	if setup.turn != turn or end.text != "End anyway (Enter)" or int(game.get("_selected_id")) != other.id:
+		print("FAIL End Turn during the delay turn ", setup.turn, " '", end.text, "' selected ", game.get("_selected_id"))
+		quit(1)
+		return false
+	await create_timer(0.5).timeout
+	if setup.turn != turn or int(game.get("_selected_id")) != other.id:
+		print("FAIL the cancelled advance changed the End Turn jump")
+		quit(1)
+		return false
+	print("PASS End Turn during the delay still jumps")
+	_click_cell(game, settler.cell)
+	first.cell = home
+	first.ap = 2
+	first.order = ""
+	first.acted = false
+	setup.config.camera_auto_advance_delay_sec = delay_was
+	setup.config.camera_pan_sec = pan_was
+	game.honor_timing_in_headless = false
+	game._refresh_board()
+	return true
+
+
 ## The human orders queue through the real handlers. Other human units are
 ## parked at 0 AP so the list is exactly the units this check spawns.
 func _orders_queue(game: Node) -> bool:
@@ -1624,6 +1734,8 @@ func _orders_queue(game: Node) -> bool:
 	if button.disabled or (game.get_node("%EndTurnButton") as Button).text != "4 units need orders (Enter)":
 		print("FAIL queue start '", (game.get_node("%EndTurnButton") as Button).text, "' disabled ", button.disabled)
 		quit(1)
+		return false
+	if not await _advance_timing(game, setup, first, other, settler, home, east):
 		return false
 	if not _select_unit_title(game, far, "Settler"):
 		return false

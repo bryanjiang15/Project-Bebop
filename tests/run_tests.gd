@@ -142,6 +142,7 @@ func _test_config() -> void:
 	_ok(cfg.skip_water_if_land_unit_present and cfg.cooldown_uses_caster_turns, "water skip and cooldown")
 	_ok(cfg.ranged_takes_no_counter and cfg.melee_captures_city and cfg.archers_can_zero_city_hp, "combat capture flags")
 	_ok(is_equal_approx(cfg.camera_default_zoom, 0.72), "camera default zoom")
+	_ok(is_equal_approx(cfg.camera_auto_advance_delay_sec, 0.4) and is_equal_approx(cfg.camera_pan_sec, 0.25), "auto-advance pause and pan")
 	_ok(cfg.log_enabled, "logging is on")
 	_ok(cfg.log_directory == "user://logs", "log directory is user://logs")
 	var again: GameConfig = GameConfig.load_file()

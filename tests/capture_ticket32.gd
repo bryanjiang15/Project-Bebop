@@ -1,7 +1,8 @@
 extends SceneTree
 
 ## Real-renderer shots for ticket 32. Not part of CI.
-## Writes the six ticket32_*.png files under /opt/cursor/artifacts.
+## Writes the ticket32_*.png files under /opt/cursor/artifacts, including the
+## pause before the camera pans.
 ## Stages a plains disk, parks the starting units at 0 AP, then fortifies them
 ## so the queue is three spawned warriors. AP on those warriors changes only
 ## through move, Fortify, Skip, and End Turn. Paints volcanic settlers to
@@ -74,9 +75,17 @@ func _run() -> void:
 		return
 	_click(game, south, MOUSE_BUTTON_RIGHT)
 	_click(game, last, MOUSE_BUTTON_RIGHT)
-	if first.ap != 0 or int(game.get("_selected_id")) != second.id or not _mark_is(game, first, 0.55):
-		print("FAIL after finish ap ", first.ap, " selected ", game.get("_selected_id"), " alpha ", _alpha(game, first))
+	if first.ap != 0 or int(game.get("_selected_id")) != first.id or not _mark_is(game, first, 0.55):
+		print("FAIL pause ap ", first.ap, " selected ", game.get("_selected_id"), " alpha ", _alpha(game, first))
 		quit(1)
+		return
+	game._clear_hover()
+	_frame(game, last, 0.9)
+	for _frame in 3:
+		await process_frame
+	if not await _save("/opt/cursor/artifacts/ticket32_pause.png"):
+		return
+	if not await _await_selected(game, second.id):
 		return
 	game._clear_hover()
 	_frame(game, second.cell, 0.9)
@@ -112,6 +121,8 @@ func _run() -> void:
 	if not _select_unit(game, west, "Warrior"):
 		return
 	SceneDriver.order_button(game, "fortify").pressed.emit()
+	if not await _await_selected_other(game, third.id):
+		return
 	if not third.fortified or setup.unit_needs_orders(third) or int(game.get("_selected_id")) == third.id:
 		print("FAIL fortify selected ", game.get("_selected_id"))
 		quit(1)
@@ -173,6 +184,32 @@ func _fortify_existing(game: Node, setup: GameSetup) -> bool:
 			print("FAIL could not fortify ", unit.unit_type)
 			quit(1)
 			return false
+	return true
+
+
+func _await_selected(game: Node, unit_id: int) -> bool:
+	var started := Time.get_ticks_msec()
+	while int(game.get("_selected_id")) != unit_id:
+		if Time.get_ticks_msec() - started > 2000:
+			print("FAIL timed out waiting for ", unit_id, " selected ", game.get("_selected_id"))
+			quit(1)
+			return false
+		await process_frame
+	for _frame in 8:
+		await process_frame
+	return true
+
+
+func _await_selected_other(game: Node, unit_id: int) -> bool:
+	var started := Time.get_ticks_msec()
+	while int(game.get("_selected_id")) == unit_id:
+		if Time.get_ticks_msec() - started > 2000:
+			print("FAIL timed out leaving ", unit_id)
+			quit(1)
+			return false
+		await process_frame
+	for _frame in 8:
+		await process_frame
 	return true
 
 
