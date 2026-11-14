@@ -3566,8 +3566,29 @@ func _rival_site(setup: GameSetup, founder: PlayerState.UnitState, origin: Vecto
 			_paint_plains(setup, cell)
 			_vacate(setup, cell, {})
 			founder.cell = cell
-			if setup.can_found(founder).is_empty():
-				return cell
+			if not setup.can_found(founder).is_empty():
+				continue
+			# Rivals may have claimed or flooded the ring. Paint one neighbor
+			# so the new city owns a tile a granary can sit on.
+			var plot := _claimable_neighbor(setup, cell)
+			if plot.x < 0:
+				continue
+			_paint_plains(setup, plot)
+			_vacate(setup, plot, {})
+			return cell
+	return Vector2i(-1, -1)
+
+
+func _claimable_neighbor(setup: GameSetup, cell: Vector2i) -> Vector2i:
+	for hex in Hex.neighbors(Hex.offset_to_axial(cell)):
+		var at := Hex.axial_to_offset(hex)
+		if not setup.map.in_bounds(at):
+			continue
+		if setup.city_at_cell(at) != null:
+			continue
+		if setup.owner_at(at) >= 0 and not setup.config.can_claim_owned_tiles:
+			continue
+		return at
 	return Vector2i(-1, -1)
 
 
