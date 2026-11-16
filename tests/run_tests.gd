@@ -3968,6 +3968,28 @@ func _ai_hazards_and_finish() -> void:
 	var loner := idle.spawn_unit(1, "warrior", Vector2i(9, 9))
 	RivalAI.play(idle, 1)
 	_ok(loner.ap == 0 and loner.order == GameSetup.ORDER_FORTIFY, "no fight still fortifies instead of stalling")
+	idle.end_turn()
+	_ok(loner.ap > 0 and loner.order == GameSetup.ORDER_FORTIFY, "the refill keeps the fortify order")
+	var prey := idle.spawn_unit(0, "warrior", _step(loner.cell, Hex.EAST, 1))
+	idle._refresh_fog()
+	var prey_hp := prey.hp
+	var loner_cell := loner.cell
+	RivalAI.play(idle, 1)
+	_ok(loner.cell != loner_cell or prey.hp < prey_hp, "a fortified rival still acts on the next turn")
+	var west := _blank_setup("plains")
+	var west_founder := west.spawn_unit(1, "settler", Vector2i(4, 9))
+	_ok(west.found_city(west_founder) != null, "west explore city founds")
+	var west_fighter := west.spawn_unit(1, "warrior", Vector2i(5, 9))
+	var west_q := Hex.offset_to_axial(west_fighter.cell).x
+	RivalAI.play(west, 1)
+	_ok(Hex.offset_to_axial(west_fighter.cell).x > west_q, "a warrior on the west side explores toward the middle")
+	var east := _blank_setup("plains")
+	var east_founder := east.spawn_unit(1, "settler", Vector2i(23, 9))
+	_ok(east.found_city(east_founder) != null, "east explore city founds")
+	var east_fighter := east.spawn_unit(1, "warrior", Vector2i(22, 9))
+	var east_q := Hex.offset_to_axial(east_fighter.cell).x
+	RivalAI.play(east, 1)
+	_ok(Hex.offset_to_axial(east_fighter.cell).x < east_q, "a warrior on the east side explores toward the middle")
 	var ended := _blank_setup("plains")
 	ended.spawn_unit(0, "settler", Vector2i(8, 8))
 	var killer := ended.spawn_unit(1, "warrior", _step(Vector2i(8, 8), Hex.EAST, 1))

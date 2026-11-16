@@ -19,12 +19,12 @@ Seeds, in order, and the ending the run must produce:
 | Seed | Mode | Ending |
 | --- | --- | --- |
 | 12345 | score | Turn 50 score |
-| 12011 | score | Turn 50 score |
-| 12023 | score | Turn 50 score |
+| 12011 | score | Eliminated |
+| 12023 | score | Eliminated |
 | 12059 | conquest | Conquest |
 | 12073 | score | Turn 50 score |
 
-On a score seed the human founds, queues units and buildings, casts (including Carve River through a building, and a spell on the rival city), moves and sometimes attacks, and orders Skip or Fortify. One unit is left idle on odd turns so End Turn warns and the second press confirms. The menu is opened first: Enter must not end the turn, and the End Turn button must still end it. Spell targeting and building placement are left armed on some turns so those modes cannot block End Turn.
+On a score seed the human founds, queues units and buildings, casts (including Carve River through a building, and a spell on the rival city), moves and sometimes attacks, and orders Skip or Fortify. Rivals explore toward the middle of the map, so on seeds 12011 and 12023 they reach the scripted human and eliminate that player. Seeds 12345 and 12073 still play to the turn limit. One unit is left idle on odd turns so End Turn warns and the second press confirms. The menu is opened first: Enter must not end the turn, and the End Turn button must still end it. Spell targeting and building placement are left armed on some turns so those modes cannot block End Turn.
 
 The conquest seed founds the human city, then the warrior captures both rival settlers before either rival acts. That is a conquest on turn 2. The warrior's AP is refilled between those two captures, and only there. Score seeds leave `ai.enabled` true, so rivals found, produce, move, and cast while the scripted human plays.
 
@@ -78,5 +78,7 @@ godot --headless --path . --script res://tests/soak_ai.gd
 Exit 0 and a final `SOAK OK` line. Locally the five games take about 2.5 seconds plus engine startup. Three runs in a row produce the same `RESULT` lines (the log file names use the clock, so those differ). CI runs this as "Run stability soak" and greps the log like the other steps.
 
 `tests/soak_ai.gd` is the AI-vs-AI soak. Seed 16016, logging off. Every living player, including index 0, is `RivalAI` for 20 turns or until `GameSetup.result`. It checks `SoakInvariants` after each round and prints `AI SOAK OK`. CI runs it as "Run AI soak".
+
+`tests/ai_end_turn.gd` is the unstaged end-turn check. It presses New Game on the default config, so the seed is rolled and the map is not painted. It ends turns with `%EndTurnButton` and with Enter, including the second End anyway press, and requires a rival unit to change cells within 8 turns. Drawn sprites have to sit on the unit's cell, and a unit the human cannot see has no sprite. It prints `AI END TURN OK` and `AI SPRITE OK`. CI runs it as "Run AI end turn".
 
 `tests/capture_ticket20.gd` is not in CI. It plays seed 12345 with the real renderer at 2560×1440 and writes `ticket20_turn1.png`, `ticket20_turn25.png`, `ticket20_turn50_board.png`, `ticket20_end_screen.png`, and `ticket20_after_restart.png`.

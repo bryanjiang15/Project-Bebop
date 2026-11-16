@@ -10,7 +10,7 @@ Ticket 16. Both non-human players play a normal turn after the human ends theirs
 
 Rivals spend the AP they already have. Then one global `end_turn()` resolves every city, pays snapshotted mana, heals cities and idle units, applies volcanic damage, ticks spell and ability cooldowns for every player, and either ends the match or increments the turn and refills AP. A cooldown of C cast on turn N is ready on turn N+C. Per-player clocks are a follow-up.
 
-Inside one player: units (snapshot of ids, sorted), then one production item for each empty queue, including a city founded this turn, then at most one spell. A unit gets at most 8 steps. A non-positive score fortifies, or skips when fortify is refused. A sprinted scout with leftover AP and nowhere to walk stops; End Turn clears `movement_only`. That is the same Skip refusal as the human.
+Inside one player: units (snapshot of ids, sorted), then one production item for each empty queue, including a city founded this turn, then at most one spell. A unit gets at most 8 steps. A non-positive score fortifies, or skips when fortify is refused. A sprinted scout with leftover AP and nowhere to walk stops; End Turn clears `movement_only`. That is the same Skip refusal as the human. Fortify still lasts until the unit moves, and End Turn refills AP without clearing that order. The rival's next turn looks at the unit again anyway. AP is what ends its turn, so a unit that fortified last turn can walk or fight once its AP is back.
 
 ## Scores (D2, D3)
 
@@ -20,7 +20,7 @@ An attack reads `ability_preview`: damage times `ai.weight_damage` for a unit, `
 
 A move scores `ai.weight_closer` times the hexes gained toward a goal, or `ai.weight_capture` when the step captures. Volcanic ground subtracts `ai.weight_volcanic`. Sprint scores only when the bonus reach is strictly closer than the current reach and that tile is not already reachable. Founding scores `ai.weight_found`.
 
-Goals, in order: a legal found tile for a settler; the nearest seen enemy combatant (closer, then lower HP, then cell); a 0 HP enemy city for a unit that can capture; any known enemy city; an unrevealed tile inside `ai.explore_radius` when fog is on.
+Goals, in order: a legal found tile for a settler; the nearest seen enemy combatant (closer, then lower HP, then cell); a 0 HP enemy city for a unit that can capture; any known enemy city; an unrevealed tile inside `ai.explore_radius` when fog is on. Unseen tiles at the same distance prefer the compass direction from that player's nearest city toward the middle of the map, then the earlier axial cell. A unit with no city uses a fixed direction from its id. That heading stays put after the unit passes the middle, so it does not turn around. The old axial-only tie sent every warrior west until it fortified on the map edge.
 
 ## Fog (D4)
 
@@ -48,4 +48,6 @@ Every number is a key under `ai` in `config/game_config.json`. A missing key fai
 
 `tests/soak_ai.gd` plays seed 16016 with `RivalAI` for every player, including the human, for 20 turns or until a result. It prints `AI SOAK OK`.
 
-Behavior tests in `tests/run_tests.gd` cover founding, a volcanic walk, a too-close settler, a warrior enqueue, a single settler queue, a damage ability, cooldown, closing in, a blocked Shield Bash, Volley on a city, Sprint, one improving cast, a refused suicidal spell, fog, water, a lethal volcano, fortify when nothing is useful, a human elimination that stops the later rival, `ai.enabled` false, a logged cast, and the same four rounds from seed 12345 twice.
+Behavior tests in `tests/run_tests.gd` cover founding, a volcanic walk, a too-close settler, a warrior enqueue, a single settler queue, a damage ability, cooldown, closing in, a blocked Shield Bash, Volley on a city, Sprint, one improving cast, a refused suicidal spell, fog, water, a lethal volcano, fortify when nothing is useful, a fortified unit that still acts after AP refills, explore that heads toward the middle instead of the west edge, a human elimination that stops the later rival, `ai.enabled` false, a logged cast, and the same four rounds from seed 12345 twice.
+
+`tests/ai_end_turn.gd` starts from the main menu on the default config, with a rolled seed and no painted map. It ends turns through `%EndTurnButton` and through Enter, including the second "End anyway" press, and requires a rival unit to change cells within 8 turns. It also requires every drawn unit sprite to sit on that unit's cell, and a hidden unit to have no sprite. CI runs it as "Run AI end turn".

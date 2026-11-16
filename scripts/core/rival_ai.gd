@@ -49,7 +49,10 @@ static func _act_unit(setup: GameSetup, unit: PlayerState.UnitState) -> void:
 	var guard := 0
 	while guard < _STEPS and setup.result == null and setup.players[unit.owner].units.has(unit):
 		guard += 1
-		if not setup.unit_needs_orders(unit):
+		# Fortify survives the refill on purpose: it is a stance, and the human
+		# can still walk it off. AP is what ends the unit's turn. Leaving the
+		# order in place made a rival fortify once and then never move again.
+		if unit.ap <= 0:
 			return
 		var action := _best_action(setup, unit)
 		if int(action["score"]) <= 0:
@@ -269,8 +272,17 @@ static func _found_goal(setup: GameSetup, unit: PlayerState.UnitState) -> Vector
 static func _explore_goal(setup: GameSetup, unit: PlayerState.UnitState) -> Vector2i:
 	var best := NO_CELL
 	var best_dist := 999999
+	var best_ahead := 999999
 	var origin := Hex.offset_to_axial(unit.cell)
+	# Equal-distance unseen tiles used to keep the westernmost axial cell, so
+	# every warrior walked to the west edge and sat there. The heading is a
+	# compass direction from the nearest city, so it does not flip after the
+	# unit passes the middle of the map.
+	var ahead := origin
+	var heading := _explore_heading(setup, unit)
 	var radius: int = setup.config.ai_explore_radius
+	for _step in radius:
+		ahead = Hex.neighbor(ahead, heading)
 	for hex in Hex.disk(origin, radius):
 		var cell := Hex.axial_to_offset(hex)
 		if not setup.map.in_bounds(cell):
@@ -278,10 +290,46 @@ static func _explore_goal(setup: GameSetup, unit: PlayerState.UnitState) -> Vect
 		if setup.fog.sight(unit.owner, cell) != FogState.Sight.UNREVEALED:
 			continue
 		var dist := Hex.distance(origin, hex)
-		if dist < best_dist or (dist == best_dist and (best == NO_CELL or _cell_before(cell, best))):
+		var ahead_dist := Hex.distance(hex, ahead)
+		var closer := dist < best_dist
+		var ahead_tie := dist == best_dist and ahead_dist < best_ahead
+		var axial_tie := dist == best_dist and ahead_dist == best_ahead and (best == NO_CELL or _cell_before(cell, best))
+		if closer or ahead_tie or axial_tie:
 			best = cell
 			best_dist = dist
+			best_ahead = ahead_dist
 	return best
+
+
+static func _explore_heading(setup: GameSetup, unit: PlayerState.UnitState) -> int:
+	var origin := _nearest_city_axial(setup, unit)
+	if origin == NO_CELL:
+		return posmod(unit.id, 6)
+	var middle := Hex.offset_to_axial(Vector2i(setup.map.width / 2, setup.map.height / 2))
+	var best := 0
+	var best_dist := 999999
+	for dir in 6:
+		var dist := Hex.distance(Hex.neighbor(origin, dir), middle)
+		if dist < best_dist:
+			best = dir
+			best_dist = dist
+	return best
+
+
+static func _nearest_city_axial(setup: GameSetup, unit: PlayerState.UnitState) -> Vector2i:
+	var best := NO_CELL
+	var best_dist := 999999
+	var origin := Hex.offset_to_axial(unit.cell)
+	for city in setup.cities:
+		if city.player != unit.owner:
+			continue
+		var dist := Hex.distance(origin, Hex.offset_to_axial(city.cell))
+		if dist < best_dist or (dist == best_dist and (best == NO_CELL or _cell_before(city.cell, best))):
+			best = city.cell
+			best_dist = dist
+	if best == NO_CELL:
+		return NO_CELL
+	return Hex.offset_to_axial(best)
 
 
 static func _good_found(setup: GameSetup, unit: PlayerState.UnitState, cell: Vector2i) -> bool:
