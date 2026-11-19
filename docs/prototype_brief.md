@@ -159,6 +159,18 @@ Exact numbers are in section 5.
 | City: HP / defense strength / heal | 100 / 15 / +10 per turn | Cities don't attack in the prototype |
 | Score weights | 1 per tile, 10 per city, 3 per population | Formula itself is a Proposal in the design doc |
 
+### Unit ability tunables (Oct 29, 2026)
+
+These rows belong with the table above. Each ability is one object under `abilities`. A unit lists the ids it has in `units.<type>.abilities`. Damage is that unit's attack times `damage_multiplier`. `ap_cost` is how much AP must remain before the ability is legal. It is not a second global minimum, and it is not subtracted. Skip, Fortify, and Found stay orders: Skip needs no AP, and Fortify and Found need at least 1 AP.
+
+| Ability | Who | Starting default | Notes |
+| --- | --- | --- | --- |
+| Strike | Warrior, Scout | Melee, range 1, 1 AP, cooldown 0, damage ×1, counter, push 0 | One enemy unit or city |
+| Shoot | Archer | Ranged, range 2, 1 AP, cooldown 0, damage ×1, no counter, push 0 | One enemy. The archer's defense of 12 is `units.archer.defense` |
+| Shield Bash | Warrior | Melee, range 1, 1 AP, cooldown 2, damage ×0.5, no counter, push 1 | Pushes a living unit one hex directly away when that hex is open |
+| Volley | Archer | Ranged, range 2, radius 1, 1 AP, cooldown 3, damage ×0.5, no counter, push 0 | Hits visible enemy units and visible enemy cities in the disk |
+| Sprint | Scout | Self, range 0, 1 AP, cooldown 3, +2 AP, then movement only | Adds `ap_bonus` and does not end the turn. The scout can only move until End Turn |
+
 # 6. Completion criteria (before testing)
 - [ ] New game from the main menu generates a random hex map with the 5 land types, fog of war, and 3 players.
 - [ ] Settler founds a city; more settlers can be trained and found more cities; the city distance rule applies.
