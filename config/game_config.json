@@ -168,6 +168,26 @@
     "auto_advance_delay_sec": 0.4,
     "pan_sec": 0.25
   },
+  "ai": {
+    "enabled": true,
+    "military_target": 3,
+    "explore_radius": 4,
+    "settle_threat": 2,
+    "weight_damage": 4,
+    "weight_kill": 90,
+    "weight_city_damage": 3,
+    "weight_counter": 5,
+    "weight_open_push": 20,
+    "weight_capture": 220,
+    "weight_found": 200,
+    "weight_closer": 16,
+    "weight_explore": 6,
+    "weight_sprint": 24,
+    "weight_improve": 8,
+    "weight_worsen": 10,
+    "weight_volcanic": 40,
+    "min_spell_score": 8
+  },
   "log": {
     "enabled": true,
     "directory": "user://logs"

@@ -65,7 +65,7 @@ An illegal click shows the reason and does not spend mana or leave targeting.
 
 ## Cooldowns
 
-Cooldowns count the caster's own turns. Until players take turns one at a time, the global End Turn is that tick for every player. It runs after the mana sum, idle healing, and volcanic damage, and before the turn counter increments.
+Cooldowns count the caster's own turns. Rivals now act before this clock, and the tick is still global: it is not yet one clock per player. It runs after the mana sum, idle healing, and volcanic damage, and before the turn counter increments.
 
 A successful cast stores the spell's `cooldown` as the number of End Turns still to wait. Each End Turn subtracts 1, and 0 means ready. A spell with cooldown 2 cast on turn N is therefore blocked on turn N+1 and castable on turn N+2. The one-cast limit clears at the same tick. `spells.cooldown_uses_caster_turns` records this rule.
 

@@ -4,7 +4,7 @@ Engineering record for the settler-movement and founding rules. Design still liv
 
 ## Who acts
 
-Player ids are `0 .. players.count - 1`. The human is `players.human_index` (0). **End Turn** and the Enter key advance one global turn and refill every unit's AP from `units.<type>.ap`. Scout is 3. Every other unit is 2. Enter does nothing while the in-game menu is open. Rivals do not take a turn.
+Player ids are `0 .. players.count - 1`. The human is `players.human_index` (0). **End Turn** and the Enter key advance one global turn and refill every unit's AP from `units.<type>.ap`. Scout is 3. Every other unit is 2. Enter does nothing while the in-game menu is open. After that End Turn succeeds, each living rival takes a turn before the clock below. See `docs/ai.md`.
 
 `players.starting_units` is `["settler", "warrior"]`. The settler takes the start tile. The warrior takes the nearest free passable tile. Combat, healing, Skip/Fortify, and Sprint are in `docs/combat.md`. End Turn refills every unit from `units.<type>.ap` and discards Sprint's leftover bonus.
 

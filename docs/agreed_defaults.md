@@ -14,7 +14,7 @@ Notion is the source of truth for the prototype brief and the design doc. This f
 8. Food shortfall drains the growth bar; at 0 the city loses 1 pop (min 1). The settler's 1-pop cost is taken when it is finished; the city must be size 2+.
 9. A new unit spawns on the city center; if any unit is already there, it goes to the nearest free tile inside the borders.
 10. Volcanic damage (flat 10) at the end of the owner's turn and can kill. Units heal +10 anywhere if they didn't move or fight. A city heals if it wasn't attacked since its owner's last turn.
-11. Mana per turn = 2 + floor(pop/2) (+2 with Mana Well). Spell cooldowns count the caster's own turns. The global End Turn is that tick for every player until turns are sequential: a cooldown of 2 cast on turn N is castable again on turn N+2. See `docs/spells.md`.
+11. Mana per turn = 2 + floor(pop/2) (+2 with Mana Well). Spell cooldowns count the caster's own turns. Rivals act before the shared End Turn, and that End Turn is still the tick for every player: a cooldown of 2 cast on turn N is castable again on turn N+2. A per-player clock is a follow-up. See `docs/spells.md` and `docs/ai.md`.
 12. Ties: more tiles, then more cities, then the human loses.
 13. Spells never change tile ownership (flag: `spells.spells_change_tile_ownership`). Borders can claim water. Already-owned tiles can't be claimed.
 14. Unit orders include Skip and Fortify (Fortify = +25% defense while not moving), so the End Turn warning about units with no orders is satisfiable. Skip needs no AP and sets AP to 0. Fortify and Found need at least 1 AP and then set AP to 0. Neither Skip nor Fortify sets `acted`, so idle healing is unchanged.
@@ -62,6 +62,17 @@ Bryan decided that Volley damages enemy cities in its radius. The damage is the 
     - D6. After a successful End Turn, select the first unit that needs orders and center the camera. If none do, leave the selection and the camera alone. If the selected unit was removed and nobody needs orders, clear the selection.
     - D7. Auto-advance runs only after the selected unit becomes done or is removed. Clicking a unit that was already done does not advance.
     - D8. No multi-turn move orders. A unit does not keep walking toward a far target on later turns.
+
+21. Simple rival AI (ticket 16). Both non-human players play a full turn after the human's End Turn succeeds, then the existing global clock runs once. The policy is `scripts/core/rival_ai.gd`. The numbers are the top-level `ai` object. The decisions are in `docs/ai.md`:
+    - D1. Rivals act on the AP they already have, in index order. Cities, mana, healing, volcanic damage, and cooldowns stay on the one shared `end_turn()`.
+    - D2. One-ply scores. No search, personality, or diplomacy. Ties keep the earlier unit id, ability id, and axial `(q, r)`.
+    - D3. The same seed and state produce the same actions. The policy does not call `randf`.
+    - D4. `fog.ai_obeys_fog` true (shipped) limits the AI to what that player can see or has revealed. False opens the map for goals. Combat and spells still go through core.
+    - D5. No water. No volcanic step or founding when that hit would kill this End Turn. No Carve River through a friendly unit or own city center. No Ignite that would kill a friendly. Attacking from a volcanic tile already occupied is allowed.
+    - D6. An empty queue gets one item. Army target is `ai.military_target` (3): warrior, then archer, then scout. One settler only when the player has exactly one city, none walking or queued, and that city is large enough. Otherwise a legal building or another unit.
+    - D7. Rival actions are instant. Input locks, the board refreshes once, and the existing start-of-turn pick runs. There is no per-unit delay.
+    - D8. Every AI number is an `ai.*` key. `ai.enabled` false skips rival turns. The shipped value is true.
+    - D9. The five-game soak stays green. `tests/soak_ai.gd` plays every player, including the human, with `RivalAI` for 20 turns or until a result.
 
 Also: volcanic damage uses the brief's flat value, not the design doc's chance-based proposal.
 

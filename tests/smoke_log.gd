@@ -80,8 +80,12 @@ func _run() -> void:
 		quit(1)
 		return
 	var events := _SceneDriver.log_events(log_path)
-	if _SceneDriver.count_kind(events, "start") != 1 or _SceneDriver.count_kind(events, "cast") != 2 or _SceneDriver.count_kind(events, "end") != 1:
-		print("FAIL events ", events.size())
+	var human_casts := 0
+	for event in events:
+		if str(event.get("event", "")) == "cast" and int(event.get("player", -1)) == 0:
+			human_casts += 1
+	if _SceneDriver.count_kind(events, "start") != 1 or human_casts != 2 or _SceneDriver.count_kind(events, "cast") < 2 or _SceneDriver.count_kind(events, "end") != 1:
+		print("FAIL events ", events.size(), " human casts ", human_casts)
 		quit(1)
 		return
 	var end_event: Dictionary = events[events.size() - 1]

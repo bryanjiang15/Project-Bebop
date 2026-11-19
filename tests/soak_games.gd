@@ -10,8 +10,8 @@ const CONFIG_PATH := "/tmp/bebop-soak-config.json"
 const FRAME_BUDGET := 120
 const GAMES: Array[Dictionary] = [
 	{"seed": 12345, "mode": "score", "ending": "Turn 50 score"},
-	{"seed": 12011, "mode": "score", "ending": "Turn 50 score"},
-	{"seed": 12023, "mode": "score", "ending": "Turn 50 score"},
+	{"seed": 12011, "mode": "score", "ending": "Eliminated"},
+	{"seed": 12023, "mode": "score", "ending": "Eliminated"},
 	{"seed": 12059, "mode": "conquest", "ending": "Conquest"},
 	{"seed": 12073, "mode": "score", "ending": "Turn 50 score"},
 ]
@@ -77,13 +77,16 @@ func _run() -> void:
 			return
 	var score_games := 0
 	var conquests := 0
+	var eliminated := 0
 	for line in results:
 		if line.contains("ending=Turn 50 score"):
 			score_games += 1
 		if line.contains("ending=Conquest"):
 			conquests += 1
-	if score_games < 3 or conquests < 1:
-		print("FAIL endings score=%d conquest=%d" % [score_games, conquests])
+		if line.contains("ending=Eliminated"):
+			eliminated += 1
+	if score_games < 2 or conquests < 1 or eliminated < 1:
+		print("FAIL endings score=%d conquest=%d eliminated=%d" % [score_games, conquests, eliminated])
 		quit(1)
 		return
 	var elapsed := Time.get_ticks_msec() - started
