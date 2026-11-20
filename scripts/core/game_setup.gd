@@ -138,6 +138,13 @@ static func _assemble(cfg: GameConfig, map: MapState, starts: Array[Vector2i], s
 	return setup
 
 
+## Starting settlers and warriors are not placed on volcanic ground.
+## A volcanic neighbor can still count toward start quality. Units trained
+## later go through _can_spawn_at and may stand on a volcanic city center.
+static func _start_land_ok(map: MapState, cell: Vector2i) -> bool:
+	return map.land_at(cell) != "volcanic"
+
+
 static func _place_starts(cfg: GameConfig, map: MapState, seed_value: int) -> Array[Vector2i]:
 	var candidates: Array[Vector2i] = []
 	for row in map.height:
@@ -154,6 +161,10 @@ static func _place_starts(cfg: GameConfig, map: MapState, seed_value: int) -> Ar
 		_shuffle(order, rng)
 		var picked: Array[Vector2i] = []
 		for cell in order:
+			# Volcanic stays in the shuffled list so a safe pick is unchanged.
+			# A volcanic anchor is skipped for the next tile that is far enough.
+			if not _start_land_ok(map, cell):
+				continue
 			var far_enough := true
 			var axial := Hex.offset_to_axial(cell)
 			for previous in picked:
@@ -1908,9 +1919,9 @@ func _city_defense_strength(city: MapCity) -> float:
 	return Combat.defender_strength(config, float(config.city_defense), on_hills, false)
 
 
-## First free passable tile, preferring the anchor, then nearer tiles, then smaller q, then smaller r.
+## First free passable non-volcanic tile, preferring the anchor, then nearer tiles, then smaller q, then smaller r.
 func _open_start_cell(player: int, type: String, anchor: Vector2i) -> Vector2i:
-	if _can_spawn_at(player, type, anchor):
+	if _start_land_ok(map, anchor) and _can_spawn_at(player, type, anchor):
 		return anchor
 	var tiles: Array[Vector2i] = []
 	for row in map.height:
@@ -1922,7 +1933,7 @@ func _open_start_cell(player: int, type: String, anchor: Vector2i) -> Vector2i:
 		return CityRules.prefer_near(a, b, anchor)
 	)
 	for cell in tiles:
-		if _can_spawn_at(player, type, cell):
+		if _start_land_ok(map, cell) and _can_spawn_at(player, type, cell):
 			return cell
 	return NO_CELL
 

@@ -118,11 +118,10 @@ static func write_json(path: String, data: Dictionary) -> String:
 	return ""
 
 
-## Ticket 30: a settler can spawn on volcanic ground and die at the first End
-## Turn, eliminating a player who has not founded. Painting plains under that
-## settler is a harness sidestep, not a rule change. Remove it when ticket 30
-## lands. `only_without_city` limits the paint to players who have no city yet,
-## which is the case the bug actually ends the game on.
+## Capture scripts still paint plains under a settler who is already standing
+## on volcanic ground before End Turn. Starting units are not placed there.
+## Smoke and the stability soak do not call this. `only_without_city` limits
+## the paint to players who have no city yet.
 static func spare_settlers(setup: GameSetup, only_without_city: bool = false) -> int:
 	var painted := 0
 	if setup == null or setup.map == null:

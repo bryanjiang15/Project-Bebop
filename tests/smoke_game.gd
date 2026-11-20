@@ -1055,9 +1055,6 @@ func _warrior_orders(game: Node) -> bool:
 	if settler != null and settler.ap <= 0 and not setup.has_unordered_moves(setup.human_index):
 		settler.ap = 1
 		settler.order = ""
-	# A settler has no HP. Volcanic ground removes them on End Turn, and with
-	# no city yet that eliminates the player. This check needs the turn to advance.
-	_spare_settlers(setup)
 	(game.get_node("%EndTurnButton") as Button).pressed.emit()
 	var turn := (game.get_node("%TurnLabel") as Label).text
 	var warning := (game.get_node("%EndTurnWarning") as Label).text
@@ -1170,9 +1167,6 @@ func _capture_city_and_settler(game: Node) -> bool:
 		quit(1)
 		return false
 	print("PASS city at 0 HP")
-	# The human settler is still on the start tile and the human has no city.
-	# Volcanic ground here eliminates them and leaves the game scene.
-	_spare_settlers(setup)
 	(game.get_node("%EndTurnButton") as Button).pressed.emit()
 	if not (game.get_node("%EndTurnWarning") as Label).text.is_empty():
 		(game.get_node("%EndTurnButton") as Button).pressed.emit()
@@ -1519,7 +1513,6 @@ func _sprint(game: Node) -> bool:
 		quit(1)
 		return false
 	print("PASS post-sprint move ", ap_text)
-	_spare_settlers(setup)
 	var end := game.get_node("%EndTurnButton") as Button
 	end.pressed.emit()
 	if end.text == "End anyway (Enter)":
@@ -1878,7 +1871,6 @@ func _orders_queue(game: Node) -> bool:
 	print("PASS a Sprinted scout stays in the queue until the last AP")
 	if not _clear_orders_except(game, setup, -1):
 		return false
-	_spare_settlers(setup)
 	game._refresh_board()
 	end = game.get_node("%EndTurnButton") as Button
 	if end.text != "End Turn (Enter)" or not (game.get_node("%EndTurnWarning") as Label).text.is_empty() or not button.disabled:
@@ -1968,7 +1960,6 @@ func _stuck_sprint_escape(game: Node) -> bool:
 		print("FAIL stuck scout did not sprint ap ", scout.ap)
 		quit(1)
 		return false
-	_spare_settlers(setup)
 	var axial := Hex.offset_to_axial(scout.cell)
 	for dir in 6:
 		var neighbor := Hex.axial_to_offset(Hex.neighbor(axial, dir))
@@ -2305,7 +2296,6 @@ func _auto_finish(game: Node) -> bool:
 			unit.ap = 0
 			unit.movement_only = false
 	setup.config.ai_enabled = false
-	_spare_settlers(setup)
 	var turn_before := setup.turn
 	end.pressed.emit()
 	if end.text == "End anyway (Enter)":
@@ -3358,7 +3348,6 @@ func _construction_markers(game: Node) -> bool:
 		return false
 	var built := false
 	for _turn in 4:
-		_spare_settlers(setup)
 		if not _confirm_end_turn(game):
 			return false
 		if _has_building(city, "granary", plot_a):
@@ -3885,9 +3874,6 @@ func _score_ending(game: Node) -> bool:
 		print("FAIL tuned turn label '", shown, "'")
 		quit(1)
 		return false
-	# Volcanic damage is applied before the turn-limit ranking. A settler on
-	# that ground would end the match as an elimination instead of the score.
-	_spare_settlers(setup)
 	_confirm_end(game)
 	var screen := await _wait_for("res://scripts/view/end_screen.gd")
 	if screen == null:
@@ -4102,13 +4088,6 @@ func _player_unit(setup: GameSetup, player: int, unit_type: String) -> PlayerSta
 func _paint_plains(setup: GameSetup, cell: Vector2i) -> void:
 	if setup.map.in_bounds(cell):
 		setup.map.set_land(cell, "plains")
-
-
-## Ticket 30: a settler with no HP on volcanic ground is removed at End Turn.
-## Smoke paints every such settler so the scripted turn can advance. The soak
-## uses the same helper and limits the paint to players who have no city.
-func _spare_settlers(setup: GameSetup) -> void:
-	_SceneDriver.spare_settlers(setup, false)
 
 
 func _wait_for(script_path: String) -> Node:
