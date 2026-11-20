@@ -25,7 +25,7 @@ docs/
 - `scripts/view/` owns rendering and input. It reads config and calls core.
 - Layout is in `.tscn` files. Scripts use `%UniqueName` and `@onready`. They do not build controls.
 - Repeated buttons are instances of `scenes/ui/menu_button.tscn`.
-- Every tunable from brief section 5 and every agreed default is a key in `config/game_config.json`. `GameConfig.load_file()` push_errors and quits on a missing or mistyped key. There are no silent defaults.
+- Every tunable from brief section 5, including the Oct 29 ability table, and every agreed default is a key in `config/game_config.json`. `GameConfig.load_file()` push_errors and quits on a missing or mistyped key. There are no silent defaults. `docs/config.md` is the list of what is a key and what stays in code. `land.volcanic.hazard_damage` and `volcanic.damage` are both required. End-of-turn damage reads `volcanic.damage`.
 - Restart on the in-game menu and on the victory and defeat screens calls `GameConfig.load_file()` and then opens the game scene, whose `_ready` loads the file again.
 
 ## Window

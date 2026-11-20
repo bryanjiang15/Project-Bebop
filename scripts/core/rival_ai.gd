@@ -7,12 +7,12 @@ extends RefCounted
 ## then axial q, then axial r.
 
 const NO_CELL := Vector2i(-999999, -999999)
-const _STEPS := 8
-const _FOUND_RADIUS := 5
-const _IMPROVE: PackedStringArray = ["forest", "hills", "plains"]
-const _WORSEN: PackedStringArray = ["water", "volcanic"]
-const _MILITARY: PackedStringArray = ["warrior", "archer", "scout"]
-const _BUILDINGS: PackedStringArray = ["granary", "lumber_mill", "mana_well"]
+## Fill order for the army. Membership is units.<type>.combatant, so a type
+## that is not a combatant drops out and a new combatant joins the end.
+const _FILL_ORDER: PackedStringArray = ["warrior", "archer", "scout"]
+## Placement order for an empty queue that is not training a unit. Membership
+## is CityRules.BUILDING_IDS. A new building id joins the end.
+const _BUILD_ORDER: PackedStringArray = ["granary", "lumber_mill", "mana_well"]
 
 
 static func play(setup: GameSetup, player: int) -> void:
@@ -47,7 +47,7 @@ static func _act_units(setup: GameSetup, player: int) -> void:
 
 static func _act_unit(setup: GameSetup, unit: PlayerState.UnitState) -> void:
 	var guard := 0
-	while guard < _STEPS and setup.result == null and setup.players[unit.owner].units.has(unit):
+	while guard < setup.config.ai_max_unit_steps and setup.result == null and setup.players[unit.owner].units.has(unit):
 		guard += 1
 		# Fortify survives the refill on purpose: it is a stance, and the human
 		# can still walk it off. AP is what ends the unit's turn. Leaving the
@@ -258,7 +258,7 @@ static func _found_goal(setup: GameSetup, unit: PlayerState.UnitState) -> Vector
 	var best := NO_CELL
 	var best_dist := 999999
 	var origin := Hex.offset_to_axial(unit.cell)
-	for hex in Hex.disk(origin, _FOUND_RADIUS):
+	for hex in Hex.disk(origin, setup.config.ai_found_radius):
 		var cell := Hex.axial_to_offset(hex)
 		if not _good_found(setup, unit, cell):
 			continue
@@ -429,8 +429,30 @@ static func _settler_pending(setup: GameSetup, player: int) -> bool:
 	return false
 
 
+static func _military_types(setup: GameSetup) -> PackedStringArray:
+	var out := PackedStringArray()
+	for type in _FILL_ORDER:
+		if _is_combatant(setup, type):
+			out.append(type)
+	for type in GameConfig.UNIT_IDS:
+		if out.has(type):
+			continue
+		if _is_combatant(setup, type):
+			out.append(type)
+	return out
+
+
+static func _is_combatant(setup: GameSetup, type: String) -> bool:
+	return setup.config.units.has(type) and setup.config.unit(type).combatant
+
+
 static func _next_military(setup: GameSetup, player: int) -> String:
-	var have := {"warrior": 0, "archer": 0, "scout": 0}
+	var types := _military_types(setup)
+	if types.is_empty():
+		return ""
+	var have := {}
+	for type in types:
+		have[type] = 0
 	for unit in setup.players[player].units:
 		if have.has(unit.unit_type):
 			have[unit.unit_type] = int(have[unit.unit_type]) + 1
@@ -440,14 +462,25 @@ static func _next_military(setup: GameSetup, player: int) -> String:
 		for item in city.queue:
 			if have.has(item.item_id):
 				have[item.item_id] = int(have[item.item_id]) + 1
-	for type in _MILITARY:
-		if int(have[type]) == 0:
+	for type in types:
+		if int(have.get(type, 0)) == 0:
 			return type
-	return "warrior"
+	return types[0]
+
+
+static func _building_types() -> PackedStringArray:
+	var out := PackedStringArray()
+	for type in _BUILD_ORDER:
+		if CityRules.BUILDING_IDS.has(type):
+			out.append(type)
+	for type in CityRules.BUILDING_IDS:
+		if not out.has(type):
+			out.append(type)
+	return out
 
 
 static func _building_choice(setup: GameSetup, city: MapCity) -> String:
-	for item_id in _BUILDINGS:
+	for item_id in _building_types():
 		if item_id == "lumber_mill":
 			if _mill_plot(setup, city) == NO_CELL:
 				continue
@@ -542,8 +575,8 @@ static func _spell_score(setup: GameSetup, player: int, land_id: String, preview
 	var changed: Array = preview["changed"]
 	if changed.is_empty() or _suicidal(setup, player, land_id, tiles, changed):
 		return 0
-	var improve := _IMPROVE.has(land_id)
-	var worsen := _WORSEN.has(land_id)
+	var improve := setup.config.ai_improve_lands.has(land_id)
+	var worsen := setup.config.ai_worsen_lands.has(land_id)
 	var score := 0
 	for cell in changed:
 		var here: Vector2i = cell

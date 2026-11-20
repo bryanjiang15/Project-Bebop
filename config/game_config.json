@@ -172,6 +172,8 @@
     "enabled": true,
     "military_target": 3,
     "explore_radius": 4,
+    "found_radius": 5,
+    "max_unit_steps": 8,
     "settle_threat": 2,
     "weight_damage": 4,
     "weight_kill": 90,
@@ -186,6 +188,8 @@
     "weight_improve": 8,
     "weight_worsen": 10,
     "weight_volcanic": 40,
+    "improve_lands": ["forest", "hills", "plains"],
+    "worsen_lands": ["water", "volcanic"],
     "min_spell_score": 8
   },
   "log": {

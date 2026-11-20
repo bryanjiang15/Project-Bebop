@@ -2,7 +2,7 @@
 
 Source: approved by Design Scribe and Bryan, 2026-10-17. There is no separate Notion page for this list.
 
-Notion is the source of truth for the prototype brief and the design doc. This file is the approved engineering decision record. If the brief and the design doc disagree, the design doc wins. These defaults are prototype rules, and every one of them is a value or a flag in `config/game_config.json`.
+Notion is the source of truth for the prototype brief and the design doc. This file is the approved engineering decision record. If the brief and the design doc disagree, the design doc wins. These defaults are prototype rules, and every one of them is a value or a flag in `config/game_config.json`. There is one file and no silent default. A number that stays in code on purpose is listed in `docs/config.md`, not copied here as a second default.
 
 1. Buildings (Granary, Mana Well, Lumber Mill) are placed on a player-chosen tile inside the city's borders. One building per tile; not on the city center. Lumber Mill counts forests adjacent to its own tile. Turning that tile to water destroys the building. Flag: `buildings.buildings_on_worked_tiles`.
 2. Combat strength: one strength per unit (scout 5, warrior 20); archer 25 when shooting, 12 when defending; city 15. Counter-damage uses the defender's strength vs the attacker's. HP doesn't reduce strength. Hills multiply the defender's strength by 1.25.
@@ -71,7 +71,7 @@ Bryan decided that Volley damages enemy cities in its radius. The damage is the 
     - D5. No water. No volcanic step or founding when that hit would kill this End Turn. No Carve River through a friendly unit or own city center. No Ignite that would kill a friendly. Attacking from a volcanic tile already occupied is allowed.
     - D6. An empty queue gets one item. Army target is `ai.military_target` (3): warrior, then archer, then scout. One settler only when the player has exactly one city, none walking or queued, and that city is large enough. Otherwise a legal building or another unit.
     - D7. Rival actions are instant. Input locks, the board refreshes once, and the existing start-of-turn pick runs. There is no per-unit delay.
-    - D8. Every AI number is an `ai.*` key. `ai.enabled` false skips rival turns. The shipped value is true.
+    - D8. Every AI number is an `ai.*` key, including `ai.max_unit_steps` (8), `ai.found_radius` (5), `ai.improve_lands`, and `ai.worsen_lands`. `ai.explore_radius` (4) stays its own key. `ai.enabled` false skips rival turns. The shipped value is true. Combatant and building candidates come from the unit table and `CityRules.BUILDING_IDS`. The fill order and the building placement order are the policy, not a second copy of those stats.
     - D9. The five-game soak stays green. `tests/soak_ai.gd` plays every player, including the human, with `RivalAI` for 20 turns or until a result.
 
 Also: volcanic damage uses the brief's flat value, not the design doc's chance-based proposal.

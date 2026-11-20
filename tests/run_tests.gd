@@ -9,6 +9,7 @@ const LAND_MIX_TOLERANCE := 0.02
 func _init() -> void:
 	print("\n=== Project Bebop unit tests ===\n")
 	_test_config()
+	_test_config_inventory()
 	_test_hex_neighbors()
 	_test_hex_distance()
 	_test_hex_disk_and_ring()
@@ -172,6 +173,8 @@ func _test_config() -> void:
 		"ai.enabled",
 		"ai.military_target",
 		"ai.explore_radius",
+		"ai.found_radius",
+		"ai.max_unit_steps",
 		"ai.settle_threat",
 		"ai.weight_damage",
 		"ai.weight_kill",
@@ -186,6 +189,8 @@ func _test_config() -> void:
 		"ai.weight_improve",
 		"ai.weight_worsen",
 		"ai.weight_volcanic",
+		"ai.improve_lands",
+		"ai.worsen_lands",
 		"ai.min_spell_score",
 	]
 	for path in ai_keys:
@@ -314,6 +319,135 @@ func _test_config() -> void:
 	_ok(_error_has(GameConfig.ability_errors(bad_only), "movement_only"), "movement_only must be a bool")
 	_ok(_error_has(GameConfig.ability_errors(_without_key(raw, "abilities.sprint.ap_bonus")), "ap_bonus"), "missing sprint ap_bonus fails loudly")
 	_ok(_error_has(GameConfig.ability_errors(_without_key(raw, "abilities.sprint.movement_only")), "movement_only"), "missing sprint movement_only fails loudly")
+
+
+func _test_config_inventory() -> void:
+	print("[config inventory]")
+	var raw: Dictionary = GameConfig.read_json(GameConfig.PATH)
+	var cfg: GameConfig = GameConfig.load_file()
+	_ok(cfg != null, "shipped config loads for the inventory")
+	if cfg == null:
+		return
+	var required := GameConfig.required_paths()
+	var present := _leaf_list(raw)
+	_ok(_same_set(present, required), "every required path is in the shipped file and every shipped path is required")
+	var rows := _config_checklist()
+	for label in rows.keys():
+		var paths: Array = rows[label]
+		for path in paths:
+			var key := str(path)
+			_ok(required.has(key) and present.has(key), "%s -> %s" % [label, key])
+	_ok(cfg.ai_max_unit_steps == 8 and cfg.ai_found_radius == 5 and cfg.ai_explore_radius == 4, "step cap, found radius, and explore radius stay distinct")
+	_ok(_string_list(cfg.ai_improve_lands) == "forest,hills,plains", "improve lands are forest, hills, plains")
+	_ok(_string_list(cfg.ai_worsen_lands) == "water,volcanic", "worsen lands are water and volcanic")
+	_ok(cfg.land("volcanic").hazard_damage == 10 and cfg.volcanic_damage == 10, "both volcanic damage fields stay, at the shipped 10")
+	var source := FileAccess.get_file_as_string("res://scripts/core/rival_ai.gd")
+	_ok(not source.contains("const _STEPS") and not source.contains("const _FOUND_RADIUS") and not source.contains("const _IMPROVE") and not source.contains("const _WORSEN"), "the old AI step, found, and land-list constants are gone")
+	_spot_check_config_reads(cfg)
+	_ai_limits_come_from_config()
+
+
+func _config_checklist() -> Dictionary:
+	return {
+		"Turn limit": ["turn_limit"],
+		"Players": ["players.count", "players.human", "players.ai"],
+		"Map size": ["map.width", "map.height", "map.start_min_distance"],
+		"Map land mix": ["map.land_mix.plains", "map.land_mix.water", "map.land_mix.forest", "map.land_mix.hills", "map.land_mix.volcanic"],
+		"Plains": ["land.plains.food", "land.plains.production", "land.plains.move_cost", "land.plains.defense"],
+		"Forest": ["land.forest.food", "land.forest.production", "land.forest.move_cost", "land.forest.defense"],
+		"Hills": ["land.hills.food", "land.hills.production", "land.hills.move_cost", "land.hills.defense"],
+		"Water": ["land.water.food", "land.water.production", "land.water.move_cost", "land.water.passable"],
+		"Volcanic ground": ["land.volcanic.food", "land.volcanic.production", "land.volcanic.move_cost", "land.volcanic.hazard_damage", "volcanic.damage"],
+		"City center yield": ["city.center_food", "city.center_production"],
+		"City mana": ["city.mana_base", "city.mana_per_population_divisor", "buildings.mana_well_mana"],
+		"Starting mana": ["players.starting_mana"],
+		"Growth threshold": ["city.growth_base", "city.growth_per_population", "city.food_per_population"],
+		"Borders": ["city.border_start_radius", "city.border_turns_per_growth", "city.border_max_radius"],
+		"Minimum city distance": ["city.min_distance"],
+		"Production costs": ["units.settler.cost", "units.scout.cost", "units.warrior.cost", "units.archer.cost", "buildings.costs.granary", "buildings.costs.mana_well", "buildings.costs.lumber_mill"],
+		"Building effects": ["buildings.granary_food", "buildings.mana_well_mana", "buildings.lumber_mill_production_per_adjacent_forest"],
+		"Spell: Grow Forest": ["spells.grow_forest.radius", "spells.grow_forest.mana", "spells.grow_forest.range", "spells.grow_forest.cooldown", "spells.grow_forest.land"],
+		"Spell: Raise Hills": ["spells.raise_hills.radius", "spells.raise_hills.mana", "spells.raise_hills.range", "spells.raise_hills.cooldown", "spells.raise_hills.land"],
+		"Spell: Carve River": ["spells.carve_river.length", "spells.carve_river.mana", "spells.carve_river.range", "spells.carve_river.cooldown", "spells.carve_river.land"],
+		"Spell: Ignite": ["spells.ignite.radius", "spells.ignite.mana", "spells.ignite.range", "spells.ignite.cooldown", "spells.ignite.land"],
+		"Spell: Restore Plains": ["spells.restore_plains.radius", "spells.restore_plains.mana", "spells.restore_plains.range", "spells.restore_plains.cooldown", "spells.restore_plains.land"],
+		"Casts per turn": ["spells.casts_per_turn"],
+		"Range measured from": ["spells.range_from"],
+		"Scout": ["units.scout.hp", "units.scout.attack", "units.scout.ap", "units.scout.cost"],
+		"Warrior": ["units.warrior.hp", "units.warrior.attack", "units.warrior.ap", "units.warrior.cost"],
+		"Archer": ["units.archer.hp", "units.archer.attack", "units.archer.defense", "units.archer.ap", "units.archer.cost"],
+		"Settler": ["units.settler.hp", "units.settler.ap", "units.settler.cost"],
+		"Combat damage": ["combat.base_damage", "combat.strength_exponent_base", "combat.min_damage", "combat.max_damage"],
+		"Terrain combat modifiers": ["combat.hills_defense_multiplier", "land.hills.defense"],
+		"Unit healing": ["units.heal"],
+		"City combat": ["city.hp", "city.defense", "city.heal"],
+		"Score weights": ["score.per_tile", "score.per_city", "score.per_population"],
+		"Strike": ["abilities.strike.range", "abilities.strike.ap_cost", "abilities.strike.cooldown", "abilities.strike.damage_multiplier", "abilities.strike.melee", "abilities.strike.deals_counter", "abilities.strike.push_distance", "units.warrior.abilities", "units.scout.abilities"],
+		"Shoot": ["abilities.shoot.range", "abilities.shoot.ap_cost", "abilities.shoot.cooldown", "abilities.shoot.damage_multiplier", "abilities.shoot.melee", "abilities.shoot.deals_counter", "abilities.shoot.push_distance", "units.archer.abilities"],
+		"Shield Bash": ["abilities.shield_bash.range", "abilities.shield_bash.ap_cost", "abilities.shield_bash.cooldown", "abilities.shield_bash.damage_multiplier", "abilities.shield_bash.deals_counter", "abilities.shield_bash.push_distance"],
+		"Volley": ["abilities.volley.range", "abilities.volley.radius", "abilities.volley.ap_cost", "abilities.volley.cooldown", "abilities.volley.damage_multiplier", "abilities.volley.deals_counter", "abilities.volley.push_distance"],
+		"Sprint": ["abilities.sprint.range", "abilities.sprint.ap_cost", "abilities.sprint.cooldown", "abilities.sprint.ap_bonus", "abilities.sprint.movement_only"],
+		"Agreed: building placement": ["buildings.buildings_on_worked_tiles", "buildings.one_per_tile", "buildings.not_on_city_center", "buildings.water_destroys_building"],
+		"Agreed: one unit per tile": ["units.one_unit_per_tile", "units.capture_lone_settler", "units.warrior.can_capture", "units.scout.can_capture", "units.archer.can_capture", "units.settler.can_capture"],
+		"Agreed: city capture": ["combat.archers_can_zero_city_hp", "combat.melee_captures_city", "city.capture_population_loss", "city.capture_population_min", "city.capture_hp_fraction"],
+		"Agreed: line spells": ["spells.line_length", "spells.only_target_must_be_in_range", "spells.drop_off_map", "city.center_never_terraformed", "spells.skip_water_if_land_unit_present"],
+		"Agreed: fog": ["fog.unit_vision", "fog.city_vision_beyond_border", "spells.spells_require_revealed_target", "fog.ai_obeys_fog"],
+		"Agreed: movement": ["movement.allow_enter_over_budget_if_mp_left"],
+		"Agreed: growth": ["growth.shortfall_drains_bar", "growth.starve_population_loss", "growth.starve_population_min", "growth.settler_population_taken_when_finished", "units.settler.population_cost", "units.settler.min_city_size", "units.spawn_on_city_center", "units.spawn_nearest_free_if_blocked"],
+		"Agreed: volcanic and healing": ["volcanic.flat", "volcanic.can_kill", "volcanic.timing", "units.heal_only_if_idle", "city.heals_if_not_attacked"],
+		"Agreed: mana clock": ["spells.cooldown_uses_caster_turns", "spells.spells_change_tile_ownership"],
+		"Agreed: ties and borders": ["ties.order", "borders.can_claim_water", "borders.can_claim_owned_tiles"],
+		"Agreed: orders": ["units.skip_enabled", "units.fortify_enabled", "units.fortify_defense_bonus", "units.end_turn_warns_if_unordered"],
+		"Agreed: combat flags": ["combat.hp_reduces_strength", "combat.counter_uses_defender_strength", "combat.ranged_takes_no_counter"],
+		"Agreed: rival AI": ["ai.enabled", "ai.military_target", "ai.explore_radius", "ai.found_radius", "ai.max_unit_steps", "ai.settle_threat", "ai.weight_damage", "ai.weight_kill", "ai.weight_city_damage", "ai.weight_counter", "ai.weight_open_push", "ai.weight_capture", "ai.weight_found", "ai.weight_closer", "ai.weight_explore", "ai.weight_sprint", "ai.weight_improve", "ai.weight_worsen", "ai.weight_volcanic", "ai.improve_lands", "ai.worsen_lands", "ai.min_spell_score"],
+	}
+
+
+func _string_list(values: PackedStringArray) -> String:
+	return ",".join(values)
+
+
+func _spot_check_config_reads(cfg: GameConfig) -> void:
+	var combat: GameConfig = GameConfig.load_file()
+	var even := Combat.damage(combat, 20.0, 20.0)
+	combat.combat_base_damage = 15
+	_ok(even == 30 and Combat.damage(combat, 20.0, 20.0) == 15, "combat base damage is read from the config")
+	_ok(is_equal_approx(Combat.defender_strength(cfg, 20.0, true, false), 20.0 * cfg.hills_defense_multiplier), "hills defense is read from the config")
+	_ok(is_equal_approx(Combat.defender_strength(cfg, 20.0, false, true), 20.0 * (1.0 + cfg.fortify_defense_bonus)), "fortify defense is read from the config")
+	_ok(cfg.spell("ignite").mana == 35 and cfg.unit("warrior").ap == 2 and cfg.unit_vision == 2, "spell cost, AP pool, and vision are the config values")
+	_ok(ScoreRules.total(cfg, 2, 1, 1) == 2 * cfg.score_per_tile + cfg.score_per_city + cfg.score_per_population, "score weights are read from the config")
+	var distance: GameConfig = GameConfig.load_file()
+	distance.city_min_distance = 4
+	var spaced := _blank_setup("plains", distance)
+	var origin := Vector2i(10, 10)
+	var home := spaced.found_city(spaced.spawn_unit(0, "settler", origin))
+	var near := spaced.spawn_unit(1, "settler", _step(origin, Hex.EAST, 3))
+	_ok(home != null and near != null and spaced.can_found(near) == GameSetup.REASON_DISTANCE, "city distance is read from city.min_distance")
+
+
+func _ai_limits_come_from_config() -> void:
+	var tight := _blank_setup("plains")
+	tight.config.ai_obeys_fog = false
+	tight.config.ai_found_radius = 0
+	var origin := Vector2i(10, 10)
+	var blocked := tight.found_city(tight.spawn_unit(0, "settler", origin))
+	var settler := tight.spawn_unit(1, "settler", _step(origin, Hex.EAST, 2))
+	RivalAI.play(tight, 1)
+	_ok(blocked != null and settler != null and tight.city_count(1) == 0, "ai.found_radius 0 does not search past the settler's own tile")
+	var paced := _blank_setup("plains")
+	paced.config.ai_obeys_fog = false
+	paced.config.ai_max_unit_steps = 1
+	var runner := paced.spawn_unit(1, "scout", Vector2i(4, 8))
+	var quarry := paced.spawn_unit(0, "warrior", _step(Vector2i(4, 8), Hex.EAST, 6))
+	var start := runner.cell
+	RivalAI.play(paced, 1)
+	_ok(quarry != null and runner.cell == start and runner.movement_only, "ai.max_unit_steps 1 sprints and does not also walk")
+	var quiet := _blank_setup("plains")
+	quiet.config.ai_improve_lands = PackedStringArray()
+	var camp := quiet.found_city(quiet.spawn_unit(1, "settler", Vector2i(10, 10)))
+	quiet.players[1].mana = 80
+	RivalAI.play(quiet, 1)
+	_ok(camp != null and quiet.players[1].casts_this_turn == 0 and quiet.players[1].mana == 80, "an empty ai.improve_lands does not cast the improving spell")
 
 
 func _test_hex_neighbors() -> void:

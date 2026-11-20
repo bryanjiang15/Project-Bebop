@@ -155,7 +155,11 @@ var ai_weight_sprint: int
 var ai_weight_improve: int
 var ai_weight_worsen: int
 var ai_weight_volcanic: int
+var ai_improve_lands: PackedStringArray = PackedStringArray()
+var ai_worsen_lands: PackedStringArray = PackedStringArray()
 var ai_min_spell_score: int
+var ai_found_radius: int
+var ai_max_unit_steps: int
 
 ## Tests point load_file() at a copy of the config. Empty uses PATH.
 static var path_override: String = ""
@@ -448,6 +452,8 @@ static func required_paths() -> PackedStringArray:
 		"ai.enabled",
 		"ai.military_target",
 		"ai.explore_radius",
+		"ai.found_radius",
+		"ai.max_unit_steps",
 		"ai.settle_threat",
 		"ai.weight_damage",
 		"ai.weight_kill",
@@ -462,6 +468,8 @@ static func required_paths() -> PackedStringArray:
 		"ai.weight_improve",
 		"ai.weight_worsen",
 		"ai.weight_volcanic",
+		"ai.improve_lands",
+		"ai.worsen_lands",
 		"ai.min_spell_score",
 		"log.enabled",
 		"log.directory",
@@ -816,6 +824,8 @@ func to_dict() -> Dictionary:
 			"enabled": ai_enabled,
 			"military_target": ai_military_target,
 			"explore_radius": ai_explore_radius,
+			"found_radius": ai_found_radius,
+			"max_unit_steps": ai_max_unit_steps,
 			"settle_threat": ai_settle_threat,
 			"weight_damage": ai_weight_damage,
 			"weight_kill": ai_weight_kill,
@@ -830,6 +840,8 @@ func to_dict() -> Dictionary:
 			"weight_improve": ai_weight_improve,
 			"weight_worsen": ai_weight_worsen,
 			"weight_volcanic": ai_weight_volcanic,
+			"improve_lands": _plain_strings(ai_improve_lands),
+			"worsen_lands": _plain_strings(ai_worsen_lands),
 			"min_spell_score": ai_min_spell_score,
 		},
 		"log": {
@@ -1028,6 +1040,8 @@ func _read(data: Dictionary) -> void:
 	ai_enabled = _bool(data, "ai.enabled")
 	ai_military_target = _int(data, "ai.military_target")
 	ai_explore_radius = _int(data, "ai.explore_radius")
+	ai_found_radius = _int(data, "ai.found_radius")
+	ai_max_unit_steps = _int(data, "ai.max_unit_steps")
 	ai_settle_threat = _int(data, "ai.settle_threat")
 	ai_weight_damage = _int(data, "ai.weight_damage")
 	ai_weight_kill = _int(data, "ai.weight_kill")
@@ -1042,6 +1056,8 @@ func _read(data: Dictionary) -> void:
 	ai_weight_improve = _int(data, "ai.weight_improve")
 	ai_weight_worsen = _int(data, "ai.weight_worsen")
 	ai_weight_volcanic = _int(data, "ai.weight_volcanic")
+	ai_improve_lands = _strings(data, "ai.improve_lands")
+	ai_worsen_lands = _strings(data, "ai.worsen_lands")
 	ai_min_spell_score = _int(data, "ai.min_spell_score")
 	log_enabled = _bool(data, "log.enabled")
 	log_directory = _string(data, "log.directory")
