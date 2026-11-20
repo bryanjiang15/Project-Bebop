@@ -17,6 +17,7 @@ func _init() -> void:
 	_test_axial_offset()
 	_test_pixels()
 	_test_map_and_fog()
+	_test_starts_avoid_volcanic()
 	_test_pathfinding()
 	_test_movement_and_fog()
 	_test_found_city()
@@ -646,7 +647,7 @@ func _test_map_and_fog() -> void:
 		var quality := first.map.passable_count(anchor, cfg.start_quality_radius, cfg)
 		_ok(quality >= cfg.start_quality_min, "start %s quality %d" % [anchor, quality])
 		_ok(player.units.size() >= 2 and player.units[0].cell != player.units[1].cell, "player %d warrior stands on its own tile" % player.index)
-		_ok(_is_nearest_open(first, player.units[0].cell, player.units[1].cell), "player %d warrior takes the nearest free tile" % player.index)
+		_ok(_is_nearest_open(first, player.units[0].cell, player.units[1].cell), "player %d warrior takes the nearest free non-volcanic tile" % player.index)
 		_ok(player.units[1].hp == cfg.unit("warrior").hp and player.units[1].max_hp == cfg.unit("warrior").hp, "player %d warrior starts at full HP" % player.index)
 		if player.index == cfg.human_index:
 			_ok(player.human, "human index is the human")
@@ -762,6 +763,8 @@ func _step(cell: Vector2i, direction: int, steps: int) -> Vector2i:
 func _is_nearest_open(game: GameSetup, anchor: Vector2i, chosen: Vector2i) -> bool:
 	if chosen == anchor or not game.map.is_passable(chosen, game.config):
 		return false
+	if game.map.land_at(chosen) == "volcanic":
+		return false
 	var taken := {}
 	for player in game.players:
 		for unit in player.units:
@@ -772,7 +775,65 @@ func _is_nearest_open(game: GameSetup, anchor: Vector2i, chosen: Vector2i) -> bo
 			var cell := Vector2i(col, row)
 			if cell == chosen or taken.has(cell) or not game.map.is_passable(cell, game.config):
 				continue
+			if game.map.land_at(cell) == "volcanic":
+				continue
 			if CityRules.prefer_near(cell, chosen, anchor):
+				return false
+	return true
+
+
+## Ticket 30. Seeds 1327562250 and 71165890 put a starting settler on volcanic
+## ground before this check. The sweep must keep every starting unit off that
+## land, on the first map, without relaxing distance or quality.
+func _test_starts_avoid_volcanic() -> void:
+	print("[starting units avoid volcanic]")
+	var cfg: GameConfig = GameConfig.load_file()
+	cfg.log_enabled = false
+	var seeds: Array[int] = [1327562250, 71165890]
+	for seed_value in range(1, 201):
+		seeds.append(seed_value)
+	for seed_value in seeds:
+		var game := GameSetup.start_with_seed(cfg, seed_value)
+		if not _starting_units_safe(game, cfg, seed_value):
+			return
+	_ok(true, "repro seeds and 1..200 keep every starting unit off volcanic ground")
+
+
+func _starting_units_safe(game: GameSetup, cfg: GameConfig, seed_value: int) -> bool:
+	if game == null:
+		_ok(false, "seed %d places a game" % seed_value)
+		return false
+	if game.seed_used != seed_value:
+		_ok(false, "seed %d retried as %d" % [seed_value, game.seed_used])
+		return false
+	if game.players.size() != cfg.player_count or game.unit_total() != cfg.player_count * cfg.starting_units.size():
+		_ok(false, "seed %d roster %d" % [seed_value, game.unit_total()])
+		return false
+	for player in game.players:
+		if player.units.size() != cfg.starting_units.size():
+			_ok(false, "seed %d player %d unit count" % [seed_value, player.index])
+			return false
+		for i in player.units.size():
+			var unit := player.units[i]
+			if unit.unit_type != cfg.starting_units[i]:
+				_ok(false, "seed %d player %d unit %d is %s" % [seed_value, player.index, i, unit.unit_type])
+				return false
+			var land := game.map.land_at(unit.cell)
+			if land == "volcanic" or land == "water" or not game.map.is_passable(unit.cell, cfg):
+				_ok(false, "seed %d player %d %s stands on %s" % [seed_value, player.index, unit.unit_type, land])
+				return false
+		var quality := game.map.passable_count(player.units[0].cell, cfg.start_quality_radius, cfg)
+		if quality < cfg.start_quality_min:
+			_ok(false, "seed %d player %d start quality %d" % [seed_value, player.index, quality])
+			return false
+		if player.units[0].cell == player.units[1].cell or not _is_nearest_open(game, player.units[0].cell, player.units[1].cell):
+			_ok(false, "seed %d player %d warrior is not on the nearest free non-volcanic tile" % [seed_value, player.index])
+			return false
+	for a in game.players.size():
+		for b in range(a + 1, game.players.size()):
+			var dist := Hex.distance(Hex.offset_to_axial(game.players[a].units[0].cell), Hex.offset_to_axial(game.players[b].units[0].cell))
+			if dist < cfg.start_min_distance:
+				_ok(false, "seed %d starts %d and %d are %d apart" % [seed_value, a, b, dist])
 				return false
 	return true
 

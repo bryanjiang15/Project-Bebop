@@ -6,7 +6,9 @@ Engineering record for the settler-movement and founding rules. Design still liv
 
 Player ids are `0 .. players.count - 1`. The human is `players.human_index` (0). **End Turn** and the Enter key advance one global turn and refill every unit's AP from `units.<type>.ap`. Scout is 3. Every other unit is 2. Enter does nothing while the in-game menu is open. After that End Turn succeeds, each living rival takes a turn before the clock below. See `docs/ai.md`.
 
-`players.starting_units` is `["settler", "warrior"]`. The settler takes the start tile. The warrior takes the nearest free passable tile. Combat, healing, Skip/Fortify, and Sprint are in `docs/combat.md`. End Turn refills every unit from `units.<type>.ap` and discards Sprint's leftover bonus.
+`players.starting_units` is `["settler", "warrior"]`. The settler takes the start tile. The warrior takes the nearest free passable tile that is not volcanic (distance, then smaller axial q, then smaller r). Combat, healing, Skip/Fortify, and Sprint are in `docs/combat.md`. End Turn refills every unit from `units.<type>.ap` and discards Sprint's leftover bonus.
+
+A start anchor is passable and not volcanic, and it still needs at least `map.start_quality_min` passable tiles inside `map.start_quality_radius`. Volcanic neighbors count toward that quality and may ring the start. The shuffled candidate list is unchanged, and a volcanic tile is skipped when the anchor is chosen, so a set of anchors that was already off volcanic stays put. Pairwise distance is unchanged. A map that cannot place those anchors retries through the existing `map.generation_attempts` and `map.start_attempts` loop. Units trained later can still spawn on a volcanic city center. Walking onto volcanic ground, and founding on it, stay legal. A settler standing there at End Turn is still removed.
 
 ## Units
 

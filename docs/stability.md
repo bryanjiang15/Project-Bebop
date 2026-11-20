@@ -8,11 +8,10 @@ Ticket 20. Five full games, back to back, with no crash and no soft-lock. The hu
 
 The scripted human is `tests/soak_policy.gd`. It uses the view handlers the smoke tests already call: left and right click, the spell buttons, the ability bar (Strike, then a left click), Found, Skip, Fortify, the build buttons, queue cancel and reorder, Cancel Place, End Turn, and the menu button. `tests/scene_driver.gd` holds those helpers. `tests/smoke_game.gd` and `tests/smoke_log.gd` use it too. The construction check founds a rival city on a plains tile and paints one neighbor plains first, so the city still has a granary tile after rivals have claimed or flooded the land around it. `smoke_game.gd` pins `map.seed` to 727142661 for that scripted run. Rivals still act. A random seed can found a second city or end the match in the middle of the script, and the pin keeps the sequence on one map that finishes.
 
-Three calls go to core because no handler exists for them:
+Two calls go to core because no handler exists for them:
 
 - The conquest game moves the two rival settlers onto plains beside the human warrior before their turn. A capture spends the warrior's AP, so the harness refills that AP once for the second capture. That refill is only this fixture. The captures themselves are right-clicks. Attacks go through the ability bar.
 - Each score game founds one rival city at `city.min_distance` so a spell can target rival-owned land. The human cannot found a city for someone else.
-- Ticket 30, below.
 
 Seeds, in order, and the ending the run must produce:
 
@@ -28,7 +27,7 @@ On a score seed the human founds, queues units and buildings, casts (including C
 
 The conquest seed founds the human city, then the warrior captures both rival settlers before either rival acts. That is a conquest on turn 2. The warrior's AP is refilled between those two captures, and only there. Score seeds leave `ai.enabled` true, so rivals found, produce, move, and cast while the scripted human plays.
 
-These five seeds did not place a starting settler on volcanic ground, so the ticket 30 paint did not fire. The paint is still in the loop.
+Starting settlers and warriors are not placed on volcanic ground, so this soak does not paint tiles to keep them alive. A test that sets a tile volcanic after spawn still proves the hazard.
 
 ## Invariants
 
@@ -59,12 +58,6 @@ A soft-lock fails the run and prints the seed, the turn, and the last action:
 - Any scene wait in the harness going past the 120-frame budget.
 
 Each finished game's log has exactly one `start` line and one `end` line, and the `end` rows match the score table on the end screen.
-
-## Ticket 30
-
-A settler can spawn on volcanic ground and die at the first End Turn, which eliminates a player who has not founded. That bug is ticket 30 and is out of scope here. Map generation, spawning, and volcanic damage are unchanged.
-
-`SceneDriver.spare_settlers(setup, true)` paints plains under a settler whose owner has no city, and only then. The soak calls it before every End Turn. Smoke still paints every volcanic settler through the same helper (`only_without_city` false). Delete the call when ticket 30 lands.
 
 ## How to run
 

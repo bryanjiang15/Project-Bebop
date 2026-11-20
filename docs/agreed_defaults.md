@@ -76,6 +76,14 @@ Bryan decided that Volley damages enemy cities in its radius. The damage is the 
 
 Also: volcanic damage uses the brief's flat value, not the design doc's chance-based proposal.
 
+22. Volcanic starts (ticket 30). Starting settlers and warriors are not placed on volcanic ground. These are the spec gaps that were built:
+    - D1. Volcanic was a normal passable start tile. Start placement rejects that land. Volcanic damage, a turn-1 grace, and painting the tile after spawn are not the fix.
+    - D2. The unit's own cell is not volcanic. Neighbors may be. Walking onto volcanic ground later, and founding there, stay legal. A settler on that ground is still removed at End Turn.
+    - D3. The check is `_place_starts` and `_open_start_cell` only. `_can_spawn_at` and `_spawn_cell` still allow a unit trained at a volcanic city center.
+    - D4. No new config key. The land id is `volcanic`. Start quality and the land mix are unchanged.
+    - D5. Seeds `1327562250` and `71165890`, plus seeds 1 through 200, keep every player's settler and warrior on passable non-volcanic ground, on the first map.
+    - D6. Smoke and the stability soak no longer paint plains under settlers. Tests that set a tile volcanic after spawn still prove the hazard and the elimination.
+
 Decided by Bryan: engine Godot (use 4.7 stable), art is isometric 2D (2D art that reads as 3D), Civ 6-style hex map. Bryan is on macOS and plays a downloadable macOS build each milestone.
 
 Greybox art v0.2 lives in `assets/art/` (source note in that folder's `README.md`). The TileSet face is 128×108 with texture origin `(0, -4)`. The art is already isometric, so the project does not apply a second squash.

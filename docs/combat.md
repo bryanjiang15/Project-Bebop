@@ -4,7 +4,7 @@ Engineering record for ticket 14. Design still lives in `design_doc.md` and `pro
 
 ## Roster
 
-`players.starting_units` is `["settler", "warrior"]`. Each player spawns that list, in order, through `spawn_unit`. The settler takes the start tile. The warrior takes the nearest free passable tile, because `units.one_unit_per_tile` allows one unit on a tile. `units.spawn_nearest_free_if_blocked` is still the city-production rule.
+`players.starting_units` is `["settler", "warrior"]`. Each player spawns that list, in order, through `spawn_unit`. The settler takes the start tile. The warrior takes the nearest free passable tile that is not volcanic, because `units.one_unit_per_tile` allows one unit on a tile. Neither starting unit is placed on volcanic ground. `units.spawn_nearest_free_if_blocked` is still the city-production rule, and a city can still train a unit onto a volcanic center.
 
 A unit stores current HP and max HP from `units.<type>.hp`. The settler's HP is 0. That unit is non-combat, so it has no HP bar and combat never removes it for being at 0.
 

@@ -13,7 +13,6 @@ extends RefCounted
 ##   a living rival would move on that End Turn.
 ## - One rival city is founded so a spell can target rival-owned land. The
 ##   human cannot found a city for someone else.
-## - Ticket 30 paints plains under a settler who has no city. See spare_settlers.
 
 const MODE_SCORE := "score"
 const MODE_CONQUEST := "conquest"
@@ -35,7 +34,6 @@ const _CAST_CYCLE: Array[String] = ["restore_plains", "grow_forest", "raise_hill
 
 var mode := MODE_SCORE
 var last_action := ""
-var spared_tiles := 0
 var did_sink := false
 var did_rival_cast := false
 var founds := 0
@@ -91,8 +89,8 @@ func play_turn(game: Node) -> String:
 
 
 func summary() -> String:
-	return "founds %d attacks %d captures %d sink %s rival_cast %s spared %d" % [
-		founds, attacks, captures, did_sink, did_rival_cast, spared_tiles,
+	return "founds %d attacks %d captures %d sink %s rival_cast %s" % [
+		founds, attacks, captures, did_sink, did_rival_cast,
 	]
 
 
@@ -396,13 +394,6 @@ func _open_menu(game: Node, setup: GameSetup) -> String:
 
 
 func _end_turn(game: Node, setup: GameSetup) -> String:
-	# Ticket 30: a starting settler on volcanic ground dies at End Turn and
-	# eliminates a player who has not founded. Paint plains only in that case.
-	# Remove this call when ticket 30 lands.
-	spared_tiles += SceneDriver.spare_settlers(setup, true)
-	var spared := _after_core(setup)
-	if not spared.is_empty():
-		return spared
 	var before := setup.turn
 	last_action = "end turn"
 	var button := game.get_node("%EndTurnButton") as Button
