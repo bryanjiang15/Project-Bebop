@@ -44,7 +44,7 @@ Every number is a key under `ai` in `config/game_config.json`, including `ai.max
 
 ## Soaks (D9)
 
-`tests/soak_games.gd` still plays the five seeds and prints `SOAK OK`. Rivals act on the score seeds. Smoke lets them act on the opening turns, then sets `ai.enabled` false before the scripted heal and volcanic measurements so those HP numbers stay the human's. A restart loads the file again and the AI is back on. The conquest seed captures both rival settlers before their turn. The second capture refills the hunter's AP; that refill is only the fixture, because a capture spends AP and a living rival would walk away. `SceneDriver.spare_settlers` is unchanged.
+`tests/soak_games.gd` still plays the five seeds and prints `SOAK OK`. Rivals act on the score seeds. Smoke lets them act on the opening turns, then sets `ai.enabled` false before the scripted heal and volcanic measurements so those HP numbers stay the human's. A restart loads the file again and the AI is back on. The conquest seed captures both rival settlers before their turn. The second capture refills the hunter's AP; that refill is only the fixture, because a capture spends AP and a living rival would walk away. Starting units are not placed on volcanic ground, so the soak does not paint those tiles.
 
 `tests/soak_ai.gd` plays seed 16016 with `RivalAI` for every player, including the human, for 20 turns or until a result. It prints `AI SOAK OK`.
 
