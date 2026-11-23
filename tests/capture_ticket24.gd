@@ -54,9 +54,9 @@ func _run() -> void:
 		quit(1)
 		return
 	SceneDriver.click_cell(game, settler.cell)
-	var found := game.get_node("%FoundCityButton") as Button
-	if found.disabled:
-		print("FAIL found ", found.tooltip_text)
+	var found := SceneDriver.order_button(game, "found")
+	if found == null or found.disabled:
+		print("FAIL found ", found.tooltip_text if found != null else "missing")
 		quit(1)
 		return
 	found.pressed.emit()
@@ -64,7 +64,15 @@ func _run() -> void:
 		print("FAIL city count ", setup.city_count(setup.human_index))
 		quit(1)
 		return
-	var city: MapCity = setup.cities[0]
+	var city: MapCity = null
+	for item in setup.cities:
+		if item.player == setup.human_index:
+			city = item
+			break
+	if city == null:
+		print("FAIL no human city")
+		quit(1)
+		return
 	_aim(game, city.cell)
 	if not _select_city(game, city.cell):
 		return
@@ -97,6 +105,10 @@ func _run() -> void:
 		return
 	grow.pressed.emit()
 	SceneDriver.click_cell(game, city.cell)
+	# Mana and cooldown win over the cap. Refill so the grey reason is the limit.
+	var human := setup.players[setup.human_index]
+	human.mana = 80
+	human.spell_cooldowns.clear()
 	game._refresh_board()
 	_aim_spells(game)
 	_present(game)
@@ -108,7 +120,7 @@ func _run() -> void:
 		return
 	var state := (grow.get_node("Column/StateLabel") as Label).text
 	if not state.begins_with("Spell limit reached"):
-		print("FAIL limit state '", state, "'")
+		print("FAIL limit state '", state, "' tip '", grow.tooltip_text, "'")
 		quit(1)
 		return
 	if not grow.disabled:
