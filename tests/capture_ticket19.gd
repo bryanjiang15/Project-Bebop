@@ -168,7 +168,7 @@ func _write_config() -> bool:
 	var data := GameConfig.read_json(GameConfig.PATH)
 	data["turn_limit"] = 1
 	(data["players"] as Dictionary)["starting_mana"] = 200
-	(data["spells"] as Dictionary)["casts_per_turn"] = 2
+	(data["spells"] as Dictionary)["max_casts_base"] = 2
 	var log: Dictionary = data["log"]
 	log["enabled"] = true
 	log["directory"] = "user://logs"

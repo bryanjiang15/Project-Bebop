@@ -33,6 +33,8 @@ func _init() -> void:
 	_test_orders_queue()
 	_test_city_capture()
 	_test_spells()
+	_test_spell_cap()
+	_test_pace_site()
 	_test_rival_land_updates()
 	_test_land_effects()
 	_test_end_turn_key()
@@ -81,18 +83,18 @@ func _test_config() -> void:
 	_ok(cfg.city_center_food == 2 and cfg.city_center_production == 2, "city center yield")
 	_ok(cfg.city_mana_base == 2 and cfg.city_mana_per_population_divisor == 2, "mana 2 + floor(pop/2)")
 	_ok(cfg.starting_mana == 10, "starting mana 10")
-	_ok(cfg.growth_base == 10 and cfg.growth_per_population == 6 and cfg.food_per_population == 2, "growth")
+	_ok(cfg.growth_base == 8 and cfg.growth_per_population == 4 and cfg.food_per_population == 2, "growth")
 	_ok(cfg.border_start_radius == 1 and cfg.border_turns_per_growth == 4 and cfg.border_max_radius == 3, "borders")
 	_ok(cfg.city_min_distance == 3, "city distance 3")
-	_ok(cfg.unit("settler").cost == 40 and cfg.unit("scout").cost == 20 and cfg.unit("warrior").cost == 30 and cfg.unit("archer").cost == 45, "unit costs")
-	_ok(cfg.granary_cost == 50 and cfg.mana_well_cost == 60 and cfg.lumber_mill_cost == 50, "building costs")
+	_ok(cfg.unit("settler").cost == 27 and cfg.unit("scout").cost == 13 and cfg.unit("warrior").cost == 20 and cfg.unit("archer").cost == 30, "unit costs")
+	_ok(cfg.granary_cost == 33 and cfg.mana_well_cost == 40 and cfg.lumber_mill_cost == 33, "building costs")
 	_ok(cfg.granary_food == 2 and cfg.mana_well_mana == 2 and cfg.lumber_mill_production_per_adjacent_forest == 1, "building effects")
-	_ok(cfg.spell("grow_forest").spell_name == "Grow Forest" and cfg.spell("grow_forest").radius == 1 and cfg.spell("grow_forest").mana == 15 and cfg.spell("grow_forest").range == 3 and cfg.spell("grow_forest").cooldown == 2, "grow forest")
-	_ok(cfg.spell("raise_hills").mana == 20 and cfg.spell("raise_hills").cooldown == 3, "raise hills")
-	_ok(cfg.spell("carve_river").length == 4 and cfg.spell("carve_river").mana == 25 and cfg.line_length == 4, "carve river line of 4")
-	_ok(cfg.spell("ignite").mana == 35 and cfg.spell("ignite").range == 2 and cfg.spell("ignite").cooldown == 5, "ignite")
-	_ok(cfg.spell("restore_plains").mana == 10 and cfg.spell("restore_plains").land == "plains", "restore plains")
-	_ok(cfg.casts_per_turn == 1 and cfg.spell_range_from == "owned_tile", "one cast from owned tiles")
+	_ok(cfg.spell("grow_forest").spell_name == "Grow Forest" and cfg.spell("grow_forest").radius == 1 and cfg.spell("grow_forest").mana == 10 and cfg.spell("grow_forest").range == 3 and cfg.spell("grow_forest").cooldown == 2, "grow forest")
+	_ok(cfg.spell("raise_hills").mana == 13 and cfg.spell("raise_hills").cooldown == 3, "raise hills")
+	_ok(cfg.spell("carve_river").length == 4 and cfg.spell("carve_river").mana == 17 and cfg.line_length == 4, "carve river line of 4")
+	_ok(cfg.spell("ignite").mana == 23 and cfg.spell("ignite").range == 2 and cfg.spell("ignite").cooldown == 5, "ignite")
+	_ok(cfg.spell("restore_plains").mana == 7 and cfg.spell("restore_plains").land == "plains", "restore plains")
+	_ok(cfg.max_casts_base == 1 and cfg.max_casts_cities_per_step == 3 and cfg.max_casts_limit == 2 and cfg.spell_range_from == "owned_tile", "spell cap from owned tiles")
 	_ok(cfg.unit("scout").hp == 50 and cfg.unit("scout").attack == 5 and cfg.unit("scout").ap == 3, "scout")
 	_ok(cfg.unit("warrior").hp == 100 and cfg.unit("warrior").attack == 20 and cfg.unit("warrior").defense == 20, "warrior")
 	_ok(cfg.unit("archer").attack == 25 and cfg.unit("archer").defense == 12 and cfg.unit("archer").ap == 2, "archer")
@@ -152,10 +154,17 @@ func _test_config() -> void:
 	_ok(again != cfg and again.turn_limit == cfg.turn_limit and is_equal_approx(again.camera_default_zoom, cfg.camera_default_zoom), "load reads the file again")
 	var broken: Dictionary = raw.duplicate(true)
 	var spells: Dictionary = broken["spells"]
-	spells.erase("casts_per_turn")
+	spells.erase("max_casts_base")
 	broken["spells"] = spells
 	var missing := GameConfig.missing_paths(broken)
-	_ok(missing.has("spells.casts_per_turn"), "missing key is reported")
+	_ok(missing.has("spells.max_casts_base"), "missing max_casts_base is reported")
+	var step_broken: Dictionary = raw.duplicate(true)
+	(step_broken["spells"] as Dictionary).erase("max_casts_cities_per_step")
+	_ok(GameConfig.missing_paths(step_broken).has("spells.max_casts_cities_per_step"), "missing max_casts_cities_per_step is reported")
+	var limit_broken: Dictionary = raw.duplicate(true)
+	(limit_broken["spells"] as Dictionary).erase("max_casts_limit")
+	_ok(GameConfig.missing_paths(limit_broken).has("spells.max_casts_limit"), "missing max_casts_limit is reported")
+	_ok(not GameConfig.required_paths().has("spells.casts_per_turn"), "casts_per_turn is not a required path")
 	var spell_broken: Dictionary = raw.duplicate(true)
 	var grow: Dictionary = (spell_broken["spells"] as Dictionary)["grow_forest"]
 	grow.erase("mana")
@@ -372,7 +381,7 @@ func _config_checklist() -> Dictionary:
 		"Spell: Carve River": ["spells.carve_river.length", "spells.carve_river.mana", "spells.carve_river.range", "spells.carve_river.cooldown", "spells.carve_river.land"],
 		"Spell: Ignite": ["spells.ignite.radius", "spells.ignite.mana", "spells.ignite.range", "spells.ignite.cooldown", "spells.ignite.land"],
 		"Spell: Restore Plains": ["spells.restore_plains.radius", "spells.restore_plains.mana", "spells.restore_plains.range", "spells.restore_plains.cooldown", "spells.restore_plains.land"],
-		"Casts per turn": ["spells.casts_per_turn"],
+		"Spell cap": ["spells.max_casts_base", "spells.max_casts_cities_per_step", "spells.max_casts_limit"],
 		"Range measured from": ["spells.range_from"],
 		"Scout": ["units.scout.hp", "units.scout.attack", "units.scout.ap", "units.scout.cost"],
 		"Warrior": ["units.warrior.hp", "units.warrior.attack", "units.warrior.ap", "units.warrior.cost"],
@@ -415,7 +424,7 @@ func _spot_check_config_reads(cfg: GameConfig) -> void:
 	_ok(even == 30 and Combat.damage(combat, 20.0, 20.0) == 15, "combat base damage is read from the config")
 	_ok(is_equal_approx(Combat.defender_strength(cfg, 20.0, true, false), 20.0 * cfg.hills_defense_multiplier), "hills defense is read from the config")
 	_ok(is_equal_approx(Combat.defender_strength(cfg, 20.0, false, true), 20.0 * (1.0 + cfg.fortify_defense_bonus)), "fortify defense is read from the config")
-	_ok(cfg.spell("ignite").mana == 35 and cfg.unit("warrior").ap == 2 and cfg.unit_vision == 2, "spell cost, AP pool, and vision are the config values")
+	_ok(cfg.spell("ignite").mana == 23 and cfg.unit("warrior").ap == 2 and cfg.unit_vision == 2, "spell cost, AP pool, and vision are the config values")
 	_ok(ScoreRules.total(cfg, 2, 1, 1) == 2 * cfg.score_per_tile + cfg.score_per_city + cfg.score_per_population, "score weights are read from the config")
 	var distance: GameConfig = GameConfig.load_file()
 	distance.city_min_distance = 4
@@ -1024,11 +1033,15 @@ func _test_city_economy() -> void:
 	_ok(int(tie.city_yields(tie_city)["mana"]) == cfg.city_mana_base + 2, "mana at population 5")
 	var growth := _blank_setup("plains")
 	var growing := growth.found_city(growth.spawn_unit(0, "settler", Vector2i(8, 8)))
-	for _i in 3:
+	var surplus := int(growth.city_yields(growing)["surplus"])
+	var threshold := int(growth.city_yields(growing)["threshold"])
+	var turns_to_grow := int(ceil(float(threshold) / float(surplus)))
+	for _i in turns_to_grow - 1:
 		growth.end_turn()
-	_ok(growing.population == 1 and growing.food_stored == 12, "surplus fills the growth bar")
+	_ok(growing.population == 1 and growing.food_stored == surplus * (turns_to_grow - 1), "surplus fills the growth bar")
 	growth.end_turn()
-	_ok(growing.population == 2 and growing.food_stored == 0, "a full bar grows and keeps the remainder")
+	var remainder := surplus * turns_to_grow - threshold
+	_ok(growing.population == 2 and growing.food_stored == remainder, "a full bar grows and keeps the remainder")
 	var chain := _blank_setup("plains")
 	var chained := chain.found_city(chain.spawn_unit(0, "settler", Vector2i(8, 8)))
 	chain.config.growth_base = 2
@@ -2710,6 +2723,132 @@ func _test_spells() -> void:
 	_ok(int(hills.ability_preview(attacker, hills.unit_abilities(attacker)[0], defender.cell)["damage"]) < plain_damage, "hills defense uses the live land")
 
 
+func _cap_ready(count: int) -> GameSetup:
+	var game := _blank_setup("plains")
+	game.config.spells_require_revealed_target = false
+	for spell_id in GameConfig.SPELL_IDS:
+		game.config.spell(spell_id).cooldown = 0
+	var origin := Vector2i(2, 8)
+	for i in count:
+		var city := game.found_city(game.spawn_unit(0, "settler", _step(origin, Hex.EAST, i * 4)))
+		if city == null:
+			return game
+	game.players[0].mana = 200
+	return game
+
+
+func _cast_restore(game: GameSetup) -> String:
+	return game.cast_spell(0, "restore_plains", game.cities[0].cell, Hex.EAST)
+
+
+func _test_spell_cap() -> void:
+	print("[spell cap]")
+	var empty := _blank_setup("plains")
+	_ok(empty.max_casts(0) == 1, "no cities leaves the base cap")
+	var one := _cap_ready(1)
+	_ok(one.city_count(0) == 1 and one.max_casts(0) == 1, "one city caps at 1")
+	_ok(_cast_restore(one).is_empty() and one.players[0].casts_this_turn == 1, "the first cast at one city succeeds")
+	_ok(_cast_restore(one) == SpellRules.REASON_TURN, "a second cast is blocked at one city")
+	var two := _cap_ready(2)
+	_ok(two.city_count(0) == 2 and two.max_casts(0) == 1, "two cities still cap at 1")
+	_ok(_cast_restore(two).is_empty(), "the first cast at two cities succeeds")
+	_ok(_cast_restore(two) == SpellRules.REASON_TURN, "a second cast is blocked at two cities")
+
+	var rising := _cap_ready(2)
+	_ok(_cast_restore(rising).is_empty(), "a two-city player spends their one cast")
+	_ok(_cast_restore(rising) == SpellRules.REASON_TURN, "the second cast is blocked before the third city")
+	var third := rising.found_city(rising.spawn_unit(0, "settler", _step(Vector2i(2, 8), Hex.EAST, 8)))
+	_ok(third != null and rising.city_count(0) == 3 and rising.max_casts(0) == 2, "founding the third city raises the cap at once")
+	_ok(rising.spell_cap_notice == "Spell limit is now 2 per turn", "the bar notice names the new cap")
+	_ok(_cast_restore(rising).is_empty() and rising.players[0].casts_this_turn == 2, "the raised cap allows the second cast")
+	_ok(_cast_restore(rising) == SpellRules.REASON_TURN, "a third cast is blocked at three cities")
+	var spent := rising.players[0].mana
+	var casts_before_reset := rising.players[0].casts_this_turn
+	rising.end_turn()
+	_ok(rising.players[0].casts_this_turn == 0 and casts_before_reset == 2, "the counter resets on the next turn and the casts already made stood")
+	_ok(rising.spell_cap_notice.is_empty(), "the notice clears when that turn ends")
+	_ok(rising.max_casts(0) == 2 and _cast_restore(rising).is_empty(), "the higher cap is still there next turn")
+
+	var logged := _blank_setup("plains")
+	logged.seed_used = 24024
+	logged.config.log_enabled = true
+	logged.config.log_directory = _fresh_log_dir("spell-cap")
+	logged.config.spells_require_revealed_target = false
+	logged.open_log()
+	for i in 3:
+		logged.found_city(logged.spawn_unit(0, "settler", _step(Vector2i(2, 6), Hex.EAST, i * 4)))
+	var cap_events: Array = []
+	for event in _log_events(logged.log.absolute_path):
+		if str(event.get("event", "")) == "spell_cap":
+			cap_events.append(event)
+	_ok(cap_events.size() == 1, "founding the third city logs one spell_cap")
+	if cap_events.size() == 1:
+		var row: Dictionary = cap_events[0]
+		_ok(int(row["player"]) == 0 and int(row["old_cap"]) == 1 and int(row["new_cap"]) == 2 and str(row["cause"]) == "founded", "the founded event records player, old cap, new cap, and cause")
+
+	var falling := _cap_ready(3)
+	_ok(_cast_restore(falling).is_empty() and _cast_restore(falling).is_empty() and falling.players[0].casts_this_turn == 2, "three cities spend two casts")
+	var mana_after_casts := falling.players[0].mana
+	for i in 2:
+		var rival_city := falling.found_city(falling.spawn_unit(1, "settler", _step(Vector2i(2, 14), Hex.EAST, i * 4)))
+		_ok(rival_city != null, "rival city %d founded" % i)
+	_ok(falling.max_casts(1) == 1, "two rival cities cap at 1")
+	var victim := falling.cities[2]
+	victim.hp = 0
+	var taker := falling.spawn_unit(1, "warrior", _step(victim.cell, Hex.WEST, 1))
+	_ok(taker != null and falling.move_unit(taker, victim.cell) and victim.player == 1, "capturing a city moves it")
+	_ok(falling.city_count(0) == 2 and falling.max_casts(0) == 1, "dropping below three cities lowers the cap at once")
+	_ok(falling.city_count(1) == 3 and falling.max_casts(1) == 2, "the capturer's third city raises their cap")
+	_ok(falling.players[0].casts_this_turn == 2 and falling.players[0].mana == mana_after_casts, "casts already made stand when the cap falls")
+	_ok(_cast_restore(falling) == SpellRules.REASON_TURN, "the fallen cap blocks another cast")
+	_ok(falling.spell_cap_notice == "Spell limit is now 1 per turn", "the notice follows the human's new cap")
+	falling.end_turn()
+	_ok(falling.players[0].casts_this_turn == 0 and falling.max_casts(0) == 1, "the reset uses the lower cap")
+	_ok(_cast_restore(falling).is_empty() and _cast_restore(falling) == SpellRules.REASON_TURN, "one cast is legal again, and the second is not")
+
+	var capped := _cap_ready(6)
+	_ok(capped.city_count(0) == 6 and capped.max_casts(0) == 2, "six cities stay at the limit of 2")
+	capped.config.max_casts_cities_per_step = 0
+	capped.config.max_casts_base = 4
+	_ok(capped.max_casts(0) == 4, "a zero step leaves a flat base and ignores the limit")
+
+	var ai := _blank_setup("plains")
+	ai.config.spells_require_revealed_target = false
+	for i in 3:
+		ai.found_city(ai.spawn_unit(1, "settler", _step(Vector2i(4, 8), Hex.EAST, i * 4)))
+	ai.players[1].mana = 200
+	RivalAI.play(ai, 1)
+	_ok(ai.max_casts(1) == 2 and ai.players[1].casts_this_turn == 2 and ai.players[1].mana < 200, "the AI casts up to the cap")
+
+
+## Typical-site hard targets from ticket 24. The full seed table lives in
+## tests/pace_report.gd and is not part of this suite.
+func _test_pace_site() -> void:
+	print("[pace site]")
+	var PaceSite = load("res://tests/pace_site.gd")
+	var cfg: GameConfig = GameConfig.load_file()
+	cfg.log_enabled = false
+	var expand: Dictionary = PaceSite.play_site(cfg, "expand")
+	_ok(int(expand["first_forest"]) == 1, "expand Grow Forest is turn 1")
+	_ok(int(expand["casts_t15"]) >= 4 and int(expand["casts_t15"]) <= 7, "expand casts by T15 are 4–7")
+	_ok(int(expand["casts_t25"]) >= 10 and int(expand["casts_t25"]) <= 15, "expand casts by T25 are 10–15")
+	_ok(int(expand["casts_26_35"]) >= 12, "expand casts in T26–35 are at least 12")
+	_ok(int(expand["casts_t50"]) >= 50, "expand casts by T50 are at least 50")
+	var bank_expand := int((expand.get("t50", {}) as Dictionary).get("bank", 999))
+	_ok(bank_expand < 100, "expand banked mana at T50 is under 100")
+	var granary: Dictionary = PaceSite.play_site(cfg, "granary")
+	_ok(int(granary["first_forest"]) == 1, "granary Grow Forest is turn 1")
+	_ok(int(granary["first_building"]) >= 6 and int(granary["first_building"]) <= 9, "granary-first finishes in T6–T9")
+	_ok(int(granary["casts_t15"]) >= 4 and int(granary["casts_t15"]) <= 7, "granary casts by T15 are 4–7")
+	_ok(int(granary["casts_t25"]) >= 10 and int(granary["casts_t25"]) <= 15, "granary casts by T25 are 10–15")
+	_ok(int(granary["casts_26_35"]) >= 12, "granary casts in T26–35 are at least 12")
+	_ok(int(granary["casts_t50"]) >= 50, "granary casts by T50 are at least 50")
+	var bank_granary := int((granary.get("t50", {}) as Dictionary).get("bank", 999))
+	_ok(bank_granary < 100, "granary banked mana at T50 is under 100")
+	var rebuild: Dictionary = PaceSite.rebuild(cfg)
+	_ok(bool(rebuild["within_7"]), "a lost city is replaceable within about 7 turns")
+
+
 func _test_rival_land_updates() -> void:
 	print("[rival land]")
 	var cfg: GameConfig = GameConfig.load_file()
@@ -3561,8 +3700,9 @@ func _test_game_log() -> void:
 	radius.players[0].mana = 0
 	_ok(radius.cast_spell(0, "raise_hills", east, Hex.EAST) == SpellRules.REASON_MANA, "mana blocks a cast")
 	radius.players[0].mana = 100
-	_ok(radius.cast_spell(0, "restore_plains", east, Hex.EAST) == SpellRules.REASON_TURN, "the one-cast limit blocks a cast")
-	radius.config.casts_per_turn = 5
+	_ok(radius.cast_spell(0, "restore_plains", east, Hex.EAST) == SpellRules.REASON_TURN, "the cap blocks a second cast")
+	radius.config.max_casts_cities_per_step = 0
+	radius.config.max_casts_base = 5
 	var far := Vector2i(0, 0)
 	_ok(radius.cast_spell(0, "restore_plains", far, Hex.EAST) == SpellRules.REASON_RANGE, "range blocks a cast")
 	_ok(_log_events(radius.log.absolute_path).size() == before_blocked, "blocked casts log nothing")
@@ -4064,10 +4204,10 @@ func _ai_spells_and_fog() -> void:
 		for col in caster.map.width:
 			if caster.map.land_at(Vector2i(col, row)) == "forest":
 				improved = true
-	_ok(caster.players[1].casts_this_turn == 1 and caster.players[1].mana == 65 and improved, "the AI casts once and improves land it can reach")
+	_ok(caster.players[1].casts_this_turn == 1 and caster.players[1].mana == 80 - caster.config.spell("grow_forest").mana and improved, "the AI casts once and improves land it can reach")
 	var spent := caster.players[1].mana
 	RivalAI.play(caster, 1)
-	_ok(caster.players[1].mana == spent and caster.players[1].casts_this_turn == 1, "casts_per_turn stays 1")
+	_ok(caster.players[1].mana == spent and caster.players[1].casts_this_turn == 1, "one city keeps the cap at 1")
 	var logged := _blank_setup("plains")
 	logged.seed_used = 16016
 	logged.config.log_enabled = true
