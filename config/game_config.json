@@ -43,8 +43,8 @@
     "center_production": 2,
     "mana_base": 2,
     "mana_per_population_divisor": 2,
-    "growth_base": 10,
-    "growth_per_population": 6,
+    "growth_base": 8,
+    "growth_per_population": 4,
     "food_per_population": 2,
     "border_start_radius": 1,
     "border_turns_per_growth": 4,
@@ -68,13 +68,15 @@
     "mana_well_mana": 2,
     "lumber_mill_production_per_adjacent_forest": 1,
     "costs": {
-      "granary": 50,
-      "mana_well": 60,
-      "lumber_mill": 50
+      "granary": 33,
+      "mana_well": 40,
+      "lumber_mill": 33
     }
   },
   "spells": {
-    "casts_per_turn": 1,
+    "max_casts_base": 1,
+    "max_casts_cities_per_step": 3,
+    "max_casts_limit": 2,
     "range_from": "owned_tile",
     "line_length": 4,
     "only_target_must_be_in_range": true,
@@ -83,11 +85,11 @@
     "spells_change_tile_ownership": false,
     "skip_water_if_land_unit_present": true,
     "cooldown_uses_caster_turns": true,
-    "grow_forest": {"name": "Grow Forest", "shape": "radius", "radius": 1, "length": 0, "mana": 15, "range": 3, "cooldown": 2, "land": "forest"},
-    "raise_hills": {"name": "Raise Hills", "shape": "radius", "radius": 1, "length": 0, "mana": 20, "range": 3, "cooldown": 3, "land": "hills"},
-    "carve_river": {"name": "Carve River", "shape": "line", "radius": 0, "length": 4, "mana": 25, "range": 3, "cooldown": 3, "land": "water"},
-    "ignite": {"name": "Ignite", "shape": "radius", "radius": 1, "length": 0, "mana": 35, "range": 2, "cooldown": 5, "land": "volcanic"},
-    "restore_plains": {"name": "Restore Plains", "shape": "radius", "radius": 1, "length": 0, "mana": 10, "range": 3, "cooldown": 2, "land": "plains"}
+    "grow_forest": {"name": "Grow Forest", "shape": "radius", "radius": 1, "length": 0, "mana": 10, "range": 3, "cooldown": 2, "land": "forest"},
+    "raise_hills": {"name": "Raise Hills", "shape": "radius", "radius": 1, "length": 0, "mana": 13, "range": 3, "cooldown": 3, "land": "hills"},
+    "carve_river": {"name": "Carve River", "shape": "line", "radius": 0, "length": 4, "mana": 17, "range": 3, "cooldown": 3, "land": "water"},
+    "ignite": {"name": "Ignite", "shape": "radius", "radius": 1, "length": 0, "mana": 23, "range": 2, "cooldown": 5, "land": "volcanic"},
+    "restore_plains": {"name": "Restore Plains", "shape": "radius", "radius": 1, "length": 0, "mana": 7, "range": 3, "cooldown": 2, "land": "plains"}
   },
   "abilities": {
     "strike": {"name": "Strike", "target": "enemy", "range": 1, "area": "single", "ap_cost": 1, "cooldown": 0, "effect": "damage", "damage_multiplier": 1.0, "melee": true, "deals_counter": true, "push_distance": 0},
@@ -107,10 +109,10 @@
     "fortify_enabled": true,
     "fortify_defense_bonus": 0.25,
     "end_turn_warns_if_unordered": true,
-    "scout": {"hp": 50, "attack": 5, "defense": 5, "ap": 3, "cost": 20, "combatant": true, "population_cost": 0, "min_city_size": 0, "can_capture": false, "abilities": ["strike", "sprint"]},
-    "warrior": {"hp": 100, "attack": 20, "defense": 20, "ap": 2, "cost": 30, "combatant": true, "population_cost": 0, "min_city_size": 0, "can_capture": true, "abilities": ["strike", "shield_bash"]},
-    "archer": {"hp": 100, "attack": 25, "defense": 12, "ap": 2, "cost": 45, "combatant": true, "population_cost": 0, "min_city_size": 0, "can_capture": false, "abilities": ["shoot", "volley"]},
-    "settler": {"hp": 0, "attack": 0, "defense": 0, "ap": 2, "cost": 40, "combatant": false, "population_cost": 1, "min_city_size": 2, "can_capture": false, "abilities": []}
+    "scout": {"hp": 50, "attack": 5, "defense": 5, "ap": 3, "cost": 13, "combatant": true, "population_cost": 0, "min_city_size": 0, "can_capture": false, "abilities": ["strike", "sprint"]},
+    "warrior": {"hp": 100, "attack": 20, "defense": 20, "ap": 2, "cost": 20, "combatant": true, "population_cost": 0, "min_city_size": 0, "can_capture": true, "abilities": ["strike", "shield_bash"]},
+    "archer": {"hp": 100, "attack": 25, "defense": 12, "ap": 2, "cost": 30, "combatant": true, "population_cost": 0, "min_city_size": 0, "can_capture": false, "abilities": ["shoot", "volley"]},
+    "settler": {"hp": 0, "attack": 0, "defense": 0, "ap": 2, "cost": 27, "combatant": false, "population_cost": 1, "min_city_size": 2, "can_capture": false, "abilities": []}
   },
   "combat": {
     "base_damage": 30,

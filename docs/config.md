@@ -21,6 +21,14 @@ Ticket 18 moved the last AI search literals into that same object. The behavior 
 
 Combatant candidates are the unit table where `combatant` is true. The fill order is warrior, then archer, then scout, then any other combatant. Building candidates are `CityRules.BUILDING_IDS`. The placement order is granary, then lumber mill, then mana well. Those two orders are the policy. They are not a second copy of the unit or building stats.
 
+## Spell cap
+
+`spells.casts_per_turn` is gone. The cap is `GameSetup.max_casts` and nowhere else:
+
+`N = min(max_casts_limit, max_casts_base + floor(cities / max_casts_cities_per_step))`
+
+when `spells.max_casts_cities_per_step` is not 0. A 0 step leaves a flat `spells.max_casts_base` and does not apply the limit. Shipped values are base 1, step 3, limit 2. Cities is the count that player owns right now.
+
 ## Not a key
 
 These stay in code:

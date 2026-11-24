@@ -58,6 +58,13 @@ var _entering_for_move: bool = false
 var result: MatchResult
 ## JSONL writer for this game. Null until open_log. Inactive when logging is off.
 var log: GameLog.Writer
+## Shown on the spell bar until this player's turn ends, or until the cap changes again.
+## Empty when the human's cap has not moved.
+var spell_cap_notice: String = ""
+## Turn number the notice belongs to. A change during rival resolution belongs to the next turn.
+var _spell_notice_turn: int = -1
+## True while play_rivals or end_turn is applying the turn, so a cap change is seen next turn.
+var _resolving_turn: bool = false
 ## True after a player was just marked eliminated, until the outcome is judged.
 var _eliminated_now: bool = false
 
@@ -1017,17 +1024,20 @@ func has_unordered_moves(player: int) -> bool:
 func play_rivals() -> void:
 	if result != null or config == null or not config.ai_enabled:
 		return
+	_resolving_turn = true
 	for player in players:
 		if player.human or player.eliminated:
 			continue
 		RivalAI.play(self, player.index)
 		if result != null:
-			return
+			break
+	_resolving_turn = false
 
 
 func end_turn() -> void:
 	if result != null:
 		return
+	_resolving_turn = true
 	# One global clock: every city resolves here. Rival turns, when enabled,
 	# already ran in play_rivals. Heal, mana, volcanic damage, and cooldowns
 	# stay on this shared tick. A cooldown of C cast on turn N is ready on N+C.
@@ -1061,11 +1071,15 @@ func end_turn() -> void:
 	_tick_spells()
 	_tick_ability_cooldowns()
 	if result != null:
+		_resolving_turn = false
 		return
 	if turn >= config.turn_limit:
 		_finish(_human_leads_on_score(), MatchResult.REASON_SCORE)
+		_resolving_turn = false
 		return
 	turn += 1
+	_retire_spell_notice()
+	_resolving_turn = false
 	for player in players:
 		for unit in player.units:
 			if unit.order == ORDER_SKIP:
@@ -1102,6 +1116,7 @@ func found_city(unit: PlayerState.UnitState) -> MapCity:
 	# Founding spends a settler and adds a city. It is never an elimination.
 	if result != null or not can_found(unit).is_empty():
 		return null
+	var cap_before := max_casts(unit.owner)
 	var city := MapCity.new()
 	city.id = _next_city_id
 	_next_city_id += 1
@@ -1117,6 +1132,7 @@ func found_city(unit: PlayerState.UnitState) -> MapCity:
 	_claim(city)
 	players[unit.owner].units.erase(unit)
 	_refresh_fog()
+	_note_spell_cap(unit.owner, cap_before, "founded")
 	return city
 
 
@@ -1321,7 +1337,39 @@ func spell_block_reason(player_index: int, spell_id: String) -> String:
 	if player_index < 0 or player_index >= players.size():
 		return SpellRules.REASON_UNKNOWN
 	var player := players[player_index]
-	return SpellRules.block_reason(config, player.mana, player.casts_this_turn, cooldown_left(player_index, spell_id), config.spell(spell_id))
+	return SpellRules.block_reason(player.mana, player.casts_this_turn, max_casts(player_index), cooldown_left(player_index, spell_id), config.spell(spell_id))
+
+
+## Casts allowed this turn. Cities owned right now. A step of 0 leaves max_casts_base.
+## Otherwise N = min(limit, base + floor(cities / step)).
+func max_casts(player_index: int) -> int:
+	if config == null:
+		return 0
+	if config.max_casts_cities_per_step == 0:
+		return config.max_casts_base
+	var cities := city_count(player_index)
+	var steps := int(float(cities) / float(config.max_casts_cities_per_step))
+	return mini(config.max_casts_limit, config.max_casts_base + steps)
+
+
+func _note_spell_cap(player_index: int, before: int, cause: String) -> void:
+	var now := max_casts(player_index)
+	if now == before:
+		return
+	if log != null and log.active:
+		var name := MatchResult.player_name(player_index, human_index)
+		log.append(GameLog.spell_cap_event(turn, player_index, name, before, now, cause))
+	if player_index != human_index:
+		return
+	spell_cap_notice = "Spell limit is now %d per turn" % now
+	_spell_notice_turn = turn + 1 if _resolving_turn else turn
+
+
+func _retire_spell_notice() -> void:
+	if spell_cap_notice.is_empty():
+		return
+	if _spell_notice_turn < turn:
+		spell_cap_notice = ""
 
 
 ## Empty when a click on `target` would cast. `direction` is a Hex direction.
@@ -1886,6 +1934,10 @@ func _capture_settler(taker: PlayerState.UnitState, settler: PlayerState.UnitSta
 
 
 func _apply_city_capture(taker: PlayerState.UnitState, city: MapCity) -> void:
+	var loser := city.player
+	var winner := taker.owner
+	var before_loser := max_casts(loser)
+	var before_winner := max_casts(winner)
 	city.player = taker.owner
 	city.population = maxi(config.capture_population_min, city.population - config.capture_population_loss)
 	city.hp = clampi(roundi(float(city.max_hp) * config.capture_hp_fraction), 0, city.max_hp)
@@ -1894,6 +1946,8 @@ func _apply_city_capture(taker: PlayerState.UnitState, city: MapCity) -> void:
 	city.attacked = false
 	for cell in territory_cells(city):
 		_owners[cell] = taker.owner
+	_note_spell_cap(loser, before_loser, "lost")
+	_note_spell_cap(winner, before_winner, "captured")
 
 
 func _heal_cities() -> void:

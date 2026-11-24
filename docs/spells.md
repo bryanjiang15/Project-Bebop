@@ -12,13 +12,13 @@ End Turn snapshots every city's mana with `city_yields` before growth, productio
 
 | Id | Name | Shape | Mana | Range | Cooldown | Land |
 | --- | --- | --- | --- | --- | --- | --- |
-| `grow_forest` | Grow Forest | radius 1 (7 tiles) | 15 | 3 | 2 | forest |
-| `raise_hills` | Raise Hills | radius 1 | 20 | 3 | 3 | hills |
-| `carve_river` | Carve River | line of 4 | 25 | 3 | 3 | water |
-| `ignite` | Ignite | radius 1 | 35 | 2 | 5 | volcanic |
-| `restore_plains` | Restore Plains | radius 1 | 10 | 3 | 2 | plains |
+| `grow_forest` | Grow Forest | radius 1 (7 tiles) | 10 | 3 | 2 | forest |
+| `raise_hills` | Raise Hills | radius 1 | 13 | 3 | 3 | hills |
+| `carve_river` | Carve River | line of 4 | 17 | 3 | 3 | water |
+| `ignite` | Ignite | radius 1 | 23 | 2 | 5 | volcanic |
+| `restore_plains` | Restore Plains | radius 1 | 7 | 3 | 2 | plains |
 
-`spells.casts_per_turn` is 1. A radius uses the spell's `radius`. A line uses the spell's `length` (Carve River is 4, matching `spells.line_length`). Each entry also has a `name`.
+The per-turn cap is `GameSetup.max_casts`. With the shipped keys that is `min(2, 1 + floor(cities / 3))`, where cities is how many that player owns right now. `spells.max_casts_cities_per_step` 0 turns the city term off and leaves a flat `spells.max_casts_base`. A radius uses the spell's `radius`. A line uses the spell's `length` (Carve River is 4, matching `spells.line_length`). Each entry also has a `name`. `spells.casts_per_turn` is not a key.
 
 ## Affected tiles
 
@@ -35,7 +35,7 @@ Every affected tile whose land is different becomes the spell's land. Tiles alre
 - A city center, when `city.center_never_terraformed` is true. Any city's center, not only the caster's.
 - A tile with a unit on it, when the new land is water and `spells.skip_water_if_land_unit_present` is true. Any other land still changes under a unit.
 
-The cast still spends mana, starts the cooldown, and counts as the player's cast for the turn when every tile is skipped or already the right land. Ownership does not change (`spells.spells_change_tile_ownership` is false). A successful cast appends one `cast` line to the game log. A rejected cast does not. See `docs/game_log.md`.
+The cast still spends mana, starts the cooldown, and counts against the player's cap for the turn when every tile is skipped or already the right land. Ownership does not change (`spells.spells_change_tile_ownership` is false). A successful cast appends one `cast` line to the game log. A rejected cast does not. See `docs/game_log.md`.
 
 A queued building whose chosen tile becomes water is always removed from the queue, including when `buildings.water_destroys_building` is false. Nothing is refunded: if that item was the head of the queue, the city's stored production is discarded, the same way cancelling the head works. A later item keeps the head's stored production. That flag only removes the finished building. With it on, a tile that actually becomes water loses the finished building on it, and a neighbor stays. With it off, the finished building stays and the tile remains occupied, so the reason is `Tile already has a building`. Either way the tile is water, so `placement_reason` rejects a new building with `Cannot build on water` once the slot is empty. Leaving the queued item in place would stall the queue, because that same reason stops the item from finishing and caps stored production at its cost.
 
@@ -51,7 +51,9 @@ The button is grey, and its tooltip is the first reason that applies:
 
 1. `Not enough mana`
 2. `On cooldown`
-3. `Already cast this turn`
+3. `Already cast this turn` (`SpellRules.REASON_TURN`)
+
+Mana and cooldown still win when they apply. The bar does not show the rules string for the cap. Its tooltip and state line are `Spell limit reached (x/y this turn)`, with x the casts already made and y `max_casts`.
 
 A click on the map checks those, then the target:
 
@@ -67,10 +69,10 @@ An illegal click shows the reason and does not spend mana or leave targeting.
 
 Cooldowns count the caster's own turns. Rivals now act before this clock, and the tick is still global: it is not yet one clock per player. It runs after the mana sum, idle healing, and volcanic damage, and before the turn counter increments.
 
-A successful cast stores the spell's `cooldown` as the number of End Turns still to wait. Each End Turn subtracts 1, and 0 means ready. A spell with cooldown 2 cast on turn N is therefore blocked on turn N+1 and castable on turn N+2. The one-cast limit clears at the same tick. `spells.cooldown_uses_caster_turns` records this rule.
+A successful cast stores the spell's `cooldown` as the number of End Turns still to wait. Each End Turn subtracts 1, and 0 means ready. A spell with cooldown 2 cast on turn N is therefore blocked on turn N+1 and castable on turn N+2. `casts_this_turn` clears at the same tick, for every player. The cap itself is not stored: founding, capturing, or losing a city changes it immediately, including mid-turn. Casts already made stay spent when the cap falls. `spells.cooldown_uses_caster_turns` records the cooldown rule.
 
 ## Bar and targeting
 
-`%SpellBar` in `scenes/game.tscn` sits under the top bar. `%SpellButtons` is filled with one instance of `scenes/ui/spell_button.tscn` per spell, in config order. A button shows the name, mana cost, shape (`Radius 1` or `Line 4`), and either `Ready`, `Targeting`, `Cooldown N`, or the reject reason. Spell buttons do not take keyboard focus, so Enter still ends the turn.
+`%SpellBar` in `scenes/game.tscn` sits under the top bar. `%SpellCount` reads `Spells x/y` (casts this turn / cap) and refreshes after a cast and when the cap changes. `%SpellNotice` shows `Spell limit is now N per turn` for the rest of the turn the human can see that change, then clears. A change while rivals resolve is shown on the following turn. `%SpellButtons` is filled with one instance of `scenes/ui/spell_button.tscn` per spell, in config order. A button shows the name, mana cost, shape (`Radius 1` or `Line 4`), and either `Ready`, `Targeting`, `Cooldown N`, or the reject reason. Spell buttons do not take keyboard focus, so Enter still ends the turn.
 
 Clicking a spell that can be cast enters targeting. Hovering a tile outlines the affected tiles on the existing highlight sprites, tinted with the new land's color. The white hover cell stays hidden during targeting so it does not sit on top of that outline. A skipped tile is grey. An illegal target is red, and the other tiles keep the land color so the shape stays visible. A tile where the cast would destroy a finished building keeps the new-land color and gets a smaller gold highlight on top of it. The tooltip shows the spell name, the cost, and how many tiles will change. A line tooltip also names the direction. When buildings would be destroyed it adds that count on the same line, for example `4 tiles change east, 1 building destroyed`. The outline is painted by one helper shared with ability targeting. Right-click or Esc leaves targeting and does not move or open the menu. A second Esc opens the menu. Left-click casts when the target is legal. Choosing a spell cancels an armed ability, and choosing an ability cancels the spell. Outside either targeting mode, left-click still selects, right-click moves (including a capture) and does not attack, B still founds a city, and S and F are still the orders.

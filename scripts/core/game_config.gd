@@ -76,7 +76,9 @@ var lumber_mill_production_per_adjacent_forest: int
 var granary_cost: int
 var mana_well_cost: int
 var lumber_mill_cost: int
-var casts_per_turn: int
+var max_casts_base: int
+var max_casts_cities_per_step: int
+var max_casts_limit: int
 var spell_range_from: String
 var line_length: int
 var only_target_must_be_in_range: bool
@@ -372,7 +374,9 @@ static func required_paths() -> PackedStringArray:
 		"buildings.costs.granary",
 		"buildings.costs.mana_well",
 		"buildings.costs.lumber_mill",
-		"spells.casts_per_turn",
+		"spells.max_casts_base",
+		"spells.max_casts_cities_per_step",
+		"spells.max_casts_limit",
 		"spells.range_from",
 		"spells.line_length",
 		"spells.only_target_must_be_in_range",
@@ -672,7 +676,9 @@ func to_dict() -> Dictionary:
 	for land_id in LAND_IDS:
 		land_out[land_id] = (lands[land_id] as LandStats).to_dict()
 	var spell_out := {
-		"casts_per_turn": casts_per_turn,
+		"max_casts_base": max_casts_base,
+		"max_casts_cities_per_step": max_casts_cities_per_step,
+		"max_casts_limit": max_casts_limit,
 		"range_from": spell_range_from,
 		"line_length": line_length,
 		"only_target_must_be_in_range": only_target_must_be_in_range,
@@ -912,7 +918,9 @@ func _read(data: Dictionary) -> void:
 	granary_cost = _int(data, "buildings.costs.granary")
 	mana_well_cost = _int(data, "buildings.costs.mana_well")
 	lumber_mill_cost = _int(data, "buildings.costs.lumber_mill")
-	casts_per_turn = _int(data, "spells.casts_per_turn")
+	max_casts_base = _int(data, "spells.max_casts_base")
+	max_casts_cities_per_step = _int(data, "spells.max_casts_cities_per_step")
+	max_casts_limit = _int(data, "spells.max_casts_limit")
 	spell_range_from = _string(data, "spells.range_from")
 	line_length = _int(data, "spells.line_length")
 	only_target_must_be_in_range = _bool(data, "spells.only_target_must_be_in_range")

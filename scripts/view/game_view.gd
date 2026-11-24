@@ -105,6 +105,8 @@ var _leaving: bool = false
 @onready var _score_1: Label = %Score1
 @onready var _score_2: Label = %Score2
 @onready var _spell_row: HBoxContainer = %SpellButtons
+@onready var _spell_count: Label = %SpellCount
+@onready var _spell_notice: Label = %SpellNotice
 @onready var _ability_bar: PanelContainer = %AbilityBar
 @onready var _ability_ap: Label = %AbilityApLabel
 @onready var _ability_row: HBoxContainer = %AbilityButtons
@@ -1388,8 +1390,16 @@ func _build_spell_bar() -> void:
 func _refresh_spells() -> void:
 	if setup == null:
 		return
+	var player := setup.players[setup.human_index]
+	_spell_count.text = "Spells %d/%d" % [player.casts_this_turn, setup.max_casts(setup.human_index)]
+	_spell_notice.text = setup.spell_cap_notice
 	for spell_id in _spell_buttons.keys():
 		_paint_spell_button(_spell_buttons[spell_id] as Button, str(spell_id))
+
+
+func _spell_limit_tooltip() -> String:
+	var player := setup.players[setup.human_index]
+	return "Spell limit reached (%d/%d this turn)" % [player.casts_this_turn, setup.max_casts(setup.human_index)]
 
 
 func _paint_spell_button(button: Button, spell_id: String) -> void:
@@ -1402,17 +1412,20 @@ func _paint_spell_button(button: Button, spell_id: String) -> void:
 	if stats.shape == "line":
 		shape = "Line %d" % stats.length
 	(button.get_node("Column/ShapeLabel") as Label).text = shape
+	var shown := reason
+	if reason == SpellRules.REASON_TURN:
+		shown = _spell_limit_tooltip()
 	var state := "Ready"
 	if _spell_id == spell_id and reason.is_empty():
 		state = "Targeting"
 	elif reason == SpellRules.REASON_COOLDOWN:
 		state = "Cooldown %d" % left
-	elif not reason.is_empty():
-		state = reason
+	elif not shown.is_empty():
+		state = shown
 	var state_label := button.get_node("Column/StateLabel") as Label
 	state_label.text = state
 	button.disabled = not reason.is_empty()
-	button.tooltip_text = reason
+	button.tooltip_text = shown
 	var muted := button.disabled
 	var name_color := Color(0.78, 0.78, 0.8) if muted else Color(0.97, 0.96, 0.92)
 	var cost_color := Color(0.62, 0.8, 0.96) if muted else Color(0.72, 0.88, 1.0)

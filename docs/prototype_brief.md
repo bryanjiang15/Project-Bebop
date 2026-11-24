@@ -4,7 +4,7 @@ Source: https://app.notion.com/p/3fc6a690fbd28150bf35d7f1dcf0be1c
 
 Notion is the source of truth. This file is a copy for the repo. If it disagrees with Notion, Notion wins. If this brief and the design doc disagree, the design doc wins.
 
-> **What this is:** the requirements for the first playable prototype. It is based on https://app.notion.com/p/3fc6a690fbd2811c8fe2faa9845f5afb **v0.3.1**. If this brief and the design doc disagree, the design doc wins.
+> **What this is:** the requirements for the first playable prototype. It is based on https://app.notion.com/p/3fc6a690fbd2811c8fe2faa9845f5afb **v0.3.1**. The pace and spell-cap rows in sections 3 and 5 match **v0.4.5** (Bryan, Nov 21, 2026). If this brief and the design doc disagree, the design doc wins.
 > **For:** the engineer building the prototype. Greybox is fine.
 > **Rule for numbers:** anything marked **Prototype default (tunable / not final design)** is a starting guess so the build can run. It is not design data. All numbers live in **one config file**.
 
@@ -66,7 +66,7 @@ Exact numbers are in section 5.
 	- **Prototype default (tunable / not final design):** add **Restore Plains** (radius), so any tile can be changed back to plains. The design doc says any tile can change to any type.
 - Spells can target **any tile in range, including rival land**.
 - Rules:
-	- **Prototype default (tunable / not final design):** the target must be within cast range of a tile you own. One cast per player per turn. Each spell has its own cooldown.
+	- **Prototype default (tunable / not final design):** the target must be within cast range of a tile you own. Each player may cast at most N spells per turn, where N is `min(2, 1 + floor(cities owned / 3))`. Mana, cooldowns, range, and the other spell rules still apply. Each spell has its own cooldown. Founding or capturing a third city raises the cap immediately. Dropping below three cities lowers it immediately. Casts already made that turn stay spent.
 	- **Prototype default (tunable / not final design):** city center tiles are never changed. Tiles with a land unit on them are skipped when the new type would be water.
 - Changing a tile updates its yields, movement cost, and defense immediately. City yields refresh at once.
 ## Cities (Civ 6-like, simplified)
@@ -136,23 +136,23 @@ Exact numbers are in section 5.
 | Volcanic ground: food / production / move cost / hazard | 0 / 3 / 1 / 10 damage | Damage to a unit that ends its turn on the tile |
 | City center yield | 2 food, 2 production | Plus the yield of the tile's land type |
 | City mana per turn | 2 + 1 per 2 population | Mana Well adds +2 |
-| Starting mana | 10 | Enough for one cheap spell early |
-| Growth threshold | 10 + 6 × current population | Food per population: 2 per turn |
+| Starting mana | 10 | Covers one Grow Forest |
+| Growth threshold | 8 + 4 × current population | Food per population: 2 per turn |
 | Borders | Radius 1 at founding; +1 tile every 4 turns; max radius 3 | New tile picked by best yield |
 | Minimum city distance | 3 tiles |  |
-| Production costs | Settler 40, Scout 20, Warrior 30, Archer 45, Granary 50, Mana Well 60, Lumber Mill 50 | Settler also costs 1 population; city must be size 2+ |
+| Production costs | Settler 27, Scout 13, Warrior 20, Archer 30, Granary 33, Mana Well 40, Lumber Mill 33 | Settler also costs 1 population; city must be size 2+. `max(1, round(old × 2/3))` |
 | Building effects | Granary +2 food; Mana Well +2 mana; Lumber Mill +1 production per adjacent forest | Lumber Mill reacts to Grow Forest and Ignite |
-| Spell: Grow Forest | Radius 1 (7 tiles), 15 mana, range 3, cooldown 2 | Makes forest |
-| Spell: Raise Hills | Radius 1 (7 tiles), 20 mana, range 3, cooldown 3 | Makes hills |
-| Spell: Carve River | Line of 4 tiles, 25 mana, range 3, cooldown 3 | Makes water |
-| Spell: Ignite | Radius 1 (7 tiles), 35 mana, range 2, cooldown 5 | Makes volcanic ground |
-| Spell: Restore Plains | Radius 1 (7 tiles), 10 mana, range 3, cooldown 2 | Makes plains; added so any tile can be reverted |
-| Casts per turn | 1 | Design doc Proposal: 1 or 2 |
+| Spell: Grow Forest | Radius 1 (7 tiles), 10 mana, range 3, cooldown 2 | Makes forest |
+| Spell: Raise Hills | Radius 1 (7 tiles), 13 mana, range 3, cooldown 3 | Makes hills |
+| Spell: Carve River | Line of 4 tiles, 17 mana, range 3, cooldown 3 | Makes water |
+| Spell: Ignite | Radius 1 (7 tiles), 23 mana, range 2, cooldown 5 | Makes volcanic ground |
+| Spell: Restore Plains | Radius 1 (7 tiles), 7 mana, range 3, cooldown 2 | Makes plains; added so any tile can be reverted |
+| Max spells per turn | 1, plus 1 per 3 cities, limit 2 | `min(2, 1 + floor(cities / 3))`. A step of 0 leaves a flat base of 1 |
 | Range measured from | Any tile you own |  |
-| Scout: HP / attack / move / cost | 50 / 5 / 3 / 20 |  |
-| Warrior: HP / attack / move / cost | 100 / 20 / 2 / 30 |  |
-| Archer: HP / ranged attack / defense / range / move / cost | 100 / 25 / 12 / 2 / 2 / 45 | Defense used when attacked |
-| Settler: HP / move / cost | Non-combat / 2 / 40 | Captured if a military unit moves onto it |
+| Scout: HP / attack / move / cost | 50 / 5 / 3 / 13 |  |
+| Warrior: HP / attack / move / cost | 100 / 20 / 2 / 20 |  |
+| Archer: HP / ranged attack / defense / range / move / cost | 100 / 25 / 12 / 2 / 2 / 30 | Defense used when attacked |
+| Settler: HP / move / cost | Non-combat / 2 / 27 | Captured if a military unit moves onto it |
 | Combat damage | 30 × 1.04\^(attacker − defender), clamped 5 to 60 | Melee defender deals the same formula back |
 | Terrain combat modifiers | Hills +25% defense; all others 0% | Applied to the defender's strength |
 | Unit healing | +10 HP per turn when not moving or fighting |  |
@@ -176,7 +176,7 @@ These rows belong with the table above. Each ability is one object under `abilit
 - [ ] Settler founds a city; more settlers can be trained and found more cities; the city distance rule applies.
 - [ ] Cities show yields, grow, expand borders, and build from a production queue.
 - [ ] Mana accumulates from cities and shows in the top bar.
-- [ ] All 5 spells work. The targeting preview shows the exact affected tiles for both line and radius shapes. Range, cost, cooldown, and one cast per turn are enforced.
+- [ ] All 5 spells work. The targeting preview shows the exact affected tiles for both line and radius shapes. Range, cost, cooldown, and the per-turn spell cap are enforced.
 - [ ] Spells can change rival land. Tile yields, movement, defense, and city yields update immediately.
 - [ ] Water blocks land units. Creating water on a building destroys it. Volcanic ground damages units.
 - [ ] Units move with land-based movement costs; melee, ranged, and counter-damage work; hills give defense.
@@ -214,7 +214,7 @@ These rows belong with the table above. Each ability is one object under `abilit
 - **Top resource bar:** food, production, **mana** (with per-turn gain), turn number (e.g. "Turn 12 / 50"), and score for all players.
 - **Minimap** at the bottom left, with borders and fog.
 - **City panel** at the bottom right: yields, growth bar, borders, and the production queue.
-- **Spell bar:** each spell with its mana cost, cooldown, and shape icon; spells you can't afford or that are on cooldown are greyed out.
+- **Spell bar:** each spell with its mana cost, cooldown, and shape icon; spells you can't afford, that are on cooldown, or that are past the per-turn cap are greyed out. The bar shows `Spells x/y`. At the cap the tooltip is `Spell limit reached (x/y this turn)`. A cap change shows `Spell limit is now N per turn` for the rest of that turn.
 - **Tile tooltip** on hover: land type, yields, movement cost, defense, owner, and any unit or building on it.
 - **Previews:** the spell area with before/after land type and yield change, and the combat result.
 # 9. Open questions for the engineer

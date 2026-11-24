@@ -25,7 +25,7 @@ Each line is flushed as it is written, so a crash keeps every event up to the la
 
 ## Lines
 
-Every line is one JSON object. `event` is `start`, `cast`, or `end`. Cells are odd-r offset coordinates, the same `Vector2i` as `UnitState.cell`: `col` is x, `row` is y. An owner of `-1` means nobody owns the tile. Names are `MatchResult.player_name`: `You` for the human, `Rival N` with N one-based for everyone else (player 1 is `Rival 2`).
+Every line is one JSON object. `event` is `start`, `cast`, `spell_cap`, or `end`. Cells are odd-r offset coordinates, the same `Vector2i` as `UnitState.cell`: `col` is x, `row` is y. An owner of `-1` means nobody owns the tile. Names are `MatchResult.player_name`: `You` for the human, `Rival N` with N one-based for everyone else (player 1 is `Rival 2`).
 
 `start`:
 
@@ -38,7 +38,7 @@ Every line is one JSON object. `event` is `start`, `cast`, or `end`. Cells are o
 `cast` (one per successful cast, any player; rejected casts are omitted):
 
 ```json
-{"event":"cast","turn":1,"player":0,"player_name":"You","spell":"carve_river","spell_name":"Carve River","shape":"line","target":{"col":11,"row":8},"direction":"east","mana":25,"tiles":[{"col":11,"row":8,"from":"plains","to":"water","owner":0,"skip":"","building":"granary","queue_dropped":""}]}
+{"event":"cast","turn":1,"player":0,"player_name":"You","spell":"carve_river","spell_name":"Carve River","shape":"line","target":{"col":11,"row":8},"direction":"east","mana":17,"tiles":[{"col":11,"row":8,"from":"plains","to":"water","owner":0,"skip":"","building":"granary","queue_dropped":""}]}
 ```
 
 `direction` is the hex direction name (`east`, `northeast`, `northwest`, `west`, `southwest`, `southeast`) for a line, and JSON `null` for a radius. `mana` is the amount spent. `tiles` is `spell_preview`'s affected list, in that order, snapshotted before the land changes:
@@ -48,6 +48,14 @@ Every line is one JSON object. `event` is `start`, `cast`, or `end`. Cells are o
 - `owner` is `owner_at` at cast time. It does not change when the land changes.
 - `building` is the kind of a finished building the cast removes (`granary`, `mana_well`, `lumber_mill`), or empty. That is the preview's `destroyed` list, which follows `buildings.water_destroys_building`.
 - `queue_dropped` is the item id of a queued building aimed at a tile that becomes water, or empty. The queue drop happens even when the finished-building flag is off. Nothing is refunded; the log only records the id.
+
+`spell_cap` (one per change in a player's cap; founding, capturing, or losing a city that does not move the number writes nothing):
+
+```json
+{"event":"spell_cap","turn":12,"player":0,"player_name":"You","old_cap":1,"new_cap":2,"cause":"founded"}
+```
+
+`cause` is `founded`, `captured`, or `lost`. `old_cap` and `new_cap` are `GameSetup.max_casts` before and after the city count changed. The view does not write this line.
 
 `end`:
 
@@ -59,4 +67,4 @@ Every line is one JSON object. `event` is `start`, `cast`, or `end`. Cells are o
 
 ## Tests
 
-Unit tests either set `log.enabled` false or point `log.directory` at `/tmp/bebop-ticket19/...`. `tests/smoke_game.gd` sets `GameLog.directory_override` so its restarts stay out of `user://logs`. `tests/smoke_log.gd` writes a temp config (`turn_limit` 1, enough mana, two casts per turn, `log.directory` under `/tmp`) and sets `GameConfig.path_override` so New Game and Restart load that file. It casts Grow Forest and Carve River through the spell bar, ends the turn, checks `%LogPath`, and checks that Restart opens a second file. `tests/soak_games.gd` writes its own temp config with `log.directory` under `/tmp/bebop-soak-logs` and checks that each of the five games has one `start` line and one `end` line whose rows match the end screen.
+Unit tests either set `log.enabled` false or point `log.directory` at `/tmp/bebop-ticket19/...`. `tests/smoke_game.gd` sets `GameLog.directory_override` so its restarts stay out of `user://logs`. `tests/smoke_log.gd` writes a temp config (`turn_limit` 1, enough mana, `spells.max_casts_base` 2 so two casts fit, `log.directory` under `/tmp`) and sets `GameConfig.path_override` so New Game and Restart load that file. It casts Grow Forest and Carve River through the spell bar, ends the turn, checks `%LogPath`, and checks that Restart opens a second file. `tests/soak_games.gd` writes its own temp config with `log.directory` under `/tmp/bebop-soak-logs` and checks that each of the five games has one `start` line and one `end` line whose rows match the end screen.

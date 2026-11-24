@@ -525,31 +525,40 @@ static func _forest_neighbors(setup: GameSetup, cell: Vector2i) -> int:
 
 
 static func _cast(setup: GameSetup, player: int) -> void:
-	var best_score := 0
-	var best_spell := ""
-	var best_cell := NO_CELL
-	var best_dir := 0
-	for spell_id in GameConfig.SPELL_IDS:
-		if not setup.spell_block_reason(player, spell_id).is_empty():
-			continue
-		var stats := setup.config.spell(spell_id)
-		var dirs := 1
-		if stats.shape == "line":
-			dirs = 6
-		for cell in _spell_cells(setup, player, stats.range):
-			for dir in dirs:
-				var preview := setup.spell_preview(player, spell_id, cell, dir)
-				if not str(preview["reason"]).is_empty():
-					continue
-				var score := _spell_score(setup, player, stats.land, preview)
-				if score > best_score:
-					best_score = score
-					best_spell = spell_id
-					best_cell = cell
-					best_dir = dir
-	if best_spell.is_empty() or best_score < setup.config.ai_min_spell_score:
-		return
-	setup.cast_spell(player, best_spell, best_cell, best_dir)
+	var guard := 0
+	var cap := setup.max_casts(player)
+	while guard < cap:
+		guard += 1
+		var used := setup.players[player].casts_this_turn
+		if used >= setup.max_casts(player):
+			return
+		var best_score := 0
+		var best_spell := ""
+		var best_cell := NO_CELL
+		var best_dir := 0
+		for spell_id in GameConfig.SPELL_IDS:
+			if not setup.spell_block_reason(player, spell_id).is_empty():
+				continue
+			var stats := setup.config.spell(spell_id)
+			var dirs := 1
+			if stats.shape == "line":
+				dirs = 6
+			for cell in _spell_cells(setup, player, stats.range):
+				for dir in dirs:
+					var preview := setup.spell_preview(player, spell_id, cell, dir)
+					if not str(preview["reason"]).is_empty():
+						continue
+					var score := _spell_score(setup, player, stats.land, preview)
+					if score > best_score:
+						best_score = score
+						best_spell = spell_id
+						best_cell = cell
+						best_dir = dir
+		if best_spell.is_empty() or best_score < setup.config.ai_min_spell_score:
+			return
+		setup.cast_spell(player, best_spell, best_cell, best_dir)
+		if setup.players[player].casts_this_turn == used:
+			return
 
 
 static func _spell_cells(setup: GameSetup, player: int, spell_range: int) -> Array[Vector2i]:

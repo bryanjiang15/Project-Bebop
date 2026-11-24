@@ -10,6 +10,8 @@ extends RefCounted
 
 const REASON_MANA := "Not enough mana"
 const REASON_COOLDOWN := "On cooldown"
+## Rules-layer id for the per-turn cap. The spell bar shows
+## "Spell limit reached (x/y this turn)" when this is the button reason.
 const REASON_TURN := "Already cast this turn"
 const REASON_RANGE := "Out of range"
 const REASON_HIDDEN := "Tile not revealed"
@@ -48,13 +50,14 @@ static func nearest_owned_distance(target: Vector2i, owned: Array[Vector2i]) -> 
 	return best
 
 
-## Mana, cooldown, and the one-cast limit. No target yet.
-static func block_reason(cfg: GameConfig, mana: int, casts_this_turn: int, cooldown_remaining: int, stats: GameConfig.SpellStats) -> String:
+## Mana and cooldown win over the cap. `cap` is GameSetup.max_casts for this player.
+## No target yet.
+static func block_reason(mana: int, casts_this_turn: int, cap: int, cooldown_remaining: int, stats: GameConfig.SpellStats) -> String:
 	if mana < stats.mana:
 		return REASON_MANA
 	if cooldown_remaining > 0:
 		return REASON_COOLDOWN
-	if casts_this_turn >= cfg.casts_per_turn:
+	if casts_this_turn >= cap:
 		return REASON_TURN
 	return ""
 

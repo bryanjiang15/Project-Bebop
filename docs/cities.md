@@ -36,7 +36,7 @@ A Granary adds `buildings.granary_food` to the city. A Lumber Mill adds `buildin
 
 ## Growth
 
-Surplus is food minus `city.food_per_population * population`. The threshold is `city.growth_base + city.growth_per_population * population`. Surplus is added to the stored bar. Each time the bar reaches the threshold, population increases by 1 and that threshold is subtracted, then the threshold is read again for the new population. Leftover food can cross more than one threshold in the same turn.
+Surplus is food minus `city.food_per_population * population`. The threshold is `city.growth_base + city.growth_per_population * population` (shipped `8 + 4 × population`). Surplus is added to the stored bar. Each time the bar reaches the threshold, population increases by 1 and that threshold is subtracted, then the threshold is read again for the new population. Leftover food can cross more than one threshold in the same turn.
 
 When `growth.shortfall_drains_bar` is true, a negative surplus drains the bar. If the bar would go below 0, it becomes 0 and the city loses `growth.starve_population_loss` population, not below `growth.starve_population_min`. That loss happens once per turn. A settler's population cost is separate and is taken when the settler finishes.
 

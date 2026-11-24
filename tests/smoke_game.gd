@@ -2599,7 +2599,8 @@ func _cast_spell(game: Node) -> bool:
 		quit(1)
 		return false
 	var tip := (game.get_node("%Tooltip") as Label).text
-	if not tip.contains("Restore Plains") or not tip.contains("10 mana") or not tip.contains("change"):
+	var restore_cost := "%d mana" % setup.config.spell("restore_plains").mana
+	if not tip.contains("Restore Plains") or not tip.contains(restore_cost) or not tip.contains("change"):
 		print("FAIL spell tip '", tip, "'")
 		quit(1)
 		return false

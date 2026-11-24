@@ -7,6 +7,7 @@ extends RefCounted
 
 const START := "start"
 const CAST := "cast"
+const SPELL_CAP := "spell_cap"
 const END := "end"
 
 ## Tests set this to a directory before GameSetup.start. Empty uses config.
@@ -62,6 +63,18 @@ static func tile_record(cell: Vector2i, from_land: String, to_land: String, owne
 		"skip": skip,
 		"building": building,
 		"queue_dropped": queue_dropped,
+	}
+
+
+static func spell_cap_event(turn_number: int, player_index: int, player_name: String, old_cap: int, new_cap: int, cause: String) -> Dictionary:
+	return {
+		"event": SPELL_CAP,
+		"turn": turn_number,
+		"player": player_index,
+		"player_name": player_name,
+		"old_cap": old_cap,
+		"new_cap": new_cap,
+		"cause": cause,
 	}
 
 
