@@ -74,8 +74,9 @@ var _selected_city_id: int = -1
 var _panel_city_id: int = -1
 var _placing: String = ""
 var _end_confirm: bool = false
-## The unit End Turn landed on. A second press ends the turn only while the
-## selection is still this unit and nothing has cleared the confirm.
+## The unit or city End Turn landed on. A second press ends the turn only while
+## the selection is still that item and nothing has cleared the confirm.
+var _end_anchor_kind: String = ""
 var _end_anchor_id: int = -1
 ## True while rival turns run. Input and buttons do nothing until they finish.
 var _rivals_acting: bool = false
@@ -255,30 +256,33 @@ func _on_end_turn_pressed() -> void:
 	_cancel_advance()
 	_spell_id = ""
 	_ability_id = ""
-	var count := setup.units_needing_orders(setup.human_index).size()
+	var count := setup.items_needing_orders(setup.human_index).size()
 	if count == 0 or not _config.end_turn_warns_if_unordered:
 		_finish_end_turn()
 		return
-	# Second press on the unit this button just landed on, with no click,
-	# move, or order in between. That is the End anyway escape, including a
-	# movement-only scout that cannot spend its leftover AP.
-	if _end_confirm and _selected_id == _end_anchor_id:
+	# Second press on the unit or city this button just landed on, with no
+	# click, move, or order in between. That is the End anyway escape,
+	# including a movement-only scout that cannot spend its leftover AP.
+	if _end_confirm and _end_anchor_matches():
 		_finish_end_turn()
 		return
-	var next := setup.next_unit_needing_orders(setup.human_index, _selected_id)
-	if next != null:
-		_selected_id = next.id
-		_selected_city_id = -1
-		_focus_cell(next.cell)
-		_end_anchor_id = next.id
+	var next := setup.next_item_needing_orders(
+		setup.human_index, _orders_after_kind(), _orders_after_id()
+	)
+	if not next.is_empty():
+		_land_on_orders_item(next)
+		_end_anchor_kind = str(next["kind"])
+		_end_anchor_id = int(next["id"])
 	else:
-		_end_anchor_id = _selected_id
+		_end_anchor_kind = _orders_after_kind()
+		_end_anchor_id = _orders_after_id()
 	_end_confirm = true
 	_refresh_board()
 
 
 func _finish_end_turn() -> void:
 	_end_confirm = false
+	_end_anchor_kind = ""
 	_end_anchor_id = -1
 	# Headless and the live game both apply rival actions in this call.
 	# The start-of-turn pick below is the only camera motion.
@@ -288,22 +292,22 @@ func _finish_end_turn() -> void:
 	if setup.result == null:
 		setup.end_turn()
 	if setup.result == null:
-		_select_opening_unit()
+		_select_opening_item()
 	_refresh_board()
 
 
 func _on_next_unit_pressed() -> void:
 	if setup == null or _menu.visible or _leaving or _rivals_acting or setup.result != null:
 		return
-	var next := setup.next_unit_needing_orders(setup.human_index, _selected_id)
-	if next == null:
+	var next := setup.next_item_needing_orders(
+		setup.human_index, _orders_after_kind(), _orders_after_id()
+	)
+	if next.is_empty():
 		return
 	_cancel_advance()
 	_cancel_targeting()
 	_cancel_end_confirm()
-	_selected_id = next.id
-	_selected_city_id = -1
-	_focus_cell(next.cell)
+	_land_on_orders_item(next)
 	_refresh_board()
 
 
@@ -356,7 +360,6 @@ func _on_found_city_pressed() -> void:
 		_refresh_selection()
 		return
 	var needed := setup.unit_needs_orders(unit)
-	var follow_id := _follow_id(unit)
 	setup.found_city(unit)
 	_selected_id = -1
 	_selected_city_id = -1
@@ -365,7 +368,8 @@ func _on_found_city_pressed() -> void:
 	_spell_id = ""
 	_ability_id = ""
 	_cancel_end_confirm()
-	_take_follow(unit, needed, follow_id)
+	# Recompute after founding so the new idle city can join the list (D2/D3).
+	_take_follow(unit, needed, {})
 	_refresh_board()
 
 
@@ -438,12 +442,11 @@ func _move_at_screen(screen: Vector2) -> void:
 	if not setup.reachable_tiles(unit).has(cell):
 		return
 	var needed := setup.unit_needs_orders(unit)
-	var follow_id := _follow_id(unit)
 	setup.move_unit(unit, cell)
 	_spell_id = ""
 	_ability_id = ""
 	_cancel_end_confirm()
-	_take_follow(unit, needed, follow_id)
+	_take_follow(unit, needed, {})
 	_refresh_board()
 
 
@@ -617,11 +620,14 @@ func _order_label(unit: PlayerState.UnitState) -> String:
 func _refresh_end_warning() -> void:
 	var count := 0
 	if setup != null:
-		count = setup.units_needing_orders(setup.human_index).size()
+		count = setup.items_needing_orders(setup.human_index).size()
 	_next_button.disabled = count == 0
 	if _end_confirm:
 		_end_button.text = "End anyway (Enter)"
-		_end_warning.text = "Units still have AP. End Turn again to continue."
+		if setup != null and not setup.units_needing_orders(setup.human_index).is_empty():
+			_end_warning.text = "Units still have AP. End Turn again to continue."
+		else:
+			_end_warning.text = "Cities still need production. End Turn again to continue."
 		return
 	if count > 0 and _config.end_turn_warns_if_unordered:
 		var phrase := _orders_phrase(count)
@@ -634,27 +640,75 @@ func _refresh_end_warning() -> void:
 
 func _orders_phrase(count: int) -> String:
 	if count == 1:
-		return "1 unit needs orders (Enter)"
-	return "%d units need orders (Enter)" % count
+		return "1 needs orders (Enter)"
+	return "%d need orders (Enter)" % count
 
 
 func _cancel_end_confirm() -> void:
 	if not _end_confirm:
 		return
 	_end_confirm = false
+	_end_anchor_kind = ""
 	_end_anchor_id = -1
 	_refresh_end_warning()
 
 
-## Id of the unit that would be next, captured before an action removes this one.
-## -2 means the unit did not need orders. -1 means nothing else does.
-func _follow_id(unit: PlayerState.UnitState) -> int:
-	if unit == null or not setup.unit_needs_orders(unit):
-		return -2
-	var follow := setup.next_unit_needing_orders(setup.human_index, unit.id)
-	if follow == null or follow.id == unit.id:
-		return -1
-	return follow.id
+func _orders_after_kind() -> String:
+	if _selected_city_id >= 0:
+		return GameSetup.ORDERS_CITY
+	if _selected_id >= 0:
+		return GameSetup.ORDERS_UNIT
+	return ""
+
+
+func _orders_after_id() -> int:
+	if _selected_city_id >= 0:
+		return _selected_city_id
+	return _selected_id
+
+
+func _end_anchor_matches() -> bool:
+	if _end_anchor_kind == GameSetup.ORDERS_CITY:
+		return _selected_city_id == _end_anchor_id and _selected_id < 0
+	if _end_anchor_kind == GameSetup.ORDERS_UNIT:
+		return _selected_id == _end_anchor_id
+	return false
+
+
+## Select a unit or city from the orders list. A city opens the production
+## panel. A unit clears the city selection. Camera motion is separate.
+func _select_orders_item(item: Dictionary) -> void:
+	if item.is_empty():
+		return
+	if str(item.get("kind", "")) == GameSetup.ORDERS_CITY:
+		var city := item.get("city") as MapCity
+		if city == null:
+			return
+		_selected_id = -1
+		_selected_city_id = city.id
+		_panel_city_id = city.id
+		_placing = ""
+		return
+	var unit := item.get("unit") as PlayerState.UnitState
+	if unit == null:
+		return
+	_selected_id = unit.id
+	_selected_city_id = -1
+
+
+## Select and pan (Next Unit, Enter jump, start-of-turn pick).
+func _land_on_orders_item(item: Dictionary) -> void:
+	_select_orders_item(item)
+	if not item.is_empty():
+		_focus_cell(_orders_item_cell(item))
+
+
+func _orders_item_cell(item: Dictionary) -> Vector2i:
+	if str(item.get("kind", "")) == GameSetup.ORDERS_CITY:
+		var city := item.get("city") as MapCity
+		return city.cell if city != null else Vector2i.ZERO
+	var unit := item.get("unit") as PlayerState.UnitState
+	return unit.cell if unit != null else Vector2i.ZERO
 
 
 func _human_by_id(unit_id: int) -> PlayerState.UnitState:
@@ -666,38 +720,46 @@ func _human_by_id(unit_id: int) -> PlayerState.UnitState:
 	return null
 
 
-## After the selected unit finishes or is removed, select the next one that
+## After the selected unit finishes or is removed, select the next item that
 ## needs orders and center the camera. A unit that still needs orders stays put.
 func _advance_after(unit: PlayerState.UnitState, needed_before: bool) -> void:
-	# Skip and Fortify leave the unit in the list, so the follow id is recomputed.
-	_take_follow(unit, needed_before, -1)
+	# Skip and Fortify leave the unit in the list, so the follow item is recomputed.
+	_take_follow(unit, needed_before, {})
 
 
-func _take_follow(unit: PlayerState.UnitState, needed_before: bool, follow_id: int) -> void:
+func _take_follow(unit: PlayerState.UnitState, needed_before: bool, follow: Dictionary) -> void:
 	if not needed_before or unit == null:
 		return
 	var still := setup.players[setup.human_index].units.has(unit)
 	if still and setup.unit_needs_orders(unit):
 		return
-	var next: PlayerState.UnitState = null
+	var next: Dictionary = {}
 	if still:
-		next = setup.next_unit_needing_orders(setup.human_index, unit.id)
-		if next != null and next.id == unit.id:
-			next = null
-	elif follow_id >= 0:
-		next = _human_by_id(follow_id)
-	if next != null and not setup.unit_needs_orders(next):
-		next = null
-	if next != null:
+		next = setup.next_item_needing_orders(
+			setup.human_index, GameSetup.ORDERS_UNIT, unit.id
+		)
+		if not next.is_empty() and str(next.get("kind", "")) == GameSetup.ORDERS_UNIT and int(next.get("id", -1)) == unit.id:
+			next = {}
+	elif not follow.is_empty():
+		next = follow
+	else:
+		# Found and other removals: recompute so a city founded this turn can join.
+		next = setup.next_item_needing_orders(
+			setup.human_index, GameSetup.ORDERS_UNIT, unit.id
+		)
+		if not next.is_empty() and str(next.get("kind", "")) == GameSetup.ORDERS_UNIT and int(next.get("id", -1)) == unit.id:
+			next = {}
+	if not next.is_empty() and not _orders_item_still_needs(next):
+		next = {}
+	if not next.is_empty():
 		if _delay_seconds() <= 0.0 and _pan_seconds() <= 0.0:
 			_cancel_advance()
-			_selected_id = next.id
-			_selected_city_id = -1
-			_center_on_cell(next.cell)
+			_select_orders_item(next)
+			_center_on_cell(_orders_item_cell(next))
 			return
 		# The finished unit stays selected through the pause. The pan selects.
 		_advance_serial += 1
-		_play_advance(_advance_serial, next.id)
+		_play_advance(_advance_serial, str(next["kind"]), int(next["id"]))
 		return
 	_cancel_advance()
 	if not still:
@@ -705,20 +767,46 @@ func _take_follow(unit: PlayerState.UnitState, needed_before: bool, follow_id: i
 		_selected_city_id = -1
 
 
-func _select_opening_unit() -> void:
+func _orders_item_still_needs(item: Dictionary) -> bool:
+	if str(item.get("kind", "")) == GameSetup.ORDERS_CITY:
+		return setup.city_needs_orders(item.get("city") as MapCity)
+	return setup.unit_needs_orders(item.get("unit") as PlayerState.UnitState)
+
+
+## After a successful enqueue on an idle city, advance like finishing a unit.
+func _advance_after_city(city: MapCity, needed_before: bool) -> void:
+	if not needed_before or city == null or setup.city_needs_orders(city):
+		return
+	var next := setup.next_item_needing_orders(
+		setup.human_index, GameSetup.ORDERS_CITY, city.id
+	)
+	if not next.is_empty() and str(next.get("kind", "")) == GameSetup.ORDERS_CITY and int(next.get("id", -1)) == city.id:
+		next = {}
+	if not next.is_empty() and not _orders_item_still_needs(next):
+		next = {}
+	if next.is_empty():
+		_cancel_advance()
+		return
+	if _delay_seconds() <= 0.0 and _pan_seconds() <= 0.0:
+		_cancel_advance()
+		_select_orders_item(next)
+		_center_on_cell(_orders_item_cell(next))
+		return
+	_advance_serial += 1
+	_play_advance(_advance_serial, str(next["kind"]), int(next["id"]))
+
+
+func _select_opening_item() -> void:
 	if setup == null or setup.result != null:
 		return
-	var needing := setup.units_needing_orders(setup.human_index)
+	var needing := setup.items_needing_orders(setup.human_index)
 	if needing.is_empty():
 		# A unit removed this turn leaves a stale id. Fortified units stay selected.
-		if _selected_unit() == null:
+		if _selected_unit() == null and _selected_city() == null:
 			_selected_id = -1
 			_selected_city_id = -1
 		return
-	var first := needing[0]
-	_selected_id = first.id
-	_selected_city_id = -1
-	_focus_cell(first.cell)
+	_land_on_orders_item(needing[0])
 
 
 func _center_on_cell(cell: Vector2i) -> void:
@@ -782,7 +870,7 @@ func _wait_for_motion(serial: int) -> void:
 		await get_tree().process_frame
 
 
-func _play_advance(serial: int, unit_id: int) -> void:
+func _play_advance(serial: int, kind: String, item_id: int) -> void:
 	await _wait_for_motion(serial)
 	if serial != _advance_serial or setup == null or setup.result != null:
 		return
@@ -791,10 +879,10 @@ func _play_advance(serial: int, unit_id: int) -> void:
 		await get_tree().create_timer(delay).timeout
 	if serial != _advance_serial or setup == null or setup.result != null:
 		return
-	var next := _human_by_id(unit_id)
-	if next == null or not setup.unit_needs_orders(next):
+	var next := _orders_item_by_ref(kind, item_id)
+	if next.is_empty() or not _orders_item_still_needs(next):
 		return
-	var goal := _camera_goal(next.cell)
+	var goal := _camera_goal(_orders_item_cell(next))
 	var seconds := _pan_seconds()
 	if seconds > 0.0 and not _camera.position.is_equal_approx(goal):
 		_kill_pan()
@@ -809,12 +897,23 @@ func _play_advance(serial: int, unit_id: int) -> void:
 		_camera.position = goal
 	if serial != _advance_serial or setup == null or setup.result != null:
 		return
-	next = _human_by_id(unit_id)
-	if next == null or not setup.unit_needs_orders(next):
+	next = _orders_item_by_ref(kind, item_id)
+	if next.is_empty() or not _orders_item_still_needs(next):
 		return
-	_selected_id = next.id
-	_selected_city_id = -1
+	_select_orders_item(next)
 	_refresh_board()
+
+
+func _orders_item_by_ref(kind: String, item_id: int) -> Dictionary:
+	if kind == GameSetup.ORDERS_CITY:
+		var city := setup.city_by_id(item_id)
+		if city == null or city.player != setup.human_index:
+			return {}
+		return {"kind": GameSetup.ORDERS_CITY, "id": city.id, "city": city}
+	var unit := _human_by_id(item_id)
+	if unit == null:
+		return {}
+	return {"kind": GameSetup.ORDERS_UNIT, "id": unit.id, "unit": unit}
 
 
 func _paint_map() -> void:
@@ -1260,10 +1359,15 @@ func _choose_build(item_id: String) -> void:
 		_refresh_city_panel("Click a tile for %s" % item_id.capitalize())
 		_rebuild_move_highlights()
 		return
+	var needed := setup.city_needs_orders(city)
 	var reason := setup.enqueue(city, item_id)
 	_placing = ""
+	_cancel_end_confirm()
+	if reason.is_empty():
+		_advance_after_city(city, needed)
 	_refresh_selection()
 	_refresh_city_panel(reason)
+	_refresh_end_warning()
 
 
 func _try_place(cell: Vector2i) -> void:
@@ -1273,9 +1377,12 @@ func _try_place(cell: Vector2i) -> void:
 		_refresh_city_panel()
 		_rebuild_move_highlights()
 		return
+	var needed := setup.city_needs_orders(city)
 	var reason := setup.enqueue(city, _placing, cell)
 	if reason.is_empty():
 		_placing = ""
+		_cancel_end_confirm()
+		_advance_after_city(city, needed)
 		_refresh_after_queue()
 		return
 	_refresh_city_panel(reason)
@@ -1645,12 +1752,11 @@ func _use_ability_at_screen(screen: Vector2) -> void:
 	var world: Vector2 = get_viewport().get_canvas_transform().affine_inverse() * screen
 	var local := _map.to_local(world)
 	var needed := setup.unit_needs_orders(unit)
-	var follow_id := _follow_id(unit)
 	var reason := setup.use_ability(unit, _ability_id, cell)
 	if reason.is_empty():
 		_ability_id = ""
 		_cancel_end_confirm()
-		_take_follow(unit, needed, follow_id)
+		_take_follow(unit, needed, {})
 		if setup.map.in_bounds(cell):
 			_hovered = cell
 			_hover_local = local
@@ -1792,12 +1898,11 @@ func _on_ability_pressed(ability_id: String) -> void:
 	if _ability_id == ability_id:
 		if _config.ability(ability_id).target == "self":
 			var needed := setup.unit_needs_orders(unit)
-			var follow_id := _follow_id(unit)
 			var reason := setup.use_ability(unit, ability_id, unit.cell)
 			if reason.is_empty():
 				_ability_id = ""
 				_cancel_end_confirm()
-				_take_follow(unit, needed, follow_id)
+				_take_follow(unit, needed, {})
 				_refresh_board()
 			return
 		_ability_id = ""

@@ -50,6 +50,8 @@ Founding still claims the disk of `city.border_start_radius`. After that, every 
 
 `GameSetup.enqueue` adds a unit or a building. Production stored on the city is spent on the first item. When the stored amount reaches `units.<type>.cost` or `buildings.costs.<id>`, that item finishes and the remainder stays for the next item, including later items in the same turn. An empty queue stores nothing.
 
+A human city with an empty production queue needs orders and joins the same turn queue as units that still have AP (`GameSetup.city_needs_orders`, then `items_needing_orders`). Next Unit, Period, Enter, End Turn, and auto-advance can land on that city, pan to it, and open `%CityPanel`. A successful `enqueue` removes it from the list and auto-advances with the same pause and pan as finishing a unit. A rejected enqueue does not. Rival cities stay out. Details of the combined list and the End anyway copy are in `docs/combat.md` (Orders) and `docs/agreed_defaults.md` item 21.
+
 Cancelling the item in front discards the stored production. Cancelling a later item does not. Moving an item keeps the stored production and applies it to whichever item is now first.
 
 A queued building remembers the tile chosen at enqueue time. If that tile becomes water, the item is dropped and nothing is refunded, even when `buildings.water_destroys_building` is false. That flag only removes a finished building. When the dropped item was the head, stored production is discarded. When it was later in the queue, the head keeps its stored production. The queue row and the construction marker disappear in the same refresh as the cast.
