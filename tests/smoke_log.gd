@@ -53,7 +53,13 @@ func _run() -> void:
 	var city: MapCity = setup.cities[0]
 	if not _cast_through_bar(game, "grow_forest", city.cell):
 		return
-	var mouth := Hex.axial_to_offset(Hex.neighbor(Hex.offset_to_axial(city.cell), Hex.EAST))
+	# Prefer east, but any on-map neighbor works. An east-edge start used to
+	# aim carve_river off the map and flake this smoke.
+	var mouth := _on_map_neighbor(setup, city.cell)
+	if mouth.x < 0:
+		print("FAIL no on-map neighbor for carve_river at ", city.cell)
+		quit(1)
+		return
 	if not _cast_through_bar(game, "carve_river", mouth):
 		return
 	if _SceneDriver.count_kind(_SceneDriver.log_events(log_path), "cast") != 2:
@@ -163,6 +169,17 @@ func _write_config() -> bool:
 		return false
 	GameConfig.path_override = ""
 	return true
+
+
+func _on_map_neighbor(setup: GameSetup, cell: Vector2i) -> Vector2i:
+	var origin := Hex.offset_to_axial(cell)
+	for direction in [
+		Hex.EAST, Hex.WEST, Hex.NORTHEAST, Hex.NORTHWEST, Hex.SOUTHEAST, Hex.SOUTHWEST,
+	]:
+		var next := Hex.axial_to_offset(Hex.neighbor(origin, direction))
+		if Hex.in_map(Hex.offset_to_axial(next), setup.config.map_width, setup.config.map_height):
+			return next
+	return Vector2i(-1, -1)
 
 
 func _cast_through_bar(game: Node, spell_id: String, cell: Vector2i) -> bool:
