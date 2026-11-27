@@ -1698,7 +1698,9 @@ func _advance_timing(game: Node, setup: GameSetup, first: PlayerState.UnitState,
 
 
 ## The human orders queue through the real handlers. Other human units are
-## parked at 0 AP so the list is exactly the units this check spawns.
+## parked at 0 AP so the list is exactly the units this check spawns. Idle
+## cities from earlier smoke steps are filled first so they stay out of the
+## unit-only walk, then a dedicated idle-city check runs at the end.
 func _orders_queue(game: Node) -> bool:
 	var setup := game.get("setup") as GameSetup
 	var button := game.get_node("%NextUnitButton") as Button
@@ -1708,6 +1710,8 @@ func _orders_queue(game: Node) -> bool:
 		return false
 	for unit in setup.players[setup.human_index].units:
 		unit.ap = 0
+	if not _fill_idle_cities(setup):
+		return false
 	game._refresh_board()
 	if not button.disabled:
 		print("FAIL Next Unit stayed enabled with an empty queue")
@@ -1739,7 +1743,7 @@ func _orders_queue(game: Node) -> bool:
 		quit(1)
 		return false
 	game._refresh_board()
-	if button.disabled or (game.get_node("%EndTurnButton") as Button).text != "4 units need orders (Enter)":
+	if button.disabled or (game.get_node("%EndTurnButton") as Button).text != "4 need orders (Enter)":
 		print("FAIL queue start '", (game.get_node("%EndTurnButton") as Button).text, "' disabled ", button.disabled)
 		quit(1)
 		return false
@@ -1760,6 +1764,10 @@ func _orders_queue(game: Node) -> bool:
 		quit(1)
 		return false
 	print("PASS found jumps to the next unit")
+	# The city founded above joins the list. Fill it so the unit walk stays clean.
+	if not _fill_idle_cities(setup):
+		return false
+	game._refresh_board()
 	button.pressed.emit()
 	if int(game.get("_selected_id")) != other.id or setup.turn != turn:
 		print("FAIL Next Unit selected ", game.get("_selected_id"))
@@ -1883,11 +1891,17 @@ func _orders_queue(game: Node) -> bool:
 		print("FAIL empty Enter did not end turn ", setup.turn, " '", end.text, "'")
 		quit(1)
 		return false
-	var opening := setup.units_needing_orders(setup.human_index)
-	if opening.is_empty() or int(game.get("_selected_id")) != opening[0].id or not _camera_on(game, opening[0].cell):
-		print("FAIL opening selection ", game.get("_selected_id"))
+	var opening := setup.items_needing_orders(setup.human_index)
+	if opening.is_empty():
+		print("FAIL opening queue empty")
 		quit(1)
 		return false
+	if str(opening[0].get("kind", "")) == GameSetup.ORDERS_UNIT:
+		var opened := opening[0].get("unit") as PlayerState.UnitState
+		if opened == null or int(game.get("_selected_id")) != opened.id or not _camera_on(game, opened.cell):
+			print("FAIL opening selection ", game.get("_selected_id"))
+			quit(1)
+			return false
 	if setup.unit_needs_orders(guard) or int(game.get("_selected_id")) == guard.id:
 		print("FAIL fortified unit was selected next turn")
 		quit(1)
@@ -1899,7 +1913,100 @@ func _orders_queue(game: Node) -> bool:
 	print("PASS Enter ends only when the queue is empty")
 	if not _stuck_sprint_escape(game):
 		return false
+	if not _idle_city_orders(game):
+		return false
 	print("PASS orders queue")
+	return true
+
+
+func _fill_idle_cities(setup: GameSetup) -> bool:
+	for city in setup.cities_needing_orders(setup.human_index):
+		var reason := setup.enqueue(city, "warrior")
+		if not reason.is_empty():
+			print("FAIL could not fill idle city ", city.id, " ", reason)
+			quit(1)
+			return false
+	return true
+
+
+func _idle_city_orders(game: Node) -> bool:
+	var setup := game.get("setup") as GameSetup
+	if not _clear_orders_except(game, setup, -1):
+		return false
+	var city: MapCity = null
+	for candidate in setup.cities:
+		if candidate.player == setup.human_index:
+			city = candidate
+			break
+	if city == null:
+		print("FAIL no human city for idle orders")
+		quit(1)
+		return false
+	city.queue.clear()
+	city.production_stored = 0
+	for unit in setup.players[setup.human_index].units:
+		unit.ap = 0
+		unit.order = GameSetup.ORDER_SKIP
+	game._refresh_board()
+	var end := game.get_node("%EndTurnButton") as Button
+	if end.text != "1 needs orders (Enter)" or not setup.city_needs_orders(city):
+		print("FAIL idle city count '", end.text, "'")
+		quit(1)
+		return false
+	(game.get_node("%NextUnitButton") as Button).pressed.emit()
+	if int(game.get("_selected_city_id")) != city.id or int(game.get("_selected_id")) >= 0:
+		print("FAIL Next Unit did not land on the idle city")
+		quit(1)
+		return false
+	if not (game.get_node("%CityPanel") as PanelContainer).visible:
+		print("FAIL CityPanel stayed closed on the idle city")
+		quit(1)
+		return false
+	print("PASS Next Unit opens an idle city")
+	var turn := setup.turn
+	end.pressed.emit()
+	if setup.turn != turn or end.text != "End anyway (Enter)":
+		print("FAIL End Turn did not arm End anyway on the city '", end.text, "'")
+		quit(1)
+		return false
+	if (game.get_node("%EndTurnWarning") as Label).text != "Cities still need production. End Turn again to continue.":
+		print("FAIL city End anyway warning '", (game.get_node("%EndTurnWarning") as Label).text, "'")
+		quit(1)
+		return false
+	_SceneDriver.spare_settlers(setup, false)
+	game._refresh_board()
+	end.pressed.emit()
+	if setup.turn != turn + 1 or setup.result != null:
+		print("FAIL End anyway from a city did not end the turn")
+		quit(1)
+		return false
+	print("PASS End anyway ends from an idle city")
+	city = null
+	for candidate in setup.cities:
+		if candidate.player == setup.human_index and setup.city_needs_orders(candidate):
+			city = candidate
+			break
+	if city == null:
+		print("FAIL no idle city after End Turn")
+		quit(1)
+		return false
+	for unit in setup.players[setup.human_index].units:
+		unit.ap = 0
+		unit.order = GameSetup.ORDER_SKIP
+	game._selected_id = -1
+	game._selected_city_id = -1
+	game._refresh_board()
+	(game.get_node("%NextUnitButton") as Button).pressed.emit()
+	if int(game.get("_selected_city_id")) != city.id:
+		print("FAIL could not reselect idle city")
+		quit(1)
+		return false
+	(game.get_node("%BuildWarrior") as Button).pressed.emit()
+	if setup.city_needs_orders(city) or city.queue.is_empty():
+		print("FAIL queueing did not remove the idle city")
+		quit(1)
+		return false
+	print("PASS queueing removes the idle city")
 	return true
 
 
@@ -1913,7 +2020,7 @@ func _clear_orders_except(game: Node, setup: GameSetup, keep_id: int) -> bool:
 				unit = candidate
 				break
 		if unit == null:
-			return true
+			return _fill_idle_cities(setup)
 		if unit.movement_only:
 			print("FAIL cannot skip a movement-only unit out of the queue")
 			quit(1)

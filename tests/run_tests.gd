@@ -2359,6 +2359,63 @@ func _test_orders_queue() -> void:
 	_ok(after_found == following and game.units_needing_orders(0).size() == before_found - 1, "after Found, next is the following living unit that needs orders")
 	var rival := game.spawn_unit(1, "warrior", Vector2i(22, 12))
 	_ok(rival != null and game.unit_needs_orders(rival) and not game.units_needing_orders(0).has(rival), "a rival that needs orders is only in that rival's list")
+	# Ticket 33: idle human cities join the same orders list.
+	var founded := game.cities[game.cities.size() - 1]
+	_ok(game.city_needs_orders(founded) and founded.queue.is_empty(), "an empty-queue human city needs orders")
+	_ok(game.enqueue(founded, "warrior").is_empty() and not game.city_needs_orders(founded), "a successful enqueue removes the city")
+	_ok(not game.enqueue(founded, "nope").is_empty() and not game.city_needs_orders(founded), "a rejected enqueue leaves a non-empty queue alone")
+	game.cancel_queue(founded, 0)
+	_ok(founded.queue.is_empty() and game.city_needs_orders(founded), "cancel_queue of the last item joins immediately")
+	var stuck := game.enqueue(founded, "settler")
+	_ok(not stuck.is_empty() and founded.queue.is_empty(), "a size-1 city cannot queue a settler")
+	founded.population = 2
+	_ok(game.enqueue(founded, "settler").is_empty() and not game.city_needs_orders(founded), "a non-empty (stuck-capable) queue excludes the city")
+	# Leave the settler queued so the city stays out while we check rivals and order.
+	var rival_town := game.found_city(game.spawn_unit(1, "settler", Vector2i(24, 14)))
+	_ok(rival_town != null and rival_town.queue.is_empty() and not game.city_needs_orders(rival_town), "rival cities never need orders")
+	_ok(game.cities_needing_orders(1).is_empty() and game.cities_needing_orders(0).is_empty(), "no idle human city while the settler stays queued")
+	game.cancel_queue(founded, 0)
+	var idle_a := founded
+	var idle_b := game.found_city(game.spawn_unit(0, "settler", Vector2i(4, 14)))
+	_ok(idle_b != null and game.city_needs_orders(idle_a) and game.city_needs_orders(idle_b), "two idle human cities need orders")
+	for unit in game.players[0].units:
+		unit.ap = 0
+		unit.order = ""
+	var items := game.items_needing_orders(0)
+	_ok(items.size() == 2 and str(items[0]["kind"]) == GameSetup.ORDERS_CITY and int(items[0]["id"]) == idle_a.id, "with no units left, cities fill the list in founding order")
+	_ok(str(items[1]["kind"]) == GameSetup.ORDERS_CITY and int(items[1]["id"]) == idle_b.id, "the second idle city follows")
+	_ok(game.has_unordered_moves(0), "has_unordered_moves is true when only a city is idle")
+	var warrior_back := game.spawn_unit(0, "warrior", Vector2i(16, 14))
+	items = game.items_needing_orders(0)
+	_ok(items.size() == 3 and str(items[0]["kind"]) == GameSetup.ORDERS_UNIT and int(items[0]["id"]) == warrior_back.id, "combined order is units first")
+	_ok(str(items[1]["kind"]) == GameSetup.ORDERS_CITY and int(items[1]["id"]) == idle_a.id and str(items[2]["kind"]) == GameSetup.ORDERS_CITY, "then idle cities in founding order")
+	var after_warrior := game.next_item_needing_orders(0, GameSetup.ORDERS_UNIT, warrior_back.id)
+	_ok(str(after_warrior.get("kind", "")) == GameSetup.ORDERS_CITY and int(after_warrior.get("id", -1)) == idle_a.id, "next after the unit is the first idle city")
+	var after_last := game.next_item_needing_orders(0, GameSetup.ORDERS_CITY, idle_b.id)
+	_ok(str(after_last.get("kind", "")) == GameSetup.ORDERS_UNIT and int(after_last.get("id", -1)) == warrior_back.id, "next wraps from the last idle city to the first unit")
+	_ok(str(game.next_item_needing_orders(0, "", -1).get("kind", "")) == GameSetup.ORDERS_UNIT, "nothing selected picks the first item")
+	warrior_back.ap = 0
+	_ok(game.has_unordered_moves(0) and game.units_needing_orders(0).is_empty(), "only cities idle still warn")
+	_ok(game.enqueue(idle_a, "warrior").is_empty() and game.enqueue(idle_b, "warrior").is_empty(), "queueing clears both cities")
+	_ok(not game.has_unordered_moves(0) and game.items_needing_orders(0).is_empty(), "no warn when every city has a queue item and no unit needs orders")
+	game.config.end_turn_warns_if_unordered = false
+	game.cancel_queue(idle_a, 0)
+	_ok(game.city_needs_orders(idle_a) and not game.has_unordered_moves(0), "the warning flag can turn city idle off")
+	game.config.end_turn_warns_if_unordered = true
+	# Capture that leaves the human an empty-queue city joins mid-turn.
+	var prize_cell := Vector2i(20, 16)
+	var prize := game.found_city(game.spawn_unit(1, "settler", prize_cell))
+	_ok(prize != null and game.enqueue(prize, "warrior").is_empty() and not prize.queue.is_empty(), "rival city starts with a queue item")
+	prize.hp = 0
+	var taker := game.spawn_unit(0, "warrior", _step(prize_cell, Hex.WEST, 1))
+	_ok(taker != null and game.move_unit(taker, prize_cell), "warrior walks onto the 0 HP city")
+	_ok(prize.player == 0 and prize.queue.is_empty() and game.city_needs_orders(prize), "a capture that leaves an empty queue joins immediately")
+	var saw_prize := false
+	for item in game.items_needing_orders(0):
+		if str(item.get("kind", "")) == GameSetup.ORDERS_CITY and int(item.get("id", -1)) == prize.id:
+			saw_prize = true
+			break
+	_ok(saw_prize, "the captured city is in the combined list")
 
 
 func _test_city_capture() -> void:

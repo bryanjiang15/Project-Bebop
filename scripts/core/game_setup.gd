@@ -38,6 +38,10 @@ const ORDER_SKIP := "skip"
 const ORDER_FORTIFY := "fortify"
 const REASON_OVER := "The game is over"
 const NO_CELL := Vector2i(-999999, -999999)
+## Kinds for `items_needing_orders` / `next_item_needing_orders`. Unit ids and
+## city ids are separate counters; the kind keeps them apart.
+const ORDERS_UNIT := "unit"
+const ORDERS_CITY := "city"
 
 var config: GameConfig
 var seed_used: int
@@ -966,6 +970,13 @@ func unit_needs_orders(unit: PlayerState.UnitState) -> bool:
 	return unit != null and unit.ap > 0 and unit.order.is_empty()
 
 
+## True when this is a living human city with an empty production queue. A city
+## with any queued item, including a stuck one, does not. Rival cities never do.
+## Membership is live from `city.queue` on each call.
+func city_needs_orders(city: MapCity) -> bool:
+	return city != null and city.player == human_index and city.queue.is_empty()
+
+
 ## That player's units, in array order, that still need orders. Derived from
 ## `ap` and `order` on each call. Rivals are a different player index.
 func units_needing_orders(player: int) -> Array[PlayerState.UnitState]:
@@ -978,11 +989,33 @@ func units_needing_orders(player: int) -> Array[PlayerState.UnitState]:
 	return out
 
 
-## The next unit after `after_id` that needs orders, wrapping the list.
-## `-1` and any other missing id start at the first unit. A removed id starts
-## at the first later id still in the list, which is the following unit while
-## ids are issued in list order, then wraps. The same unit is returned only
-## when it is the only one that still needs orders.
+## Idle human cities in `cities` array order (founding order). Empty for a
+## rival player index. Derived from `city.queue` on each call.
+func cities_needing_orders(player: int) -> Array[MapCity]:
+	var out: Array[MapCity] = []
+	if player != human_index:
+		return out
+	for city in cities:
+		if city_needs_orders(city):
+			out.append(city)
+	return out
+
+
+## Units that need orders first (array order), then idle human cities
+## (founding order). Each entry is `{kind, id, unit?|city?}`.
+func items_needing_orders(player: int) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for unit in units_needing_orders(player):
+		out.append({"kind": ORDERS_UNIT, "id": unit.id, "unit": unit})
+	for city in cities_needing_orders(player):
+		out.append({"kind": ORDERS_CITY, "id": city.id, "city": city})
+	return out
+
+
+## The next unit after `after_id` that needs orders, wrapping the unit list.
+## Cities are not in this walk; use `next_item_needing_orders` for the combined
+## queue. `-1` and any other missing id start at the first unit. A removed id
+## starts at the first later id still in the list, then wraps.
 func next_unit_needing_orders(player: int, after_id: int) -> PlayerState.UnitState:
 	if player < 0 or player >= players.size():
 		return null
@@ -1009,13 +1042,78 @@ func next_unit_needing_orders(player: int, after_id: int) -> PlayerState.UnitSta
 	return null
 
 
-## True when a unit still has AP and no order, and the warning key is on.
-## Skip and Fortify set AP to 0, so they clear the warning without counting
-## as acted. This stays in step with `units_needing_orders`.
+## The next item after `(after_kind, after_id)` that needs orders, wrapping the
+## combined list (units then cities). An empty kind or a negative id starts at
+## the first item. A removed id starts at the first later entry of that kind,
+## then continues through the rest of the combined order, then wraps.
+func next_item_needing_orders(player: int, after_kind: String, after_id: int) -> Dictionary:
+	var entries := _orders_entries(player)
+	if entries.is_empty():
+		return {}
+	var start := 0
+	if after_id >= 0 and not after_kind.is_empty():
+		var found := false
+		for i in entries.size():
+			if str(entries[i]["kind"]) == after_kind and int(entries[i]["id"]) == after_id:
+				start = i + 1
+				found = true
+				break
+		if not found:
+			for i in entries.size():
+				if str(entries[i]["kind"]) != after_kind:
+					if after_kind == ORDERS_UNIT and str(entries[i]["kind"]) == ORDERS_CITY:
+						start = i
+						break
+					continue
+				if int(entries[i]["id"]) > after_id:
+					start = i
+					break
+	for offset in entries.size():
+		var entry: Dictionary = entries[(start + offset) % entries.size()]
+		if _orders_entry_needs(entry):
+			return _orders_item_from_entry(entry)
+	return {}
+
+
+## Every unit then every city for this player, in list order. Used to walk past
+## a removed id the same way `next_unit_needing_orders` did for units alone.
+func _orders_entries(player: int) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	if player < 0 or player >= players.size():
+		return out
+	for unit in players[player].units:
+		out.append({"kind": ORDERS_UNIT, "id": unit.id, "unit": unit})
+	if player == human_index:
+		for city in cities:
+			if city.player == human_index:
+				out.append({"kind": ORDERS_CITY, "id": city.id, "city": city})
+	return out
+
+
+func _orders_entry_needs(entry: Dictionary) -> bool:
+	if str(entry.get("kind", "")) == ORDERS_UNIT:
+		return unit_needs_orders(entry.get("unit") as PlayerState.UnitState)
+	if str(entry.get("kind", "")) == ORDERS_CITY:
+		return city_needs_orders(entry.get("city") as MapCity)
+	return false
+
+
+func _orders_item_from_entry(entry: Dictionary) -> Dictionary:
+	if str(entry.get("kind", "")) == ORDERS_UNIT:
+		var unit := entry.get("unit") as PlayerState.UnitState
+		return {"kind": ORDERS_UNIT, "id": unit.id, "unit": unit}
+	var city := entry.get("city") as MapCity
+	return {"kind": ORDERS_CITY, "id": city.id, "city": city}
+
+
+## True when a unit still has AP and no order, or a human city has an empty
+## production queue, and the warning key is on. Skip and Fortify set AP to 0,
+## so they clear a unit without counting as acted. This stays in step with
+## `items_needing_orders`.
 func has_unordered_moves(player: int) -> bool:
 	if config == null or not config.end_turn_warns_if_unordered:
 		return false
-	return not units_needing_orders(player).is_empty()
+	return not items_needing_orders(player).is_empty()
 
 
 ## Each living rival plays, in index order, on the AP they already have.

@@ -63,7 +63,14 @@ Bryan decided that Volley damages enemy cities in its radius. The damage is the 
     - D7. Auto-advance runs only after the selected unit becomes done or is removed. Clicking a unit that was already done does not advance.
     - D8. No multi-turn move orders. A unit does not keep walking toward a far target on later turns.
 
-21. Simple rival AI (ticket 16). Both non-human players play a full turn after the human's End Turn succeeds, then the existing global clock runs once. The policy is `scripts/core/rival_ai.gd`. The numbers are the top-level `ai` object. The decisions are in `docs/ai.md`:
+21. Idle cities in the orders queue (ticket 33). The Notion ticket left two open defaults unconfirmed. These were build assumptions for the first pass; if Bryan contradicts one later, stop rather than stacking more behavior.
+    - D1. Order is units first (existing unit-array order), then idle human cities in `GameSetup.cities` array order (founding order). One combined list that wraps. Next Unit, Enter, auto-advance, and the start-of-turn pick all walk this list. Cities are not interleaved between units.
+    - D2. Membership is live from `city.queue.is_empty()` on each call. A city whose queue empties mid-turn (founded this turn, `cancel_queue` emptied it, a capture left the human an empty queue, or a spell dropped the last queued building) joins immediately. A successful `enqueue` removes it immediately. A rejected enqueue does not. Rival cities never join. A city with any queued item, including a stuck one, does not.
+    - D3. Auto-advance after a unit finishes can land on an idle city, with the same `camera.auto_advance_delay_sec` pause and `camera.pan_sec` pan. After the player successfully queues an item in an idle city that was in the list, also auto-advance with that same pause and pan. If enqueue is rejected, the city stays selected and stays in the list.
+    - D4. The count includes idle cities. The phrase is `1 needs orders (Enter)` / `N need orders (Enter)`. `End anyway (Enter)` stays. If any units still need orders, the confirm warning is `Units still have AP. End Turn again to continue.` If only cities remain, it is `Cities still need production. End Turn again to continue.` A second press on the same landed unit or city, with no state change, ends the turn. Queueing something, a click, or Next Unit clears the confirm.
+    - D5. Jumping to a city selects that city, clears the unit selection, pans to its tile, and opens `%CityPanel`. Jumping to a unit clears the city selection. No new config key; reuse the ticket 32 camera keys and `units.end_turn_warns_if_unordered`.
+
+22. Simple rival AI (ticket 16). Both non-human players play a full turn after the human's End Turn succeeds, then the existing global clock runs once. The policy is `scripts/core/rival_ai.gd`. The numbers are the top-level `ai` object. The decisions are in `docs/ai.md`:
     - D1. Rivals act on the AP they already have, in index order. Cities, mana, healing, volcanic damage, and cooldowns stay on the one shared `end_turn()`.
     - D2. One-ply scores. No search, personality, or diplomacy. Ties keep the earlier unit id, ability id, and axial `(q, r)`.
     - D3. The same seed and state produce the same actions. The policy does not call `randf`.
@@ -76,7 +83,7 @@ Bryan decided that Volley damages enemy cities in its radius. The damage is the 
 
 Also: volcanic damage uses the brief's flat value, not the design doc's chance-based proposal.
 
-22. Volcanic starts (ticket 30). Starting settlers and warriors are not placed on volcanic ground. These are the spec gaps that were built:
+23. Volcanic starts (ticket 30). Starting settlers and warriors are not placed on volcanic ground. These are the spec gaps that were built:
     - D1. Volcanic was a normal passable start tile. Start placement rejects that land. Volcanic damage, a turn-1 grace, and painting the tile after spawn are not the fix.
     - D2. The unit's own cell is not volcanic. Neighbors may be. Walking onto volcanic ground later, and founding there, stay legal. A settler on that ground is still removed at End Turn.
     - D3. The check is `_place_starts` and `_open_start_cell` only. `_can_spawn_at` and `_spawn_cell` still allow a unit trained at a volcanic city center.
